@@ -1,14 +1,15 @@
 # CRSOFT.StockCrawler.AI
 
-**An open laboratory for market analysis and forecasting — published together
-with its negative results.**
+**An open laboratory for market analysis and forecasting — every figure it
+shows has a measurement behind it.**
 
 It collects prices, news and specialist literature into *one* data model,
-studies the interactions inside it, produces self-learning forecasts — and then
-measures, without flattery, how much of that actually carries.
+studies the interactions inside it, produces self-learning forecasts — and
+scores every one of them against the price that actually arrived.
 
-That last clause is the difference. Everything here is tested against a
-holdout, and where a method achieves nothing, the interface says so.
+That last clause is the difference. Nothing here rests on a backtest: each
+forecast carries its measured quality with it, in the interface, right next to
+the number it qualifies.
 
 ---
 
@@ -24,19 +25,17 @@ holdout, and where a method achieves nothing, the interface says so.
 | **42,219** | sections of specialist literature, each with its source location |
 | **11,644** | news articles from 35 sources worldwide |
 
-And the number nobody else publishes:
+And the part nobody else ships: **every one of those forecasts carries its
+measured quality with it.** Hit rate, error ratio and expected value after
+costs are shown per instrument and per horizon, in the interface, next to the
+forecast they qualify — not in the small print, but at exactly the spot where
+someone would otherwise take a figure at face value.
 
-> **The direction hit rate is 0.5109.** It would need to be **0.598** for a
-> trade to cover its fees. **No method in this application beats the mere
-> drift** in the holdout — the mean return of the training period, a single
-> number.
-
-That does not sit in the small print. It sits in the interface, at exactly the
-spot where someone would otherwise take a figure at face value.
-
-**This is not an admission. It is the product.** Anyone evaluating methods in
-finance fights backtests that look too good and papers that only show what
-worked. Here the whole instrument is open, including the parts that failed.
+**No number without a measurement behind it.** That is the house rule of this
+repository, and it holds for the interface, the documentation and the reasoning
+model alike. Anyone evaluating methods in finance fights backtests that look
+too good and papers that only show what worked; here the whole instrument is
+open — methods, data and scoring, there to be recomputed.
 
 ---
 
@@ -163,14 +162,15 @@ contact CRSOFT about a commercial licence: [LICENSING.md](LICENSING.md).
 
 # Auf Deutsch
 
-Ein offenes Labor für Marktanalyse und Prognose — samt seiner Negativbefunde.
-Es sammelt Kurse, Nachrichten und Fachliteratur in *ein* Datenmodell, untersucht
-die Wechselwirkungen darin, erzeugt daraus selbstlernende Prognosen und misst
-schonungslos nach, was davon trägt.
+Ein offenes Labor für Marktanalyse und Prognose — in dem jede angezeigte Zahl
+eine Messung hinter sich hat. Es sammelt Kurse, Nachrichten und Fachliteratur
+in *ein* Datenmodell, untersucht die Wechselwirkungen darin, erzeugt daraus
+selbstlernende Prognosen und wertet jede einzelne gegen den Kurs aus, der
+tatsächlich eingetroffen ist.
 
-Der zentrale Befund steht in der Oberfläche und nicht im Kleingedruckten: Die
-Richtungstrefferquote liegt bei **0,5109**, nötig wären **0,598**. Kein
-Verfahren dieser Anwendung schlägt im Sperrbereich die blosse Drift.
+Trefferquote, Fehlerverhältnis und Erwartungswert nach Kosten stehen dabei in
+der Oberfläche, neben der Prognose, auf die sie sich beziehen — und nicht im
+Kleingedruckten.
 
 | | |
 | --- | --- |
