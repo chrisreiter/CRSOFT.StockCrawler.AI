@@ -30,6 +30,7 @@
   <t k='"&gt;wählen'>"&gt;select</t>
   <t k='"&gt;öffnen'>"&gt;open</t>
   <t k='"&gt;übernehmen'>"&gt;take over</t>
+  <t k="% Fehler">% error</t>
   <t k="% Gebühr">% fee</t>
   <t k="% im Fenster —">% in the window —</t>
   <t k="% je Bar.">% per bar.</t>
@@ -39,6 +40,7 @@
   <t k="% je Tausch — zwei Beine à">% per swap — two legs at</t>
   <t k="% je Vorgang.">% per transaction.</t>
   <t k="% je Wert, Umschichtung">% per value, reallocation</t>
+  <t k="% Treffer,">% hits,</t>
   <t k="% und">% and</t>
   <t k="% — kein Anstieg">% — no rise</t>
   <t k="% — kein erwarteter Rückgang">% — no expected decline</t>
@@ -172,11 +174,14 @@
   <t k="10 Bars">10 bars</t>
   <t k="10 Jahre">10 years</t>
   <t k="14 Tagen">14 days ago</t>
+  <t k="1J">1Y</t>
+  <t k="1T">1D</t>
   <t k="2 Wochen">2 weeks</t>
   <t k="2 Wochen voraus">2 weeks ahead</t>
   <t k="2 Zeilen">2 rows</t>
   <t k="20 Bars">20 bars</t>
   <t k="20 Jahre">20 years</t>
+  <t k="2W">2W</t>
   <t k="3 Jahre">3 years</t>
   <t k="3 Monate">3 months</t>
   <t k="3 Monate voraus">3 months ahead</t>
@@ -185,6 +190,7 @@
   <t k="30 Tagen">30 days ago</t>
   <t k="5 Bars">5 bars</t>
   <t k="5 Jahre">5 years</t>
+  <t k="5J">5Y</t>
   <t k="6 Monate">6 months</t>
   <t k="6 Monate voraus">6 months ahead</t>
   <t k="6 Stunden">6 hours</t>
@@ -259,6 +265,7 @@
   <t k="Aktien und Krypto haben verschiedene Handelskalender; gemischt bleiben über zehn Jahre nur zwei Werte mit durchgehendem Handel übrig, und die bilden keine Gruppe. Getrennt findet das Verfahren sofort welche.">Equities and crypto have different trading calendars; mixed, only two values with continuous trading remain over ten years, and those form no group. Separated, the method finds some immediately.</t>
   <t k="Aktien, Staatsanleihen, Gold — drei Dinge, die aus">Equities, government bonds, gold — three things that rise for</t>
   <t k="Aktiv">Active</t>
+  <t k="Aktiv (Vgl.)">Active (comp.)</t>
   <t k="Aktualisieren">Refresh</t>
   <t k="aktuelle Auswahl">current selection</t>
   <t k="Aktuelle Prognosen">Current forecasts</t>
@@ -350,6 +357,7 @@
   <t k="Auch die mit „kein Text gefunden“. Sinnvoll nach einer Änderung">Including those marked “no text found”. Worthwhile after a change</t>
   <t k="auch „kein Text gefunden“">including “no text found”</t>
   <t k="Auf">On</t>
+  <t k="auf 100 normalisiert">normalised to 100</t>
   <t k="Auf dem">In the</t>
   <t k="Auf der ersten Hälfte des Zeitraums zusammengestellt: Es beginnt mit dem">Assembled on the first half of the period: it starts with the</t>
   <t k="auf der zweiten Hälfte, die die Auswahl nicht gesehen hat.">on the second half, which the selection has not seen.</t>
@@ -981,6 +989,7 @@
   <t k="Grundlage">Foundation</t>
   <t k="Grundlagen">Foundations</t>
   <t k="Grundlinie">Baseline</t>
+  <t k="Grundlinie (Vgl.)">Baseline (comp.)</t>
   <t k="Grundlinie: einmal gekauft, nie wieder">Baseline: bought once, never again</t>
   <t k="grundsätzlich nicht bewerten, weil ihr Fenster über das Ende der Reihe">most recent days, because their window reaches beyond the end of the</t>
   <t k="Gruppen">Groups</t>
@@ -1072,6 +1081,7 @@
   <t k="Intervall muss 1h oder 1d sein">Interval must be 1h or 1d</t>
   <t k="Intervall muss 1h oder 1d sein, war:">Interval must be 1h or 1d, was:</t>
   <t k="Invers">Inverse</t>
+  <t k="Invers (Vgl.)">Inverse (comp.)</t>
   <t k="invertiert nach Kosten">inverted after costs</t>
   <t k="Investitionen gehen vom Konto ab, Verkäufe buchen darauf">Investments go out of the account, sales book back</t>
   <t k="ist aktuell, findet aber nichts über Stufe 70.">is current, but finds nothing above level 70.</t>
@@ -1362,6 +1372,7 @@
   <t k="Median des Fehlerverhältnisses:">Median of the error ratio:</t>
   <t k="Median Verhältnis">Median ratio</t>
   <t k="Mein Depot">My portfolio</t>
+  <t k="Mein Depot (Vgl.)">My portfolio (comp.)</t>
   <t k="Meiste Kreuzungen">Most crossings</t>
   <t k="meiste Kreuzungen">most crossings</t>
   <t k="Meldung">Message</t>
@@ -1416,6 +1427,7 @@
   <t k="nahe verwandt — Paarhandel">closely related — pairs trading</t>
   <t k="Name">Name</t>
   <t k="Name und Adresse werden gebraucht — oder ein SSH-Host für den Tunnel.">Name and address are required — or an SSH host for the tunnel.</t>
+  <t k="nebeneinander">side by side</t>
   <t k="Nebeneinander, nicht summiert — deshalb sind hier auch die">Side by side, not summed — which is why the autopilot's</t>
   <t k="negativer Versatz">negative offset</t>
   <t k="nein — gemeinsame Handelszeit">no — shared trading hours</t>
@@ -1815,6 +1827,7 @@
   <t k="Strategie, die in einem steigenden Markt fünf Prozent macht, hat nichts">strategy that makes five percent in a rising market has achieved nothing</t>
   <t k='Strategien sind Gegenrechnungen auf dasselbe Geld."'>strategies are counterfactuals on the same money."</t>
   <t k="Streng">Strict</t>
+  <t k="Streng (Vgl.)">Strict (comp.)</t>
   <t k="streut das Verhältnis von selbst über den ganzen Bereich.">the ratio scatters across the whole range by itself.</t>
   <t k="Streuung">Spread</t>
   <t k="Stufe">Level</t>
@@ -1825,6 +1838,7 @@
   <t k="Stundendaten aktualisiert">Hourly data updated</t>
   <t k="Stundendaten nachladen">Reload hourly data</t>
   <t k="Stundenkurs">Hourly price</t>
+  <t k="Stundenlauf in">hourly run in</t>
   <t k="Stundenlauf jetzt">Hourly run now</t>
   <t k="Stärkste Zunahme:">Strongest increase:</t>
   <t k="Stärkster Vorlauf">Strongest lead</t>
@@ -1856,6 +1870,7 @@
   <t k="Tagesdaten aktualisiert">Daily data updated</t>
   <t k="Tagesdaten nachladen">Reload daily data</t>
   <t k="Tagesjournal">Daily journal</t>
+  <t k="Tageslauf in">daily run in</t>
   <t k="Tageslauf jetzt">Daily run now</t>
   <t k="Tagesschluss">Daily close</t>
   <t k="Tagesübersicht erstellen">Create daily overview</t>
@@ -1980,6 +1995,7 @@
   <t k="Verzerrung">Bias</t>
   <t k="Verzerrung in diesem Fenster.">bias in this window.</t>
   <t k="Veto">Veto</t>
+  <t k="Vgl.">comp.</t>
   <t k="vielen Quellen einige Minuten …">many sources this takes several minutes …</t>
   <t k="vielen Werten den mit der höchsten Quote auswählt, wählt den glücklichsten, nicht">many values, the one with the highest rate picks the luckiest, not</t>
   <t k="Virtuelles Depot: was aus einem heute eingesetzten Betrag würde">Virtual portfolio: what would become of an amount invested today</t>
@@ -2208,6 +2224,7 @@
   <t k="Änderung">Change</t>
   <t k="öffentliche Schlüssel im Container. Nachreichen geht: POST auf">public key in the container. It can be supplied afterwards: POST to</t>
   <t k="öffnen">open</t>
+  <t k="Ø ">avg </t>
   <t k="Ø Bewegung">Avg. movement</t>
   <t k="Ø Ertrag">Avg. yield</t>
   <t k="Ø Fehler">Avg. error</t>

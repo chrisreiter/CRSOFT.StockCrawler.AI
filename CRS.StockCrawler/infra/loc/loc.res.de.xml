@@ -38,6 +38,7 @@
   <t k='"&gt;wählen'>"&gt;wählen</t>
   <t k='"&gt;öffnen'>"&gt;öffnen</t>
   <t k='"&gt;übernehmen'>"&gt;übernehmen</t>
+  <t k="% Fehler">% Fehler</t>
   <t k="% Gebühr">% Gebühr</t>
   <t k="% im Fenster —">% im Fenster —</t>
   <t k="% je Bar.">% je Bar.</t>
@@ -47,6 +48,7 @@
   <t k="% je Tausch — zwei Beine à">% je Tausch — zwei Beine à</t>
   <t k="% je Vorgang.">% je Vorgang.</t>
   <t k="% je Wert, Umschichtung">% je Wert, Umschichtung</t>
+  <t k="% Treffer,">% Treffer,</t>
   <t k="% und">% und</t>
   <t k="% — kein Anstieg">% — kein Anstieg</t>
   <t k="% — kein erwarteter Rückgang">% — kein erwarteter Rückgang</t>
@@ -180,11 +182,14 @@
   <t k="10 Bars">10 Bars</t>
   <t k="10 Jahre">10 Jahre</t>
   <t k="14 Tagen">14 Tagen</t>
+  <t k="1J">1J</t>
+  <t k="1T">1T</t>
   <t k="2 Wochen">2 Wochen</t>
   <t k="2 Wochen voraus">2 Wochen voraus</t>
   <t k="2 Zeilen">2 Zeilen</t>
   <t k="20 Bars">20 Bars</t>
   <t k="20 Jahre">20 Jahre</t>
+  <t k="2W">2W</t>
   <t k="3 Jahre">3 Jahre</t>
   <t k="3 Monate">3 Monate</t>
   <t k="3 Monate voraus">3 Monate voraus</t>
@@ -193,6 +198,7 @@
   <t k="30 Tagen">30 Tagen</t>
   <t k="5 Bars">5 Bars</t>
   <t k="5 Jahre">5 Jahre</t>
+  <t k="5J">5J</t>
   <t k="6 Monate">6 Monate</t>
   <t k="6 Monate voraus">6 Monate voraus</t>
   <t k="6 Stunden">6 Stunden</t>
@@ -267,6 +273,7 @@
   <t k="Aktien und Krypto haben verschiedene Handelskalender; gemischt bleiben über zehn Jahre nur zwei Werte mit durchgehendem Handel übrig, und die bilden keine Gruppe. Getrennt findet das Verfahren sofort welche.">Aktien und Krypto haben verschiedene Handelskalender; gemischt bleiben über zehn Jahre nur zwei Werte mit durchgehendem Handel übrig, und die bilden keine Gruppe. Getrennt findet das Verfahren sofort welche.</t>
   <t k="Aktien, Staatsanleihen, Gold — drei Dinge, die aus">Aktien, Staatsanleihen, Gold — drei Dinge, die aus</t>
   <t k="Aktiv">Aktiv</t>
+  <t k="Aktiv (Vgl.)">Aktiv (Vgl.)</t>
   <t k="Aktualisieren">Aktualisieren</t>
   <t k="aktuelle Auswahl">aktuelle Auswahl</t>
   <t k="Aktuelle Prognosen">Aktuelle Prognosen</t>
@@ -358,6 +365,7 @@
   <t k="Auch die mit „kein Text gefunden“. Sinnvoll nach einer Änderung">Auch die mit „kein Text gefunden“. Sinnvoll nach einer Änderung</t>
   <t k="auch „kein Text gefunden“">auch „kein Text gefunden“</t>
   <t k="Auf">Auf</t>
+  <t k="auf 100 normalisiert">auf 100 normalisiert</t>
   <t k="Auf dem">Auf dem</t>
   <t k="Auf der ersten Hälfte des Zeitraums zusammengestellt: Es beginnt mit dem">Auf der ersten Hälfte des Zeitraums zusammengestellt: Es beginnt mit dem</t>
   <t k="auf der zweiten Hälfte, die die Auswahl nicht gesehen hat.">auf der zweiten Hälfte, die die Auswahl nicht gesehen hat.</t>
@@ -989,6 +997,7 @@
   <t k="Grundlage">Grundlage</t>
   <t k="Grundlagen">Grundlagen</t>
   <t k="Grundlinie">Grundlinie</t>
+  <t k="Grundlinie (Vgl.)">Grundlinie (Vgl.)</t>
   <t k="Grundlinie: einmal gekauft, nie wieder">Grundlinie: einmal gekauft, nie wieder</t>
   <t k="grundsätzlich nicht bewerten, weil ihr Fenster über das Ende der Reihe">grundsätzlich nicht bewerten, weil ihr Fenster über das Ende der Reihe</t>
   <t k="Gruppen">Gruppen</t>
@@ -1080,6 +1089,7 @@
   <t k="Intervall muss 1h oder 1d sein">Intervall muss 1h oder 1d sein</t>
   <t k="Intervall muss 1h oder 1d sein, war:">Intervall muss 1h oder 1d sein, war:</t>
   <t k="Invers">Invers</t>
+  <t k="Invers (Vgl.)">Invers (Vgl.)</t>
   <t k="invertiert nach Kosten">invertiert nach Kosten</t>
   <t k="Investitionen gehen vom Konto ab, Verkäufe buchen darauf">Investitionen gehen vom Konto ab, Verkäufe buchen darauf</t>
   <t k="ist aktuell, findet aber nichts über Stufe 70.">ist aktuell, findet aber nichts über Stufe 70.</t>
@@ -1370,6 +1380,7 @@
   <t k="Median des Fehlerverhältnisses:">Median des Fehlerverhältnisses:</t>
   <t k="Median Verhältnis">Median Verhältnis</t>
   <t k="Mein Depot">Mein Depot</t>
+  <t k="Mein Depot (Vgl.)">Mein Depot (Vgl.)</t>
   <t k="Meiste Kreuzungen">Meiste Kreuzungen</t>
   <t k="meiste Kreuzungen">meiste Kreuzungen</t>
   <t k="Meldung">Meldung</t>
@@ -1424,6 +1435,7 @@
   <t k="nahe verwandt — Paarhandel">nahe verwandt — Paarhandel</t>
   <t k="Name">Name</t>
   <t k="Name und Adresse werden gebraucht — oder ein SSH-Host für den Tunnel.">Name und Adresse werden gebraucht — oder ein SSH-Host für den Tunnel.</t>
+  <t k="nebeneinander">nebeneinander</t>
   <t k="Nebeneinander, nicht summiert — deshalb sind hier auch die">Nebeneinander, nicht summiert — deshalb sind hier auch die</t>
   <t k="negativer Versatz">negativer Versatz</t>
   <t k="nein — gemeinsame Handelszeit">nein — gemeinsame Handelszeit</t>
@@ -1823,6 +1835,7 @@
   <t k="Strategie, die in einem steigenden Markt fünf Prozent macht, hat nichts">Strategie, die in einem steigenden Markt fünf Prozent macht, hat nichts</t>
   <t k='Strategien sind Gegenrechnungen auf dasselbe Geld."'>Strategien sind Gegenrechnungen auf dasselbe Geld."</t>
   <t k="Streng">Streng</t>
+  <t k="Streng (Vgl.)">Streng (Vgl.)</t>
   <t k="streut das Verhältnis von selbst über den ganzen Bereich.">streut das Verhältnis von selbst über den ganzen Bereich.</t>
   <t k="Streuung">Streuung</t>
   <t k="Stufe">Stufe</t>
@@ -1833,6 +1846,7 @@
   <t k="Stundendaten aktualisiert">Stundendaten aktualisiert</t>
   <t k="Stundendaten nachladen">Stundendaten nachladen</t>
   <t k="Stundenkurs">Stundenkurs</t>
+  <t k="Stundenlauf in">Stundenlauf in</t>
   <t k="Stundenlauf jetzt">Stundenlauf jetzt</t>
   <t k="Stärkste Zunahme:">Stärkste Zunahme:</t>
   <t k="Stärkster Vorlauf">Stärkster Vorlauf</t>
@@ -1864,6 +1878,7 @@
   <t k="Tagesdaten aktualisiert">Tagesdaten aktualisiert</t>
   <t k="Tagesdaten nachladen">Tagesdaten nachladen</t>
   <t k="Tagesjournal">Tagesjournal</t>
+  <t k="Tageslauf in">Tageslauf in</t>
   <t k="Tageslauf jetzt">Tageslauf jetzt</t>
   <t k="Tagesschluss">Tagesschluss</t>
   <t k="Tagesübersicht erstellen">Tagesübersicht erstellen</t>
@@ -1988,6 +2003,7 @@
   <t k="Verzerrung">Verzerrung</t>
   <t k="Verzerrung in diesem Fenster.">Verzerrung in diesem Fenster.</t>
   <t k="Veto">Veto</t>
+  <t k="Vgl.">Vgl.</t>
   <t k="vielen Quellen einige Minuten …">vielen Quellen einige Minuten …</t>
   <t k="vielen Werten den mit der höchsten Quote auswählt, wählt den glücklichsten, nicht">vielen Werten den mit der höchsten Quote auswählt, wählt den glücklichsten, nicht</t>
   <t k="Virtuelles Depot: was aus einem heute eingesetzten Betrag würde">Virtuelles Depot: was aus einem heute eingesetzten Betrag würde</t>
@@ -2216,6 +2232,7 @@
   <t k="Änderung">Änderung</t>
   <t k="öffentliche Schlüssel im Container. Nachreichen geht: POST auf">öffentliche Schlüssel im Container. Nachreichen geht: POST auf</t>
   <t k="öffnen">öffnen</t>
+  <t k="Ø ">Ø </t>
   <t k="Ø Bewegung">Ø Bewegung</t>
   <t k="Ø Ertrag">Ø Ertrag</t>
   <t k="Ø Fehler">Ø Fehler</t>
