@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Probe: eine dritte Sprache, absichtlich unvollstaendig.
+
+  Sie belegt zweierlei — dass eine neue Datei ohne jede Aenderung an der
+  Anwendung erkannt wird, und dass eine Luecke als Luecke gemeldet wird und
+  nicht als leere Oberflaeche.
+-->
+<sprache name="Italiano">
+  <t k="Kurse">Prezzi</t>
+  <t k="Auswahl">Selezione</t>
+  <t k="Analyse">Analisi</t>
+  <t k="Prognose">Previsione</t>
+  <t k="Langfrist">Lungo termine</t>
+  <t k="Bot-Herde">Sciame di bot</t>
+  <t k="Day Trading">Day trading</t>
+  <t k="Tausch">Scambio</t>
+  <t k="Neuzugänge">Nuove quotazioni</t>
+  <t k="Säulen">Pilastri</t>
+  <t k="System">Sistema</t>
+  <t k="Anmelden" offen="1">Accedi</t>
+  <t k="Diese Anwendung ist nicht öffentlich." offen="1">Questa applicazione non è pubblica.</t>
+  <t k="Invers">Inverso</t>
+</sprache>

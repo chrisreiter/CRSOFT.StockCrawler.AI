@@ -1,0 +1,39 @@
+CRSOFT.StockCrawler
+Copyright (C) 2026 CRSOFT — Chris Reiter
+
+Dieses Programm ist freie Software: Sie koennen es unter den Bedingungen der
+GNU Affero General Public License, Version 3, weitergeben und/oder aendern,
+wie von der Free Software Foundation veroeffentlicht. Der vollstaendige
+Lizenztext steht in der Datei LICENSE.
+
+Die Veroeffentlichung erfolgt in der Hoffnung, dass es nuetzlich sein wird,
+aber OHNE JEDE GEWAEHRLEISTUNG -- sogar ohne die implizite Gewaehrleistung der
+MARKTFAEHIGKEIT oder der EIGNUNG FUER EINEN BESTIMMTEN ZWECK.
+
+Wer eine Fassung ohne die Offenlegungspflicht der AGPL braucht, wendet sich
+wegen einer kommerziellen Lizenz an CRSOFT. Einzelheiten in LICENSING.md.
+
+---
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License, version 3, as published by
+the Free Software Foundation. See LICENSE for the full text.
+
+It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.
+
+For a version without the AGPL's source-disclosure obligation, contact CRSOFT
+about a commercial licence. See LICENSING.md.
+
+---
+
+Fremdbestandteile / Third-party components
+
+  uPlot                                   MIT
+  Dapper, Serilog, Cronos, SSH.NET,
+  PdfPig, Swashbuckle, xunit              MIT / Apache-2.0
+  Microsoft.Data.SqlClient,
+  Microsoft.Extensions.*, ONNX Runtime    MIT
+
+Ihre Lizenzen bleiben unberuehrt; die AGPL gilt fuer das Werk als Ganzes.

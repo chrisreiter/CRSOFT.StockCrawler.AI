@@ -1,0 +1,15 @@
+[
+  {
+    "Id": "lokal",
+    "Name": "Dieser Rechner",
+    "BaseUrl": "http://localhost:11434",
+    "IstStandard": true,
+    "NutztTunnel": false,
+    "SshHost": null,
+    "SshPort": 22,
+    "SshUser": "root",
+    "SshKeyPath": null,
+    "RemotePort": 11434,
+    "Schluessel": null
+  }
+]

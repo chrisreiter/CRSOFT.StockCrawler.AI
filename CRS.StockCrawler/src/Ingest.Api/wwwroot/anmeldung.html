@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>CRSOFT.StockCrawler — Anmeldung</title>
+
+<!--
+  Eigenständig. Kein app.js, kein app.css, kein Bauteil der Anwendung.
+
+  Der erste Entwurf lieferte die vollständige Anwendung aus und legte einen
+  halbdurchsichtigen Schleier darüber. Die Daten waren dicht -- jeder /api-Pfad
+  antwortete 401 --, aber index.html (91 KB) und app.js (237 KB) gingen an
+  jeden, der die Adresse kannte, samt aller Erklärtexte und Messwerte. Wer den
+  Schleier im Browser wegräumte, sah die Anwendung. Als Zugangskontrolle war
+  das Kosmetik.
+
+  Deshalb wird ohne gültige Sitzung nur noch diese Seite ausgeliefert. Alles
+  Nötige steht hier drin; es gibt nichts nachzuladen und damit nichts, was an
+  der Sperre vorbeikommen könnte.
+-->
+
+<style>
+  :root {
+    --bg: #12151a; --panel: #1a1f27; --line: #2a3038;
+    --text: #e6e9ee; --muted: #8b95a4; --accent: #4a9eff; --down: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 20px;
+  }
+  .kasten {
+    width: 100%; max-width: 380px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 28px;
+  }
+  .marke { font-size: 15px; font-weight: 600; margin-bottom: 22px; letter-spacing: .3px; }
+  .marke span { color: var(--accent); }
+  h1 { font-size: 17px; margin: 0 0 6px; font-weight: 600; }
+  p.hint { color: var(--muted); font-size: 12.5px; margin: 0 0 20px; }
+  label { display: block; font-size: 11px; text-transform: uppercase;
+          letter-spacing: .5px; color: var(--muted); margin: 14px 0 5px; }
+  input {
+    width: 100%; padding: 9px 11px; font-size: 14px;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  button {
+    width: 100%; margin-top: 20px; padding: 10px;
+    font-size: 14px; font-weight: 500; cursor: pointer;
+    background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .6; cursor: default; }
+  .fehler { color: var(--down); font-size: 12.5px; min-height: 18px; margin-top: 12px; }
+  .fuss { color: var(--muted); font-size: 11.5px; margin-top: 20px;
+          padding-top: 16px; border-top: 1px solid var(--line); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="kasten">
+  <div class="marke"><span>CRSOFT.</span>StockCrawler</div>
+
+  <h1 id="titel">Anmelden</h1>
+  <p class="hint" id="hinweis">Diese Anwendung ist nicht öffentlich.</p>
+
+  <div id="token-feld" hidden>
+    <label for="token">Einrichtungswort</label>
+    <input id="token" autocomplete="off" spellcheck="false">
+  </div>
+
+  <label for="login">Anmeldename</label>
+  <input id="login" autocomplete="username" spellcheck="false" autofocus>
+
+  <label for="kennwort">Kennwort</label>
+  <input id="kennwort" type="password" autocomplete="current-password">
+
+  <button id="senden">Anmelden</button>
+  <div class="fehler" id="fehler"></div>
+
+  <p class="fuss" id="fuss">
+    Zugang erhalten Sie von einem Verwalter dieser Anlage.
+  </p>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let eingerichtet = true;
+
+/* Der Zustand entscheidet, ob angemeldet oder der erste Verwalter angelegt
+   wird. Ohne Benutzer ist die Anwendung nicht etwa offen, sondern es geht nur
+   der Weg über das Einrichtungswort aus dem Serverprotokoll -- wer das lesen
+   kann, hat ohnehin Zugriff auf den Server. */
+(async () => {
+  try {
+    const d = await (await fetch('/api/auth/status')).json();
+    eingerichtet = !!d.eingerichtet;
+  } catch { /* Server nicht erreichbar -- das Feld hilft dann auch nicht. */ }
+
+  if (!eingerichtet) {
+    $('#titel').textContent = 'Ersten Verwalter anlegen';
+    $('#hinweis').textContent =
+      'Es gibt noch keinen Benutzer. Das Einrichtungswort steht im Serverprotokoll.';
+    $('#token-feld').hidden = false;
+    $('#senden').textContent = 'Verwalter anlegen';
+    $('#kennwort').autocomplete = 'new-password';
+    $('#fuss').textContent = 'Mindestens zwölf Zeichen. Verbreitete Kennwörter '
+                           + 'werden abgelehnt.';
+  }
+})();
+
+async function senden() {
+  const login = $('#login').value.trim();
+  const kennwort = $('#kennwort').value;
+  const fehler = $('#fehler');
+
+  if (!login || !kennwort) { fehler.textContent = 'Name und Kennwort eingeben.'; return; }
+
+  $('#senden').disabled = true;
+  fehler.textContent = '';
+
+  try {
+    const pfad = eingerichtet ? '/api/auth/login' : '/api/auth/einrichten';
+    const koerper = eingerichtet
+      ? { login, kennwort }
+      : { token: $('#token').value.trim(), login, kennwort };
+
+    const r = await fetch(pfad, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(koerper)
+    });
+
+    const d = await r.json().catch(() => ({}));
+
+    if (!r.ok) {
+      fehler.textContent = d.error || 'Anmeldung fehlgeschlagen.';
+      $('#senden').disabled = false;
+      return;
+    }
+
+    /* Nach der Einrichtung existiert der Verwalter, aber die Sitzung kennt ihn
+       noch nicht -- also gleich anmelden, statt zweimal tippen zu lassen. */
+    if (!eingerichtet) {
+      await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login, kennwort })
+      });
+    }
+
+    /* Erst jetzt liefert der Server die Anwendung aus. */
+    location.replace('/');
+  } catch {
+    fehler.textContent = 'Server nicht erreichbar.';
+    $('#senden').disabled = false;
+  }
+}
+
+$('#senden').onclick = senden;
+
+for (const id of ['#login', '#kennwort', '#token']) {
+  $(id).addEventListener('keydown', e => { if (e.key === 'Enter') senden(); });
+}
+</script>
+
+</body>
+</html>

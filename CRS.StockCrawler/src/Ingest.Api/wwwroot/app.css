@@ -1,0 +1,1410 @@
+:root {
+  --bg: #0f1216;
+  --panel: #171b21;
+  --panel-2: #1e242c;
+  --line: #2a323d;
+  --text: #dde3ea;
+  --muted: #8b97a6;
+  --accent: #4c9aff;
+  --up: #35c46b;
+  --down: #f2545b;
+  --radius: 6px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+/* ------------------------------------------------------------- Kopfzeile */
+/* Die Kopfzeile MUSS umbrechen duerfen.
+
+   Sie traegt Marke, Anmeldeleiste, zehn Navigationsknoepfe, fuenf
+   Ansichtsknoepfe, die Auto-Suche und das Statusfeld. Als starre Reihe ist das
+   breiter als ein normales Fenster -- und weil `.status` mit `margin-left:auto`
+   am Ende steht, wurde ausgerechnet IT hinausgeschoben: gemessen x = 2541 px
+   bei 1254 px Fensterbreite.
+
+   Die Folge war nicht ein haesslicher Umbruch, sondern eine Anwendung, die auf
+   nichts mehr zu antworten schien. „Benutzer angelegt" wurde geschrieben --
+   nur eben neben den Bildschirm. Erfolg und Fehler gleichermassen. Gemeldet
+   als „man kann keinen user anlegen, keine reaktion der ui"; angelegt war er.
+
+   Deshalb `flex-wrap` und eine Mindest- statt einer Festhoehe. Ein Feld, das
+   Rueckmeldung gibt, darf nie das erste sein, das aus dem Bild faellt.      */
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+  padding: 6px 20px;
+  min-height: 52px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.brand { font-weight: 600; letter-spacing: .3px; }
+.brand-org { color: var(--accent); }
+
+/*  Umbruch, seit es elf Reiter sind.
+
+    Ohne ihn wurde die Leiste bei 830 px Sichtbreite 882 px lang, schob den
+    ganzen Rumpf waagrecht und liess die Kopfzeile aus dem Bild wandern --
+    verursacht durch EINEN zusaetzlichen Reiter. Eine waagrecht unbegrenzte
+    Navigationsleiste ist eine Zeitbombe: Sie faellt erst auf, wenn ein Eintrag
+    zuviel dazukommt, und dann sieht es nach einem Fehler der neuen Seite aus.
+    `min-width: 0` daneben, damit sie in ihrem Rasterplatz schrumpfen darf.   */
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+
+.tabs button {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.tabs button:hover { background: var(--panel-2); color: var(--text); }
+.tabs button.active { background: var(--panel-2); color: var(--text); }
+
+/* Ansichtsumschalter in der Kopfzeile */
+.viewswitch { display: flex; margin-left: 8px; }
+
+.viewswitch button {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  padding: 5px 12px;
+  border-radius: 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.viewswitch button + button { border-left: 0; }
+.viewswitch button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.viewswitch button:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+.viewswitch button:hover { color: var(--text); }
+.viewswitch button.active { background: var(--accent); border-color: var(--accent); color: #06101f; font-weight: 600; }
+
+/* Auto-Suche neben dem Ansichtsumschalter */
+.autofind { display: flex; gap: 6px; margin-left: 10px; align-items: center; }
+.autofind select { padding: 5px 8px; font-size: 13px; }
+.autofind button {
+  padding: 5px 12px;
+  font-size: 13px;
+  background: var(--panel-2);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.autofind button:hover { background: var(--accent); color: #06101f; }
+
+/* `margin-left:auto` schiebt es an den rechten Rand SEINER Zeile. Bricht die
+   Kopfzeile um, ist das eine eigene Zeile -- sichtbar statt abgeschnitten.
+   `flex-shrink:0` verhindert, dass eine lange Fehlermeldung auf null Breite
+   zusammengedrueckt wird, was dasselbe Ergebnis haette wie vorher.          */
+.status {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+  min-height: 18px;
+  flex-shrink: 0;
+  max-width: 100%;
+}
+
+.status.err { color: var(--down); }
+.status.busy { color: var(--accent); }
+
+/* --------------------------------------------------------------- Layout */
+.view { display: none; }
+.view.active { display: flex; }
+
+.sidebar {
+  width: 300px;
+  flex: 0 0 300px;
+  border-right: 1px solid var(--line);
+  padding: 16px;
+  height: calc(100vh - 52px);
+  overflow-y: auto;
+  background: var(--panel);
+}
+
+.content { flex: 1; padding: 16px 20px; min-width: 0; }
+.content.wide { max-width: 1500px; }
+
+/* ------------------------------------------------------------ Bedienung */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 16px;
+}
+
+.group { display: flex; flex-direction: column; gap: 5px; }
+
+label {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+
+input, select, button {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+}
+
+input[type="number"] { width: 90px; }
+input[type="date"] { width: 140px; font-size: 13px; }
+
+.daterange { display: flex; align-items: center; gap: 6px; }
+.daterange .dash { color: var(--muted); }
+
+.asof-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+
+.asof-list .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 2px 4px 2px 7px;
+  font-size: 12px;
+}
+
+.asof-list .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+
+.asof-list .chip button {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  padding: 0 3px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.asof-list .chip button:hover { color: var(--down); }
+input[type="search"] { min-width: 180px; }
+
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #06101f; font-weight: 600; }
+button.primary:hover { filter: brightness(1.1); }
+button.link { background: none; border: 0; color: var(--accent); padding: 0; font-size: 12px; }
+
+.segmented { display: flex; }
+.segmented button { border-radius: 0; }
+.segmented button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.segmented button:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+.segmented button.active { background: var(--accent); border-color: var(--accent); color: #06101f; }
+
+/* Mehrfachauswahl: schmaler, weil hier bis zu sechs Schalter nebeneinander stehen */
+.segmented.multi button { padding: 6px 9px; font-size: 12px; min-width: 34px; }
+
+.check { display: flex; align-items: center; gap: 7px; text-transform: none; font-size: 14px; color: var(--text); }
+.check input { width: auto; }
+
+.hint { color: var(--muted); font-size: 12px; margin: 2px 0 0; }
+.hint.block { margin: 0 0 14px; max-width: 900px; }
+
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.field.inline { flex-direction: row; align-items: center; gap: 10px; margin-bottom: 10px; }
+
+/* ---------------------------------------------------------- Wertauswahl */
+.picker-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 14px 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+
+.picker {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--panel-2);
+}
+
+.picker li {
+  padding: 6px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.picker li:last-child { border-bottom: 0; }
+.picker li:hover { background: #263040; }
+.picker .sym { font-weight: 600; min-width: 74px; }
+.picker .nm { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker .swatch { width: 10px; height: 10px; border-radius: 2px; flex: 0 0 10px; }
+.picker.selected li { background: #1a2330; }
+
+/* ------------------------------------------------------------- Diagramme */
+.charts { display: grid; gap: 16px; }
+.charts.grid-mode { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+
+.chart-box {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+
+  /* Ohne min-width:0 weigern sich Grid-Kinder zu schrumpfen und übernehmen
+     stattdessen die Breite ihres Inhalts — beim Canvas also dessen feste
+     Pixelbreite. Zusammen mit overflow:hidden kann ein zu breit berechnetes
+     Diagramm nie in die Nachbarspalte laufen. */
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chart-box .u-wrap { max-width: 100%; }
+
+.chart-title { font-weight: 600; margin: 0 0 6px; font-size: 13px; }
+.chart-title .sub { color: var(--muted); font-weight: 400; margin-left: 8px; font-size: 12px; }
+
+.chart-help { margin: 0 0 8px; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+
+.legend .item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 9px;
+}
+
+.legend .swatch { width: 10px; height: 10px; border-radius: 2px; }
+.legend .chg.up { color: var(--up); }
+.legend .chg.down { color: var(--down); }
+
+.empty { color: var(--muted); padding: 40px 0; text-align: center; }
+
+/* ------------------------------------------------------ Korrelationsmatrix */
+
+.matrix-wrap { overflow-x: auto; }
+.flow-wrap { margin-top: 16px; }
+
+.heatmap { border-collapse: separate; border-spacing: 2px; font-size: 12px; }
+
+.heatmap th {
+  color: var(--muted);
+  font-weight: 500;
+  padding: 4px 8px;
+  text-align: right;
+  white-space: nowrap;
+  position: sticky;
+  left: 0;
+  background: var(--bg);
+  z-index: 1;
+}
+
+/* Kopfzeile schräg gestellt, sonst wird die Matrix bei vielen Werten
+   unlesbar breit. */
+.heatmap tr:first-child th {
+  position: static;
+  height: 92px;
+  vertical-align: bottom;
+  text-align: left;
+  padding: 0;
+}
+
+.heatmap th.rot span {
+  display: inline-block;
+  transform: rotate(-60deg);
+  transform-origin: left bottom;
+  white-space: nowrap;
+  font-size: 11px;
+  padding-left: 4px;
+}
+
+.heatmap td {
+  width: 46px;
+  min-width: 46px;
+  text-align: center;
+  padding: 6px 2px;
+  border-radius: 3px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  cursor: default;
+}
+
+.heatmap td.strong { font-weight: 700; }
+.heatmap td.na { color: var(--muted); background: var(--panel-2); }
+
+/* --------------------------------------------------------------- Tabellen */
+.grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+.grid th, .grid td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--line); }
+.grid th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+.grid td.num, .grid th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.grid tbody tr:hover { background: var(--panel-2); }
+.grid .up { color: var(--up); }
+.grid .down { color: var(--down); }
+.grid .dim { color: var(--muted); }
+
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); gap: 16px; margin-bottom: 16px; }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.card h3 { margin: 0 0 4px; font-size: 14px; }
+
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; font-size: 13px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+.pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; border: 1px solid var(--line); }
+.pill.ok { color: var(--up); border-color: var(--up); }
+.pill.off { color: var(--muted); }
+
+/* uPlot an das dunkle Thema anpassen */
+.u-legend { color: var(--text); font-size: 12px; }
+.u-legend .u-marker { border-radius: 2px; }
+
+/* Ebene fuer den Bezugspunkt: liegt ueber dem Diagramm, faengt aber
+   keine Mausereignisse ab -- Zoom und Verschieben muessen weiter
+   beim Diagramm ankommen. */
+.anchor-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------- Säulen --- */
+
+.pillar-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid #2a2f37;
+}
+
+.pillar-tabs button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  padding: 8px 16px;
+  color: #9aa3ad;
+  cursor: pointer;
+  border-radius: 4px 4px 0 0;
+}
+
+.pillar-tabs button:hover { color: #e8e8e8; }
+
+.pillar-tabs button.active {
+  background: #171b21;
+  border-color: #2a2f37;
+  color: #e8e8e8;
+  /* Deckt die Trennlinie darunter ab, damit der Reiter mit dem Inhalt verbunden wirkt. */
+  margin-bottom: -1px;
+  padding-bottom: 9px;
+}
+
+.pillar-panel { display: none; }
+.pillar-panel.active { display: block; }
+
+.pillar-head {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: #171b21;
+  border: 1px solid #2a2f37;
+  border-radius: 6px;
+}
+
+.pillar-head .weight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pillar-head .weight input[type=range] { width: 200px; }
+
+.pillar-head .weight output {
+  min-width: 2.5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Der normierte Anteil -- das Gewicht allein sagt nichts, erst das Verhältnis. */
+.pillar-head .share {
+  color: #9aa3ad;
+  font-size: 12px;
+  min-width: 9em;
+}
+
+.strategies {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.strategy {
+  padding: 12px 14px;
+  background: #14181d;
+  border: 1px solid #262b33;
+  border-radius: 6px;
+}
+
+.strategy .hint { margin: 6px 0 8px 24px; max-width: 78ch; }
+
+.strategy .params {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-left: 24px;
+}
+
+.strategy .params label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #9aa3ad;
+}
+
+.strategy .params input { width: 80px; }
+
+.strategy .result {
+  margin: 10px 0 0 24px;
+  font-size: 13px;
+  color: #cfd6dd;
+}
+
+.strategy .result .num { font-variant-numeric: tabular-nums; }
+
+.strategy.off { opacity: 0.45; }
+
+.verdict {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  margin-left: 6px;
+}
+
+.verdict.good { background: #1d3a26; color: #7ee2a0; }
+.verdict.mid  { background: #3a341d; color: #e2cd7e; }
+.verdict.bad  { background: #3a1d1d; color: #e28c7e; }
+
+/* Trennt die beiden Hälften der mathematischen Säule: Einzelkurs oben,
+   Universum unten. Ohne sichtbare Trennung liest man den zweiten Teil als
+   Fortsetzung des ersten und wundert sich, warum das Auswahlfeld nicht wirkt. */
+.section-split {
+  margin: 26px 0 10px;
+  padding-top: 18px;
+  border-top: 1px solid #2a2f37;
+  font-size: 15px;
+}
+
+.mm-busy { opacity: 0.5; pointer-events: none; }
+
+/* Die Ladung als Balken -- eine Zahl zwischen 0 und 1 liest sich in einer
+   Tabelle mit dreißig Zeilen schlecht. */
+.bar {
+  display: inline-block;
+  height: 8px;
+  background: #6aa9ff;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+/* Vorläufer und Nachzügler nebeneinander -- untereinander verliert man den
+   Vergleich, und genau der ist die Aussage. */
+.two-col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+#mm-leaders h4 { margin: 16px 0 6px; font-size: 13px; color: #cfd6dd; }
+
+/* Hinweis über dem Diagrammbereich: was von der Auswahl nicht gezeigt wird.
+   Auffällig genug, um gelesen zu werden, zurückhaltend genug, um nicht wie ein
+   Fehler auszusehen — es ist eine Auskunft, keine Störung. */
+.notice {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-left: 3px solid #c9a227;
+  background: rgba(201, 162, 39, 0.08);
+  border-radius: 0 4px 4px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* --- Die drei Bänder der Deep-Learning-Säule -------------------------------
+   Jedes Band ist eine eigene Einheit mit eigenem Gewicht. Der Rahmen macht
+   sichtbar, dass die Messwerte darin zum Regler daneben gehören und nicht zur
+   Säule als ganzer. */
+.band, .band-fc {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid #2a3341;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.band.off, .band-fc.off { opacity: 0.62; }
+
+.band-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.band-name b { font-size: 15px; }
+.band-name .dim { margin-left: 8px; font-size: 12px; }
+
+.band-head .weight { display: flex; align-items: center; gap: 8px; }
+.band-head .weight input[type="range"] { width: 160px; }
+.band-head .weight output { min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+
+.band .share, .band-fc .share { font-size: 12px; color: #8b98a8; }
+
+.band-fc h4 { margin: 0 0 6px; font-size: 14px; }
+.band-fc h4 .share { float: right; font-weight: normal; }
+
+table.grid.compact th, table.grid.compact td { padding: 3px 8px; font-size: 12px; }
+
+button.link {
+  background: none;
+  border: none;
+  color: #6aa9ff;
+  cursor: pointer;
+  padding: 0 2px;
+  font: inherit;
+  text-decoration: underline;
+}
+
+/* Blätterleiste. Bei 185 Seiten wäre eine vollständige Zahlenreihe breiter als
+   das Fenster — gezeigt werden die Nachbarn, Anfang und Ende. */
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.pager button {
+  min-width: 32px;
+  padding: 4px 8px;
+  border: 1px solid #2a3341;
+  border-radius: 4px;
+  background: #161c25;
+  color: #c8d2de;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.pager button:hover { background: #1d2530; }
+.pager button.active { background: #2b5c9e; border-color: #3c7ad1; color: #fff; }
+.pager .dim { margin-left: 8px; font-size: 12px; }
+
+.warn { color: #e0b45c; }
+
+/* --- Wissen und Semantik -------------------------------------------------- */
+
+.toolbar.wide { flex-wrap: wrap; }
+.toolbar .group.grow { flex: 1 1 340px; }
+.toolbar .group.grow input[type="text"] { width: 100%; }
+
+.row-actions { white-space: nowrap; }
+.row-actions button { margin-right: 8px; }
+
+/* Ein Treffer der Ähnlichkeitssuche. Der Text bekommt Luft — er ist hier der
+   Inhalt und nicht eine Zelle in einer Tabelle. */
+.hit {
+  margin: 10px 0;
+  padding: 10px 14px;
+  border-left: 3px solid #2b5c9e;
+  background: rgba(43, 92, 158, 0.06);
+  border-radius: 0 4px 4px 0;
+}
+
+.hit-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.hit-head .score { margin-left: auto; font-size: 12px; color: #8b98a8; }
+.hit p { margin: 4px 0; line-height: 1.55; }
+.hit .small { font-size: 12px; }
+
+input[type="file"] { font: inherit; color: #c8d2de; }
+
+/* --- Reasoning ------------------------------------------------------------ */
+
+.chat {
+  max-height: 620px;
+  overflow-y: auto;
+  padding: 4px 2px;
+  margin-bottom: 12px;
+}
+
+.msg {
+  margin: 10px 0;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid #232c38;
+}
+
+.msg.user { background: rgba(43, 92, 158, 0.10); border-color: #2b5c9e; }
+.msg.assistant { background: rgba(255, 255, 255, 0.02); }
+
+.msg-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b98a8;
+  margin-bottom: 6px;
+}
+
+.msg-head .dim { margin-left: auto; font-weight: normal; }
+.msg-body { line-height: 1.6; }
+
+/* Die Werkzeugspur gehört zur Antwort, drängt sich aber nicht auf. */
+details.tools { margin-top: 10px; font-size: 12px; }
+details.tools summary { cursor: pointer; color: #6aa9ff; }
+
+details.tools .tool {
+  margin: 8px 0 0 12px;
+  padding-left: 10px;
+  border-left: 2px solid #2a3341;
+}
+
+details.tools code { color: #d8b46a; }
+
+details.tools pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  background: #10151d;
+  border-radius: 4px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: #9aa7b8;
+}
+
+#rs-input {
+  width: 100%;
+  font: inherit;
+  padding: 8px 10px;
+  background: #10151d;
+  border: 1px solid #2a3341;
+  border-radius: 4px;
+  color: #c8d2de;
+  resize: vertical;
+}
+
+/* Die Wippe einer Erhaltungsgruppe: zwei Seiten, die sich gegenläufig bewegen.
+   Die Pfeile in der Mitte sind der Punkt — ohne sie liest man zwei Listen. */
+.wippe {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+
+.wippe .seite-a, .wippe .seite-b {
+  flex: 1 1 40%;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.wippe .seite-a { background: rgba(95, 191, 143, 0.10); border-left: 3px solid #5fbf8f; }
+.wippe .seite-b { background: rgba(226, 140, 126, 0.10); border-left: 3px solid #e28c7e; text-align: right; }
+.wippe .wippe-mitte { color: #8b98a8; font-size: 18px; }
+
+/* Die Fundstelle im Trefferkopf — sichtbar, aber nicht lauter als der Inhalt. */
+.hit-head .stelle { font-size: 12px; }
+.hit-head .stelle a { color: #6aa9ff; text-decoration: none; }
+.hit-head .stelle a:hover { text-decoration: underline; }
+
+/* --- Tagesübersicht ------------------------------------------------------- */
+
+.heute-punkt {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid #2a3341;
+  background: rgba(255, 255, 255, 0.015);
+  border-radius: 0 4px 4px 0;
+}
+
+.heute-kopf {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.heute-kopf b { font-size: 14px; }
+.heute-saeule { font-size: 11px; color: #6b7684; text-transform: uppercase; letter-spacing: .04em; }
+
+/* Das Gewicht ganz rechts: Es ordnet ein, es ist nicht die Aussage. */
+.heute-gewicht {
+  margin-left: auto;
+  font-size: 12px;
+  color: #8b98a8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.heute-punkt p { margin: 2px 0 0; line-height: 1.55; font-size: 13px; }
+
+/* Die Einschränkungen stehen mit der Übersicht, nicht als Kleingedrucktes
+   darunter — wer sie überliest, soll sie wenigstens gesehen haben. */
+.heute-caveats {
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-left: 3px solid #c9a227;
+  background: rgba(201, 162, 39, 0.07);
+  border-radius: 0 4px 4px 0;
+}
+
+.heute-caveats p { margin: 4px 0; }
+
+/* --- Tagesjournal --------------------------------------------------------- */
+
+.journal { margin-top: 10px; line-height: 1.65; }
+.journal h4 { margin: 0 0 4px; font-size: 17px; }
+
+.journal-lead {
+  margin: 0 0 14px;
+  font-size: 14px;
+  color: #c8d2de;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #232c38;
+}
+
+.journal-abschnitt { margin: 14px 0; }
+.journal-abschnitt h5 { margin: 0 0 5px; font-size: 14px; color: #9fb4cc; }
+.journal-abschnitt p { margin: 0; font-size: 13px; }
+
+/* Die Notiz unter einem Abschnitt ist die Einordnung, nicht der Inhalt —
+   sie steht eingerückt und ruhiger. */
+.journal-notiz {
+  margin-top: 6px !important;
+  padding-left: 12px;
+  border-left: 2px solid #2a3341;
+  color: #8b98a8;
+  font-size: 12px !important;
+}
+
+a.link {
+  color: #6aa9ff;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 13px;
+  align-self: center;
+}
+
+
+/* ============================================================= Anmeldung ===
+
+   Hier lagen die Regeln fuer einen Anmeldeschleier ueber der geladenen
+   Anwendung. Der Kommentar an dieser Stelle lautete: „Sicherheit ist er nicht
+   -- die sitzt im Server; wer den Schleier wegraeumt, sieht eine Anwendung,
+   deren Abfragen alle mit 401 antworten."
+
+   Das stimmte nur halb. Die Abfragen antworteten tatsaechlich mit 401, aber
+   index.html (91 KB) und app.js (237 KB) wurden an jeden ausgeliefert, der die
+   Adresse kannte -- samt aller Erklaertexte und Messwerte. Gemeldet wurde es
+   mit den Worten „nur verdunkelt, aber nicht gesperrt", und das war zutreffend.
+
+   Ohne Sitzung liefert der Server jetzt nur `anmeldung.html` aus, eine
+   eigenstaendige Seite. Der Schleier ist damit ueberfluessig geworden und
+   entfernt; was bleibt, ist die `[hidden]`-Regel darunter -- die gilt fuer die
+   ganze Oberflaeche.                                                        */
+
+/* [hidden] MUSS gewinnen.
+
+   Das Browser-Stylesheet setzt fuer [hidden] ein `display: none` -- aber jede
+   eigene Regel mit `display` schlaegt es, weil Autoren-Regeln vor denen des
+   Browsers kommen. Genau das ist hier passiert: `.anmeldeschleier` traegt
+   `display: flex`, also liess sich der Schleier nie verbergen. Man meldete
+   sich an, die Seite lud neu -- und der Schleier stand wieder da. Das sieht
+   aus wie „die Anmeldung funktioniert nicht", obwohl der Server sauber
+   antwortete.
+
+   Die Regel steht hier oben und gilt fuer alles, was kuenftig ein `display`
+   bekommt. Ein `!important` ist selten richtig; hier ist es genau richtig,
+   denn `hidden` bedeutet unsichtbar und nichts anderes. */
+[hidden] { display: none !important; }
+
+
+/* Wer ist angemeldet -- rechts in der Kopfzeile.
+
+   NICHT absolut positioniert. Als ich das zuerst so gebaut habe, war die
+   Leiste aus dem Fluss genommen -- die Flex-Zeile wusste nichts von ihr, und
+   das Statusfeld daneben lief darunter hindurch. Eine rote Fehlermeldung
+   ueberdruckte dann den Anmeldenamen, beides unlesbar.
+
+   Als gewoehnliches Flex-Element mit `order` am Ende regelt die Zeile den
+   Abstand selbst, und beim Umbruch wandert die Leiste mit, statt stehen zu
+   bleiben.                                                                  */
+.wer {
+  order: 99;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.wer button { font-size: 11px; padding: 2px 8px; }
+
+/* Das Band fuer Nur-Lese-Zugang. Es steht dauerhaft, nicht als Meldung, die
+   verschwindet -- die Einschraenkung gilt ja auch dauerhaft. */
+.nurlesen-band {
+  background: #2a2413;
+  border-bottom: 1px solid #4a3f1d;
+  color: #d8c98d;
+  font-size: 12px;
+  padding: 6px 14px;
+}
+
+/* Abgelegte Antworten im Journal: Umbrueche des Modells bleiben erhalten, und
+   eine lange Antwort sprengt nicht die Karte. */
+pre.antwort {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 420px;
+  overflow-y: auto;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+pre.antwort.dim { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
+
+/* Die Auswertung 'Prognose gegen Ist' braucht die volle Breite.
+
+   Die Prognose-Ansicht ist ein mehrspaltiges Raster; darin blieb der Tabelle so
+   wenig Platz, dass die letzte Spalte abgeschnitten war -- ausgerechnet die mit
+   der Aussage 'schlaegt Stillstand'. Eine Tabelle mit sieben Spalten gehoert
+   nicht in eine Seitenspalte.                                                 */
+#gu-card {
+  grid-column: 1 / -1;
+}
+
+#gu-out table { width: 100%; }
+#gu-out h4 { margin: 18px 0 6px; font-size: 14px; }
+#gu-out h4 .dim { font-weight: 400; }
+
+#sm-card { grid-column: 1 / -1; }
+#sm-out table { width: 100%; }
+
+/* ============================================================= Taktleiste ===
+
+   Schmal, ruhig, immer da. Sie soll beim Lesen nicht stoeren und beim Suchen
+   sofort auffindbar sein -- deshalb dieselbe Hoehe wie eine Textzeile und kein
+   eigener Rahmen, nur eine Trennlinie nach unten.                            */
+.taktleiste {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 20px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  min-height: 22px;
+  position: sticky;
+
+  /* Die Hoehe der Kopfzeile ist keine Konstante.
+
+     Hier stand `top: 52px` -- die feste Hoehe, die die Kopfzeile einmal hatte.
+     Seit sie umbrechen darf (`flex-wrap`), ist sie 77 hoch, und die Leiste lag
+     vollstaendig darunter: gemessen y=52 bis 77, Unterkante der Kopfzeile 77,
+     deren z-index hoeher. Sie war da, hatte Text, war nicht `hidden` -- und
+     unsichtbar. Eine Zahl, die aus einem frueheren Layout stammt, ist die
+     unauffaelligste Art, etwas zu verstecken.
+
+     `--kopfhoehe` wird beim Aufbau und bei jeder Groessenaenderung aus der
+     tatsaechlichen Kopfzeile gesetzt. */
+  top: var(--kopfhoehe, 52px);
+  z-index: 19;
+}
+
+.takt-trenner { opacity: .4; }
+
+/* Der Punkt traegt die Aussage, nicht die Farbe des Textes: Ein ruhiges Grau
+   fuer „nichts zu tun", ein pulsierendes Blau fuer „laeuft gerade". Wer die
+   Leiste im Augenwinkel hat, sieht die Bewegung, ohne zu lesen. */
+.takt-punkt {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--line);
+  flex-shrink: 0;
+}
+
+.takt-punkt.laeuft {
+  background: var(--accent);
+  animation: takt-puls 1.6s ease-in-out infinite;
+}
+
+.takt-punkt.aus { background: var(--down); }
+
+@keyframes takt-puls {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .25; }
+}
+
+/* ============================================================== Investings ==
+
+   Das virtuelle Depot. Die Zahlenspalten rechtsbuendig und in Ziffern gleicher
+   Breite -- untereinander stehende Betraege muss man vergleichen koennen, ohne
+   sie zu lesen.                                                              */
+.invest-wrap { margin-top: 14px; }
+
+.invest-summen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.invest-block {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--panel);
+  min-width: 210px;
+}
+
+.invest-block .w { font-size: 12px; color: var(--muted); letter-spacing: .06em; }
+.invest-block .stand { font-size: 22px; font-weight: 600; margin: 2px 0; }
+.invest-block .zeile { font-size: 12px; color: var(--muted); }
+
+.invest-tab { width: 100%; }
+.invest-tab td, .invest-tab th { vertical-align: middle; }
+.invest-tab .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Die Zeilen ohne Buchung sind Angebot, nicht Bestand -- sie stehen unten und
+   treten zurueck, damit der Blick zuerst auf das faellt, was wirklich laeuft. */
+.invest-tab tr.leer td { opacity: .62; }
+
+.invest-tab input.soll {
+  width: 108px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.invest-gewinn.plus  { color: var(--up); }
+.invest-gewinn.minus { color: var(--down); }
+
+.invest-journal td { background: rgba(255,255,255,.03); }
+.invest-journal table { width: 100%; font-size: 12px; }
+
+/* Die Kontoleiste. Eine Zeile je Waehrung, damit beide Konten nebeneinander
+   einstellbar sind, ohne dass man umschalten muss. */
+.konto-leiste { margin: 4px 0 14px; }
+
+.konto-zeile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.konto-zeile > b { min-width: 34px; }
+
+.konto-zeile label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: 6px;
+}
+
+.konto-zeile input {
+  width: 118px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.konto-zeile .konto-gebuehr { width: 78px; }
+
+#konto-out { margin-top: 10px; }
+#konto-out table { width: 100%; font-size: 12px; }
+
+/* ========================================================= Gesamtvermoegen ==
+
+   Das Band ganz oben. Die Zahl ist absichtlich gross: Sie beantwortet die
+   Frage, mit der man auf die Seite kommt.                                    */
+.gesamt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 26px;
+  padding: 14px 18px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.gesamt-zahl .w { font-size: 12px; color: var(--muted); }
+.gesamt-zahl .zahl { font-size: 34px; font-weight: 600; line-height: 1.15; }
+.gesamt-zahl .zeile { font-size: 13px; }
+.gesamt-zahl select { margin-left: 6px; }
+
+.gesamt-depots { display: flex; flex-wrap: wrap; gap: 18px; }
+
+.gesamt-depots .gd {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gesamt-depots .gd b { font-size: 11px; color: var(--muted); font-weight: 500; }
+
+.invest-h {
+  margin: 22px 0 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line);
+  font-size: 15px;
+}
+
+/* Eine Zeile je Strategie -- alle drei nebeneinander einstellbar, ohne
+   Umschalten. */
+/* Die Einstellungen als echte Tabelle.
+
+   Vorher standen sie als Flex-Zeilen da, und weil die Beschreibungstexte
+   verschieden lang sind, fluchtete keine Spalte mit der darunter -- drei
+   Zeilen, in denen dasselbe Feld an drei verschiedenen Stellen stand. Eine
+   Tabelle richtet das aus, ohne dass jemand Breiten von Hand pflegen muss. */
+.auto-einst { width: 100%; margin: 6px 0 16px; }
+
+.auto-einst th { white-space: nowrap; }
+.auto-einst td { vertical-align: middle; }
+
+.auto-einst label.an {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
+
+.auto-einst input[type="number"] {
+  width: 66px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.auto-einst select { min-width: 132px; }
+
+.auto-einst .auto-tasten {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.auto-einst .auto-tasten button { margin-left: 6px; }
+
+#auto-detail { margin-top: 14px; }
+#auto-detail table, #auto-out table { width: 100%; }
+
+/* Kopfzeile je Strategie ueber ihrem Positionsraster: Name, was sie tut, und
+   die drei Zahlen, die man beim Ueberfliegen braucht. */
+.auto-depot-kopf {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 18px 0 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line);
+}
+
+.auto-depot-kopf .auto-kennzahl {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.auto-depot-kopf .auto-kennzahl b { color: var(--text); font-size: 14px; }
+
+/* Die Zeilen sind nur lesbar -- der Autopilot ueberschreibt jede Eingabe beim
+   naechsten Lauf. Deshalb kein Eingabefeld und kein Zeilen-Hover, der zum
+   Klicken einlaedt. */
+.auto-tab td { vertical-align: middle; }
+
+.auto-einst .auto-budget { width: 82px; }
+.auto-einst .auto-waehrung { min-width: 62px; margin-left: 4px; }
+
+/* Vergleichslaeufe stehen in der Aufstellung, gehen aber nicht in die Summe
+   ein. Sie treten deshalb zurueck -- wer die Zahlen ueberfliegt, soll nicht
+   versuchen, sie im Kopf zu addieren. */
+.gesamt-depots .gd.nichtgezaehlt { opacity: .55; }
+.gesamt-depots .gd.nichtgezaehlt b i { font-style: normal; font-weight: 400; }
+
+.auto-depot-kopf .pill { align-self: center; }
+
+/* Der Umschalter sitzt in der Kopfzeile des Diagramms, rechts. */
+.depot-schalter { margin-left: auto; display: inline-flex; gap: 4px; }
+
+.depot-schalter button {
+  padding: 2px 9px;
+  font-size: 11px;
+}
+
+/* Nur dort, wo der Titel einen Umschalter traegt -- die Regel stand zuerst
+   ohne Einschraenkung und legte jeden Diagrammtitel auf Flex um. */
+.chart-title:has(.depot-schalter) { display: flex; align-items: baseline; gap: 10px; }
+
+/* ============================================================== Journal ====
+
+   Breit, aber nicht randlos: Ein Journal liest man in Zeilen, und Zeilen ueber
+   die volle Breite eines 4K-Schirms verliert das Auge beim Zurueckspringen. */
+.journal-dialog {
+  width: min(1180px, 94vw);
+  max-height: 88vh;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  overflow: hidden;
+}
+
+.journal-dialog::backdrop { background: rgba(0, 0, 0, .58); }
+
+.journal-kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+
+.journal-kopf h3 { margin: 0; font-size: 15px; }
+
+.journal-kopf button {
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 10px;
+}
+
+#journal-inhalt {
+  padding: 12px 16px 18px;
+  overflow: auto;
+  max-height: calc(88vh - 52px);
+}
+
+.journal-summe {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.journal-summe b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+.journal-tab { width: 100%; font-size: 12px; }
+.journal-tab .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Ein- und Auszahlungen sind keine Geschaefte -- sie treten zurueck, damit die
+   Trades die Liste tragen. */
+.journal-tab tr.j-einzahlung td,
+.journal-tab tr.j-auszahlung td { background: rgba(255, 255, 255, .03); }
+
+.auto-depot-kopf .journal-auf { margin-left: auto; }
+
+/* Der Journal-Knopf sass in der Strategiekopfzeile; er steht jetzt einmal in
+   der Werkzeugleiste des Autopiloten. */
+.auto-depot-kopf .journal-auf { display: none; }
+
+/* Eine Summenzeile je Strategie -- die Kennung vorn, damit die Zeilen beim
+   Ueberfliegen auseinanderzuhalten sind. */
+.journal-summe + .journal-summe { margin-top: 4px; }
+.journal-summe .j-depot { min-width: 96px; }
+.journal-summe .j-depot b { color: var(--text); }
+
+/* ======================================== Werte am Zeiger ==================
+
+   Folgt dem Zeiger im Diagramm. `pointer-events: none` ist keine Feinheit: Ohne
+   das faengt der Kasten die Maus ab, sobald er sie beruehrt, uPlot bekommt kein
+   mousemove mehr, der Kasten verschwindet, der Zeiger ist wieder frei -- und
+   das Ganze flackert im Kreis.                                               */
+.u-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: none;
+  pointer-events: none;
+  z-index: 10;
+  min-width: 168px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(18, 22, 28, .94);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .45);
+}
+
+.u-tip-kopf {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 3px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--line);
+}
+
+.u-tip-zeile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* Die naechstgelegene Reihe steht oben und traegt die Aussage. */
+.u-tip-zeile.nah { font-weight: 600; }
+.u-tip-zeile.nah .u-tip-wert { color: var(--text); }
+
+.u-tip-punkt {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.u-tip-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 190px;
+}
+
+.u-tip-wert {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.u-tip-mehr { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+/* ============================================================ Neuzugänge ===  */
+#nz-card { grid-column: 1 / -1; }
+#nz-out table { width: 100%; }
+
+.nz-kennzahlen { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 14px; }
+
+.nz-kennzahl {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 14px;
+  background: var(--panel);
+  min-width: 118px;
+}
+
+.nz-kennzahl .w { font-size: 11px; color: var(--muted); }
+.nz-kennzahl .zahl { font-size: 21px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.nz-h { margin: 20px 0 6px; font-size: 14px; }
+.nz-tab td { vertical-align: middle; }
+.nz-tab .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/*  Ohne eigene Farbe nimmt der Verweis die Browser-Voreinstellung -- dunkelblau
+    auf dunklem Grund, also praktisch unlesbar. Betroffen war ausgerechnet die
+    erste Spalte: Bei Binance ist der ganze Titel der Verweis.                 */
+.nz-tab a { color: #6aa9ff; text-decoration: none; }
+.nz-tab a:hover { text-decoration: underline; }
+.nz-tab a:visited { color: #8ab6ea; }
+
+
+/*  `min-width: 0` auf BEIDEN Ebenen.
+
+    Ein Rollbereich allein genuegt nicht: Ein Raster- oder Flex-Kind bekommt
+    von sich aus `min-width: auto` und waechst mit seinem Inhalt. Die Karte
+    wurde dadurch 902 px breit, obwohl nur 830 px Platz waren -- der Rumpf
+    schob waagrecht, und die Kopfzeile wanderte aus dem Bild. Dieselbe Loesung
+    wie bei `.chart-box`, aus demselben Grund.                                */
+#nz-card { min-width: 0; }
+
+.nz-roll { overflow-x: auto; min-width: 0; }
+.nz-tab { min-width: 780px; }
+.nz-tab td:first-child { max-width: 300px; }
+
+/* ======================================================= Sprachwahl ======  */
+
+/*  order 98: unmittelbar links neben der Anmeldezeile (.wer, order 99).
+    Nichts in dieser Leiste wird absolut positioniert -- das war schon einmal
+    der Fehler, durch den das Statusfeld unter den Anmeldenamen lief.         */
+.sprachwahl { order: 98; flex-shrink: 0; }
+
+.sprachwahl select {
+  background: var(--panel-2);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.sprachwahl select:hover { border-color: var(--accent); color: var(--fg); }
+.sprachwahl select:focus { outline: 1px solid var(--accent); }

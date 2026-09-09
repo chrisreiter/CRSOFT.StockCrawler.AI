@@ -1,0 +1,547 @@
+{
+  "hinweis": "Kuratierte Startlisten für die Säulen 'Semantik' (Nachrichten) und 'Knowledge' (Fachliteratur). Bewusst als Datei und nicht im Code: Wer eine Quelle ergänzt oder streicht, soll das ohne Übersetzen tun können. Die knowledge-Liste ist der VOLLSTÄNDIGE Stand, mit dem dieses Projekt arbeitet — wer sie einträgt und einbettet, hat denselben Wissensbestand. Enthalten sind ausschließlich Titel, Adresse und Rechtslage; der Text selbst wird von jeder Instanz an der Quelle geholt und liegt nie im Repository.",
+  "semantik": [
+    {
+      "titel": "Reuters — Wirtschaft",
+      "url": "https://ir.thomsonreuters.com/rss/news-releases.xml?items=20",
+      "region": "Welt",
+      "abstandMinuten": 60
+    },
+    {
+      "titel": "CNBC — Finanzmärkte",
+      "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
+      "region": "USA",
+      "abstandMinuten": 30
+    },
+    {
+      "titel": "CNBC — Wirtschaft",
+      "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258",
+      "region": "USA",
+      "abstandMinuten": 60
+    },
+    {
+      "titel": "MarketWatch — Topmeldungen",
+      "url": "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+      "region": "USA",
+      "abstandMinuten": 30
+    },
+    {
+      "titel": "MarketWatch — Marktpuls",
+      "url": "https://feeds.content.dowjones.io/public/rss/mw_marketpulse",
+      "region": "USA",
+      "abstandMinuten": 30
+    },
+    {
+      "titel": "Wall Street Journal — Märkte",
+      "url": "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain",
+      "region": "USA",
+      "abstandMinuten": 30
+    },
+    {
+      "titel": "Wall Street Journal — Wirtschaft",
+      "url": "https://feeds.content.dowjones.io/public/rss/WSJcomUSBusiness",
+      "region": "USA",
+      "abstandMinuten": 60
+    },
+    {
+      "titel": "Yahoo Finance",
+      "url": "https://finance.yahoo.com/news/rssindex",
+      "region": "USA",
+      "abstandMinuten": 30
+    },
+    {
+      "titel": "Investing.com — Börsennachrichten",
+      "url": "https://www.investing.com/rss/news_25.rss",
+      "region": "Welt",
+      "abstandMinuten": 30
+    },
+    {
+      "titel": "Investing.com — Wirtschaftsindikatoren",
+      "url": "https://www.investing.com/rss/news_95.rss",
+      "region": "Welt",
+      "abstandMinuten": 120
+    },
+    {
+      "titel": "Nasdaq — Originalinhalte",
+      "url": "https://www.nasdaq.com/feed/rssoutbound?category=Markets",
+      "region": "USA",
+      "abstandMinuten": 60
+    },
+    {
+      "titel": "Seeking Alpha — Marktnachrichten",
+      "url": "https://seekingalpha.com/market_currents.xml",
+      "region": "USA",
+      "abstandMinuten": 30
+    },
+    {
+      "titel": "Financial Times — Startseite",
+      "url": "https://www.ft.com/rss/home",
+      "region": "Europa",
+      "abstandMinuten": 60
+    },
+    {
+      "titel": "The Guardian — Wirtschaft",
+      "url": "https://www.theguardian.com/uk/business/rss",
+      "region": "Europa",
+      "abstandMinuten": 60
+    },
+    {
+      "titel": "BBC — Wirtschaft",
+      "url": "https://feeds.bbci.co.uk/news/business/rss.xml",
+      "region": "Europa",
+      "abstandMinuten": 60
+    },
+    {
+      "titel": "Handelsblatt",
+      "url": "https://www.handelsblatt.com/contentexport/feed/schlagzeilen",
+      "region": "DACH",
+      "abstandMinuten": 60
+    },
+    {
+      "titel": "FinanzNachrichten.de — Aktien",
+      "url": "https://www.finanznachrichten.de/rss-aktien-nachrichten",
+      "region": "DACH",
+      "abstandMinuten": 60
+    },
+    {
+      "titel": "Der Standard — Wirtschaft",
+      "url": "https://www.derstandard.at/rss/wirtschaft",
+      "region": "Österreich",
+      "abstandMinuten": 120
+    },
+    {
+      "titel": "ORF — Wirtschaft",
+      "url": "https://rss.orf.at/news.xml",
+      "region": "Österreich",
+      "abstandMinuten": 120
+    },
+    {
+      "titel": "Neue Zürcher Zeitung — Wirtschaft",
+      "url": "https://www.nzz.ch/wirtschaft.rss",
+      "region": "Schweiz",
+      "abstandMinuten": 120
+    },
+    {
+      "titel": "Japan Times — Wirtschaft",
+      "url": "https://www.japantimes.co.jp/feed/topstories/",
+      "region": "Asien",
+      "abstandMinuten": 120
+    },
+    {
+      "titel": "Nikkei Asia",
+      "url": "https://asia.nikkei.com/rss/feed/nar",
+      "region": "Asien",
+      "abstandMinuten": 120
+    },
+    {
+      "titel": "South China Morning Post — Wirtschaft",
+      "url": "https://www.scmp.com/rss/92/feed/",
+      "region": "Asien",
+      "abstandMinuten": 120
+    },
+    {
+      "titel": "Economic Times India — Märkte",
+      "url": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
+      "region": "Asien",
+      "abstandMinuten": 120
+    },
+    {
+      "titel": "CoinDesk",
+      "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+      "region": "Krypto",
+      "abstandMinuten": 30
+    },
+    {
+      "titel": "Cointelegraph",
+      "url": "https://cointelegraph.com/rss",
+      "region": "Krypto",
+      "abstandMinuten": 30
+    },
+    {
+      "titel": "Bitcoin Magazine",
+      "url": "https://bitcoinmagazine.com/feed",
+      "region": "Krypto",
+      "abstandMinuten": 120
+    },
+    {
+      "titel": "Decrypt",
+      "url": "https://decrypt.co/feed",
+      "region": "Krypto",
+      "abstandMinuten": 60
+    },
+    {
+      "titel": "Federal Reserve — Pressemitteilungen",
+      "url": "https://www.federalreserve.gov/feeds/press_all.xml",
+      "region": "Notenbank",
+      "abstandMinuten": 120
+    },
+    {
+      "titel": "EZB — Pressemitteilungen",
+      "url": "https://www.ecb.europa.eu/rss/press.html",
+      "region": "Notenbank",
+      "abstandMinuten": 120
+    },
+    {
+      "titel": "Bank of England",
+      "url": "https://www.bankofengland.co.uk/rss/news",
+      "region": "Notenbank",
+      "abstandMinuten": 240
+    },
+    {
+      "titel": "BIZ — Arbeitspapiere",
+      "url": "https://www.bis.org/doclist/wppubls.rss",
+      "region": "Notenbank",
+      "abstandMinuten": 720
+    },
+    {
+      "titel": "SEC — Pressemitteilungen",
+      "url": "https://www.sec.gov/news/pressreleases.rss",
+      "region": "Aufsicht",
+      "abstandMinuten": 240
+    },
+    {
+      "titel": "NASA Erdbeobachtung — Naturereignisse",
+      "url": "https://eonet.gsfc.nasa.gov/api/v3/events/rss",
+      "region": "Weltereignisse",
+      "abstandMinuten": 360
+    },
+    {
+      "titel": "UN News — Weltgeschehen",
+      "url": "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
+      "region": "Weltereignisse",
+      "abstandMinuten": 240
+    }
+  ],
+  "knowledge": [
+    {
+      "titel": "A Deterministic Limit Order Book Simulator with Hawkes-Driven Order Flow",
+      "url": "https://arxiv.org/pdf/2510.08085v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "A market impact game under transient price impact",
+      "url": "https://arxiv.org/pdf/1305.4013v7.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "A Multi Agent Model for the Limit Order Book Dynamics",
+      "url": "https://arxiv.org/pdf/1005.0182v2.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "A Multi-factor Adaptive Statistical Arbitrage Model",
+      "url": "https://arxiv.org/pdf/1405.2384v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "A singular stochastic control approach for optimal pairs trading with proportional transaction costs",
+      "url": "https://arxiv.org/pdf/1911.10450v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "An Algebraic Framework for the Modeling of Limit Order Books",
+      "url": "https://arxiv.org/pdf/2406.04969v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "ClusterLOB: Enhancing Trading Strategies by Clustering Orders in Limit Order Books",
+      "url": "https://arxiv.org/pdf/2504.20349v3.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Continuous-time Equilibrium Returns in Markets with Price Impact and Transaction Costs",
+      "url": "https://arxiv.org/pdf/2405.14418v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Deep Learning Meets Queue-Reactive: A Framework for Realistic Limit Order Book Simulation",
+      "url": "https://arxiv.org/pdf/2501.08822v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Deep Learning Statistical Arbitrage",
+      "url": "https://arxiv.org/pdf/2106.04028v2.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Deep reinforcement learning with positional context for intraday trading",
+      "url": "https://arxiv.org/pdf/2406.08013v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "DeepScalper: A Risk-Aware Reinforcement Learning Framework to Capture Fleeting Intraday Trading Opportunities",
+      "url": "https://arxiv.org/pdf/2201.09058v3.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Detecting intraday financial market states using temporal clustering",
+      "url": "https://arxiv.org/pdf/1508.04900v3.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Does Overnight News Explain Overnight Returns?",
+      "url": "https://arxiv.org/pdf/2507.04481v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Dynamic modeling of mean-reverting spreads for statistical arbitrage",
+      "url": "https://arxiv.org/pdf/0808.1710v3.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Equilibrium under TWAP trading with quadratic transaction costs",
+      "url": "https://arxiv.org/pdf/2008.00908v2.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Finding Moving-Band Statistical Arbitrages via Convex-Concave Optimization",
+      "url": "https://arxiv.org/pdf/2402.08108v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Hawkes model for price and trades high-frequency dynamics",
+      "url": "https://arxiv.org/pdf/1301.1135v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Insider Trading with Temporary Price Impact",
+      "url": "https://arxiv.org/pdf/2007.14162v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Intraday pattern in bid-ask spreads and its power-law relaxation for Chinese A-share stocks",
+      "url": "https://arxiv.org/pdf/0710.2402v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Intraday trading strategy based on time series and machine learning for Chinese stock market",
+      "url": "https://arxiv.org/pdf/2103.13507v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Large-scale empirical study on pairs trading for all possible pairs of stocks listed on the first section of the Tokyo Stock Exchange",
+      "url": "https://arxiv.org/pdf/1412.7269v2.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Looking into informal currency markets as Limit Order Books: impact of market makers",
+      "url": "https://arxiv.org/pdf/2503.03858v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Margin setting with high-frequency data1",
+      "url": "https://arxiv.org/pdf/1103.5412v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Mean Reversion Pays, but Costs",
+      "url": "https://arxiv.org/pdf/1103.4934v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Optimal execution strategy in the presence of permanent price impact and fixed transaction cost",
+      "url": "https://arxiv.org/pdf/1007.0199v5.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Optimal multifactor trading under proportional transaction costs",
+      "url": "https://arxiv.org/pdf/1204.6488v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Optimal Portfolio Design for Statistical Arbitrage in Finance",
+      "url": "https://arxiv.org/pdf/1803.02974v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Overreaction as an indicator for momentum in algorithmic trading: A Case of AAPL stocks",
+      "url": "https://arxiv.org/pdf/2602.18912v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Pairs Trading with Nonlinear and Non-Gaussian State Space Models",
+      "url": "https://arxiv.org/pdf/2005.09794v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Price impact equilibrium with transaction costs and TWAP trading",
+      "url": "https://arxiv.org/pdf/2002.08286v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Price impact without order book: A study of the OTC credit index market",
+      "url": "https://arxiv.org/pdf/1609.04620v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Rise of the Machines? Intraday High-Frequency Trading Patterns of Cryptocurrencies",
+      "url": "https://arxiv.org/pdf/2009.04200v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Singular Perturbation Expansion for Utility Maximization with Order-$�$ Quadratic Transaction Costs",
+      "url": "https://arxiv.org/pdf/1910.06463v5.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Statistical Arbitrage for Multiple Co-Integrated Stocks",
+      "url": "https://arxiv.org/pdf/1908.02164v5.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Statistical arbitrage portfolio construction based on preference relations",
+      "url": "https://arxiv.org/pdf/2310.08284v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Stochastic impulse control on optimal execution with price impact and transaction cost",
+      "url": "https://arxiv.org/pdf/1103.3482v4.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "The slippage paradox",
+      "url": "https://arxiv.org/pdf/1103.2214v1.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Volatility forecasting with machine learning and intraday commonality",
+      "url": "https://arxiv.org/pdf/2202.08962v2.pdf",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Arbeit"
+    },
+    {
+      "titel": "Quantifying the High-Frequency Trading Arms Race (BIZ Working Paper 955)",
+      "url": "https://www.bis.org/publ/work955.pdf",
+      "lizenz": "BIZ, frei",
+      "art": "Arbeitspapier"
+    },
+    {
+      "titel": "Unravelling the Trading Invariance Hypothesis (arXiv 1602.03011)",
+      "url": "https://arxiv.org/pdf/1602.03011",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Aufsatz"
+    },
+    {
+      "titel": "Market Microstructure and Algorithmic Trading (Dissertation, Univ. Luxemburg)",
+      "url": "https://orbilu.uni.lu/bitstream/10993/52222/1/thesis.pdf",
+      "lizenz": "offener Zugang",
+      "art": "Dissertation"
+    },
+    {
+      "titel": "After the Stock Market Crash of November 1929 (Harper)",
+      "url": "https://www.gutenberg.org/cache/epub/73648/pg73648.txt",
+      "lizenz": "gemeinfrei",
+      "art": "Klassiker"
+    },
+    {
+      "titel": "Chronicles of the Stock Exchange (Francis)",
+      "url": "https://www.gutenberg.org/cache/epub/70656/pg70656.txt",
+      "lizenz": "gemeinfrei",
+      "art": "Klassiker"
+    },
+    {
+      "titel": "Fifty Years in Wall Street (Clews)",
+      "url": "https://www.gutenberg.org/cache/epub/70377/pg70377.txt",
+      "lizenz": "gemeinfrei",
+      "art": "Klassiker"
+    },
+    {
+      "titel": "Frenzied Finance (Lawson)",
+      "url": "https://www.gutenberg.org/cache/epub/26330/pg26330.txt",
+      "lizenz": "gemeinfrei",
+      "art": "Klassiker"
+    },
+    {
+      "titel": "My Adventures with Your Money (Rice)",
+      "url": "https://www.gutenberg.org/cache/epub/44274/pg44274.txt",
+      "lizenz": "gemeinfrei",
+      "art": "Klassiker"
+    },
+    {
+      "titel": "Profitable Stock Exchange Investments (Brandenburg)",
+      "url": "https://www.gutenberg.org/cache/epub/44052/pg44052.txt",
+      "lizenz": "gemeinfrei",
+      "art": "Klassiker"
+    },
+    {
+      "titel": "Psychology of the Stock Market (Selden, 1912)",
+      "url": "https://www.gutenberg.org/cache/epub/75570/pg75570.txt",
+      "lizenz": "gemeinfrei",
+      "art": "Klassiker"
+    },
+    {
+      "titel": "Reminiscences of a Stock Operator (Lefèvre, 1923)",
+      "url": "https://www.gutenberg.org/cache/epub/60979/pg60979.txt",
+      "lizenz": "gemeinfrei",
+      "art": "Klassiker"
+    },
+    {
+      "titel": "Successful Stock Speculation (Butler)",
+      "url": "https://www.gutenberg.org/cache/epub/26841/pg26841.txt",
+      "lizenz": "gemeinfrei",
+      "art": "Klassiker"
+    },
+    {
+      "titel": "The Cycles of Speculation (Gibson)",
+      "url": "https://www.gutenberg.org/cache/epub/75687/pg75687.txt",
+      "lizenz": "gemeinfrei",
+      "art": "Klassiker"
+    },
+    {
+      "titel": "The Psychology of Speculation (Harper, 1926)",
+      "url": "https://www.gutenberg.org/cache/epub/73647/pg73647.txt",
+      "lizenz": "gemeinfrei",
+      "art": "Klassiker"
+    },
+    {
+      "titel": "The Theory of Stock Exchange Speculation (Crump)",
+      "url": "https://www.gutenberg.org/cache/epub/59518/pg59518.txt",
+      "lizenz": "gemeinfrei",
+      "art": "Klassiker"
+    },
+    {
+      "titel": "Limit Order Books (Gould et al., arXiv 1012.0349)",
+      "url": "https://arxiv.org/pdf/1012.0349",
+      "lizenz": "arXiv, offener Zugang",
+      "art": "Übersichtsarbeit"
+    }
+  ]
+}

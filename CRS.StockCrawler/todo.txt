@@ -1,0 +1,371 @@
+Anweisungen für Claude (Datensammeln mit SQL Server, EOD & CoinGecko)
+0) Projektgrundlage einrichten
+
+Verwende .NET 8 (oder 9, wenn installiert) Web API (ohne Controllers → Minimal API ist ok).
+
+Lege folgende Projektstruktur an:
+
+src/
+  Ingest.Api/          // Web API Host, Endpoints, DI
+  Ingest.Core/         // Domain-Modelle, DTOs, Services-Interfaces
+  Ingest.Infrastructure/ // SQL Server, Dapper/EF, HTTP-Clients, Repos
+
+
+Aktiviere nullable + implicit usings.
+
+1) NuGet-Pakete installieren
+
+In Ingest.Api und Ingest.Infrastructure:
+
+Serilog.AspNetCore, Serilog.Sinks.Console
+
+Microsoft.Data.SqlClient
+
+Dapper
+
+EFCore (optional; wenn du Migrations nutzen willst: Microsoft.EntityFrameworkCore.SqlServer, Microsoft.EntityFrameworkCore.Tools)
+
+Polly (und Polly.Extensions.Http)
+
+System.Text.Json (SourceGen optional)
+
+Cronos (für einfache Cron-Schedules) oder Quartz (wenn bevorzugt)
+
+FluentValidation (optional, für Request-Validierung)
+
+2) Konfiguration erstellen
+
+In appsettings.json (Ingest.Api):
+
+{
+  "ConnectionStrings": {
+    "Sql": "Server=localhost,1433;Database=MarketData;User Id=sa;Password=Your_strong_password123;TrustServerCertificate=true"
+  },
+  "Sources": {
+    "Eod": {
+      "BaseUrl": "https://eodhd.com/api",
+      "ApiKey": "__EOD_API_KEY__",
+      "DefaultExchange": "US" // nur als Fallback
+    },
+    "CoinGecko": {
+      "BaseUrl": "https://api.coingecko.com/api/v3",
+      "VsCurrency": "usd"
+    }
+  },
+  "Ingest": {
+    "StartYear": 2000,
+    "DailyUpdateCronUtc": "5 3 * * *",  // 03:05 UTC täglich für Aktien
+    "DailyUpdateCryptoCronUtc": "5 0 * * *" // 00:05 UTC täglich für Krypto
+  },
+  "Serilog": { "MinimumLevel": "Information" }
+}
+
+
+EOD API Key als Secret/ENV setzen, nicht commiten.
+
+3) SQL Server: Schema anlegen (DDL)
+
+Erstelle ein SQL-Skript infra/sql/001_init.sql und führe es gegen die DB aus:
+
+CREATE TABLE dbo.asset (
+  asset_id        INT IDENTITY(1,1) PRIMARY KEY,
+  vendor_key      NVARCHAR(128) NOT NULL,       -- z.B. "AAPL.US" oder "bitcoin" (coingecko_id)
+  symbol          NVARCHAR(50)  NULL,           -- Anzeige/Kürzel (BTC, AAPL)
+  [name]          NVARCHAR(200) NULL,
+  asset_type      TINYINT       NOT NULL,       -- 0=stock,1=crypto,2=index,3=etf
+  exchange        NVARCHAR(50)  NULL,           -- z.B. NASDAQ, XETRA, bei Krypto NULL
+  source_system   TINYINT       NOT NULL,       -- 0=eod,1=coingecko
+  created_at_utc  DATETIME2(0)  NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+CREATE UNIQUE INDEX UX_asset_vendor ON dbo.asset(vendor_key, source_system);
+
+CREATE TABLE dbo.price_daily (
+  asset_id        INT           NOT NULL,
+  [date]          DATE          NOT NULL,
+  [open]          DECIMAL(19,8) NULL,
+  [high]          DECIMAL(19,8) NULL,
+  [low]           DECIMAL(19,8) NULL,
+  [close]         DECIMAL(19,8) NOT NULL,
+  adj_close       DECIMAL(19,8) NULL,          -- bei Krypto NULL
+  volume          DECIMAL(38,8) NULL,
+  source_system   TINYINT       NOT NULL,      -- 0=eod,1=coingecko
+  ingested_at_utc DATETIME2(0)  NOT NULL DEFAULT SYSUTCDATETIME(),
+  CONSTRAINT PK_price_daily PRIMARY KEY (asset_id, [date], source_system),
+  CONSTRAINT FK_price_daily_asset FOREIGN KEY (asset_id) REFERENCES dbo.asset(asset_id)
+);
+
+CREATE INDEX IX_price_daily_asset_date ON dbo.price_daily(asset_id, [date]);
+
+CREATE TABLE dbo.corp_action (
+  asset_id        INT           NOT NULL,
+  [date]          DATE          NOT NULL,
+  action_type     TINYINT       NOT NULL,      -- 0=split,1=dividend
+  ratio_n         DECIMAL(19,8) NULL,          -- z.B. 2
+  ratio_d         DECIMAL(19,8) NULL,          -- z.B. 1
+  amount          DECIMAL(19,8) NULL,          -- Dividend amount
+  source_system   TINYINT       NOT NULL,      -- 0=eod
+  ingested_at_utc DATETIME2(0)  NOT NULL DEFAULT SYSUTCDATETIME(),
+  CONSTRAINT PK_corp_action PRIMARY KEY (asset_id, [date], action_type, source_system),
+  CONSTRAINT FK_corp_action_asset FOREIGN KEY (asset_id) REFERENCES dbo.asset(asset_id)
+);
+
+CREATE TABLE dbo.ingest_run (
+  run_id          BIGINT IDENTITY(1,1) PRIMARY KEY,
+  source_system   TINYINT      NOT NULL,
+  job_name        NVARCHAR(100) NOT NULL,
+  started_utc     DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+  finished_utc    DATETIME2(0) NULL,
+  ok_count        INT          NULL,
+  err_count       INT          NULL,
+  note            NVARCHAR(4000) NULL
+);
+
+
+Optional: Lege MERGE-Upsert Procs an (empfohlen), z. B. dbo.upsert_price_daily und dbo.upsert_asset. (Claude soll sie erstellen und im Repo versionieren.)
+
+4) Domain-/Infra-Modelle definieren
+
+In Ingest.Core:
+
+Enums: AssetType { Stock=0, Crypto=1, Index=2, Etf=3 }, SourceSystem { Eod=0, CoinGecko=1 }, CorpActionType { Split=0, Dividend=1 }.
+
+POCOs: Asset, PriceDaily, CorpAction.
+
+DTOs für API-Responses von EOD & CoinGecko (nur Felder, die wir brauchen).
+
+5) HTTP-Clients implementieren (Polly + Typed HttpClient)
+
+In Ingest.Infrastructure/Http:
+
+EodClient:
+
+BaseUrl: from config.
+
+Auth: api_token Querystring.
+
+Endpoints (nur die wir in Phase 1 brauchen):
+
+Price History (EOD) pro Symbol: /eod/{SYMBOL}?from=YYYY-MM-DD&to=YYYY-MM-DD&fmt=json&api_token=...
+
+Splits: /splits/{SYMBOL}?from=...&to=...
+
+Dividends: /div/{SYMBOL}?from=...&to=...
+
+Rückgabe in interne DTOs mappen.
+
+CoinGeckoClient:
+
+/coins/list → Komplett-Liste (id, symbol, name).
+
+Historische Preise: /coins/{id}/market_chart/range?vs_currency=usd&from={unix_sec}&to={unix_sec}
+
+Verwende prices (timestamp, price) und total_volumes.
+
+OHLC falls nötig: /coins/{id}/ohlc?vs_currency=usd&days=max (aber range ist stabiler).
+
+Für beide Clients: Polly Retry mit Exponential Backoff + Jitter (429/5xx), und Rate-Limit-Respekt (kleine Delay zwischen Calls).
+
+6) Repositories & Upserts
+
+In Ingest.Infrastructure/Repositories (Dapper):
+
+IAssetRepository:
+
+GetOrCreateAsync(vendorKey, sourceSystem, symbol?, name?, assetType, exchange?)
+→ nutzt MERGE in dbo.upsert_asset, gibt asset_id zurück.
+
+IPriceDailyRepository:
+
+BulkUpsertAsync(assetId, IEnumerable<PriceDaily>)
+→ nutze SqlBulkCopy in Temp-Tabelle + MERGE in price_daily.
+
+ICorpActionRepository:
+
+UpsertSplitsAsync(assetId, ...), UpsertDividendsAsync(assetId, ...).
+
+Claude soll:
+
+Temp-Tabelle(n) #price_daily_stage erstellen und MERGE gegen dbo.price_daily.
+
+Alle Upserts idempotent implementieren (PK verhindert Duplikate).
+
+7) Services (ETL-Schichten)
+
+In Ingest.Core/Services + Implementierungen in Infra:
+
+IUniverseService
+
+EnsureStockUniverseAsync() → liest definierte Listen (S&P 500 etc. später; jetzt: Liste aus config/Datei).
+
+EnsureCryptoUniverseAsync() → lädt CoinGecko /coins/list, filtert Top-N nach späterer Regel (Phase 1: nimm z. B. Top 200 via separater Liste).
+
+IBackfillService
+
+BackfillStocksAsync(fromDate):
+
+Für jedes Asset (Stock, Quelle EOD): hole EOD-Pricing in Jahresscheiben (z. B. 2–5 Jahre pro Call) → Upsert.
+
+Splits + Dividenden separat ziehen → Upsert.
+
+BackfillCryptoAsync(fromDate):
+
+Für jedes Krypto-Asset: market_chart/range in mehreren Blöcken (z. B. 365 Tage pro Block) → Preis + Volume in price_daily (OHLC approximieren: open=first, high=max, low=min, close=last pro Tag).
+
+IIncrementalUpdateService
+
+RunDailyStocksAsync() (gestern→heute), RunDailyCryptoAsync().
+
+Datenqualitätsregeln beim Transformieren:
+
+Preise > 0, high >= max(open, close), low <= min(open, close). Invalid rows verwerfen + loggen.
+
+Für Krypto daily Aggregation: Gruppiere alle Punkte eines Tages (UTC) → O/H/L/C + Volume (Summe).
+
+8) Background Scheduler
+
+In Ingest.Api:
+
+Registriere einen BackgroundService (oder IHostedService) mit Cronos:
+
+Job A (Aktien): Ingest:DailyUpdateCronUtc
+
+Job B (Krypto): Ingest:DailyUpdateCryptoCronUtc
+
+Jeder Run erzeugt einen Datensatz in dbo.ingest_run mit Metriken (ok_count, err_count).
+
+9) Minimal API Endpoints (Manuelle Trigger)
+
+In Program.cs (oder Modul):
+
+POST /universe/stocks/init → EnsureStockUniverseAsync()
+
+POST /universe/crypto/init → EnsureCryptoUniverseAsync()
+
+POST /backfill/stocks?from=YYYY-MM-DD
+
+POST /backfill/crypto?from=YYYY-MM-DD
+
+POST /update/stocks/daily
+
+POST /update/crypto/daily
+
+GET /health/ingest-runs?last=50 → letzte Runs
+
+Antworten: JSON mit Zahlen (upserted rows), Dauer, Fehlerliste.
+
+10) Logging & Observability
+
+Richte Serilog ein (Console), logge:
+
+Start/Ende jedes Runs, Anzahl Assets, Anzahl Records, Retries, 429/5xx.
+
+Optionale Metriken (Counter) via EventCounters/Prometheus später.
+
+11) Startjahr & Parameter
+
+Lese Ingest:StartYear. Berechne fromDate = 1.1.StartYear (UTC).
+
+Für Backfill in Schleifen:
+
+Aktien (EOD): Jahr-Blöcke (from=YYYY-01-01&to=YYYY-12-31).
+
+Krypto (CoinGecko): range mit Unix-Sekunden, Blöcke à 365 Tage (konfigurierbar).
+
+12) Mapping-Details (wichtig)
+
+EOD (Stocks):
+
+vendor_key = "{SYMBOL}.{EXCHANGE}" (z. B. AAPL.US), source_system=Eod.
+
+Speichere adj_close (falls geliefert), nutze close für Roh-Close.
+
+Splits: ratio n/d. Dividenden: amount.
+
+CoinGecko (Crypto):
+
+vendor_key = coingecko_id (z. B. bitcoin), source_system=CoinGecko.
+
+Aggregiere zu daily (UTC).
+
+adj_close=NULL, volume aus total_volumes (falls verfügbar).
+
+13) Idempotenz & Fehlerbehandlung
+
+Jeder Upsert über MERGE mit PK (asset_id, date, source_system).
+
+Polly Policy:
+
+429/5xx: WaitAndRetry mit Exponential Backoff (z. B. 5 Versuche, Basis 1s, Jitter).
+
+Timeout pro HTTP Call 30–60s.
+
+Bei Teilfehlern: run als err_count>0 markieren, aber nicht abbrechen.
+
+14) Schnelle Sanity-Checks (SQL)
+
+Erstelle einfache SQL-Views oder Queries:
+
+-- Anzahl Tage je Asset
+SELECT a.symbol, COUNT(*) AS days
+FROM dbo.price_daily p
+JOIN dbo.asset a ON a.asset_id = p.asset_id
+GROUP BY a.symbol
+ORDER BY days DESC;
+
+-- Lücken (nur Aktien, Werktage): später erweitern
+
+15) README (Kurz)
+
+Wie DB starten / Verbindungsstring setzen
+
+Wie Backfill triggern (cURL Beispiele)
+
+Bekannte Limits/Quotas (EOD/CoinGecko)
+
+Nächste Phase (Intraday optional, ClickHouse/Timescale optional)
+
+Zusatz: Beispiel-Stored Procedures (Skizze)
+
+Claude: bitte implementiere diese als echte T-SQL Procs.
+
+CREATE OR ALTER PROCEDURE dbo.upsert_asset
+  @vendor_key NVARCHAR(128),
+  @source_system TINYINT,
+  @symbol NVARCHAR(50) = NULL,
+  @name NVARCHAR(200) = NULL,
+  @asset_type TINYINT,
+  @exchange NVARCHAR(50) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+  MERGE dbo.asset AS t
+  USING (SELECT @vendor_key AS vendor_key, @source_system AS source_system) AS s
+  ON (t.vendor_key = s.vendor_key AND t.source_system = s.source_system)
+  WHEN MATCHED THEN UPDATE SET symbol = COALESCE(@symbol, t.symbol),
+                              [name] = COALESCE(@name, t.[name]),
+                              asset_type = @asset_type,
+                              exchange = COALESCE(@exchange, t.exchange)
+  WHEN NOT MATCHED THEN
+    INSERT (vendor_key, symbol, [name], asset_type, exchange, source_system)
+    VALUES (@vendor_key, @symbol, @name, @asset_type, @exchange, @source_system);
+  SELECT asset_id FROM dbo.asset WHERE vendor_key=@vendor_key AND source_system=@source_system;
+END
+GO
+
+
+Für price_daily: SqlBulkCopy in #stage, danach MERGE in dbo.price_daily.
+
+Testablauf (manuell)
+
+POST /universe/crypto/init → lädt CoinGecko Liste (min. 50 Assets, konfigurierbar) → asset.
+
+POST /universe/stocks/init → legt definierte Aktien an (vorerst kleine Liste: AAPL.US, MSFT.US, GOOGL.US, ^ später erweitern).
+
+POST /backfill/crypto?from=2015-01-01
+
+POST /backfill/stocks?from=2000-01-01
+
+GET /health/ingest-runs?last=20 → Erfolg prüfen.
+
+SQL-Checks (Coverage, Tage/Asset).

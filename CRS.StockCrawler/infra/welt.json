@@ -1,0 +1,155 @@
+{
+  "hinweis": [
+    "Kuratierte Weltliste. Warum eine Liste und kein Screener: Yahoos",
+    "vordefinierte Screener (most_actives, day_gainers, ...) kennen keinen",
+    "Regionsparameter -- sie liefern ausschliesslich US-Werte. Deshalb stand im",
+    "Bestand kein einziges Symbol mit Punkt, also kein einziges",
+    "nicht-amerikanisches Papier.",
+    "",
+    "Die Symbole tragen Yahoos Boersenkuerzel: .DE Xetra, .VI Wien, .SW",
+    "Schweiz, .PA Paris, .AS Amsterdam, .MI Mailand, .MC Madrid, .L London,",
+    ".T Tokio, .HK Hongkong, .TO Toronto, .AX Sydney, .ST Stockholm, .CO",
+    "Kopenhagen, .OL Oslo, .HE Helsinki.",
+    "",
+    "WAEHRUNG: Diese Papiere notieren nicht in Dollar. Fuer Korrelationen,",
+    "Kreuzungen und Paargewinne ist das unerheblich -- sie rechnen mit",
+    "Renditen. Wer Kurse addiert oder Kapital verteilt, muss umrechnen.",
+    "",
+    "Ein Symbol, das Yahoo nicht kennt, wird beim Aufnehmen gemeldet und",
+    "uebersprungen. Die Liste darf also Fehler enthalten, ohne Schaden",
+    "anzurichten -- sie wird nicht stillschweigend gekuerzt."
+  ],
+
+  "regionen": [
+    {
+      "name": "Deutschland — DAX und MDAX",
+      "land": "DE",
+      "symbole": [
+        "SAP.DE", "SIE.DE", "ALV.DE", "DTE.DE", "MUV2.DE", "AIR.DE", "MRK.DE",
+        "BAS.DE", "BAYN.DE", "BMW.DE", "MBG.DE", "VOW3.DE", "ADS.DE", "RHM.DE",
+        "IFX.DE", "DBK.DE", "DHL.DE", "EOAN.DE", "RWE.DE", "HEN3.DE", "BEI.DE",
+        "CBK.DE", "HNR1.DE", "SY1.DE", "ZAL.DE", "DB1.DE", "VNA.DE", "FRE.DE",
+        "CON.DE", "P911.DE", "HEI.DE", "QIA.DE", "SRT3.DE", "1COV.DE", "BNR.DE",
+        "MTX.DE", "SHL.DE", "ENR.DE", "LHA.DE", "FME.DE", "PAH3.DE", "TKA.DE"
+      ]
+    },
+    {
+      "name": "Österreich — ATX",
+      "land": "AT",
+      "symbole": [
+        "OMV.VI", "VOE.VI", "EBS.VI", "RBI.VI", "VER.VI", "ANDR.VI", "WIE.VI",
+        "BG.VI", "CAI.VI", "DOC.VI", "LNZ.VI", "POST.VI", "SBO.VI", "TKA.VI",
+        "UQA.VI", "IIA.VI", "EVN.VI", "MMK.VI", "ATS.VI"
+      ]
+    },
+    {
+      "name": "Schweiz — SMI",
+      "land": "CH",
+      "symbole": [
+        "NESN.SW", "ROG.SW", "NOVN.SW", "UBSG.SW", "ZURN.SW", "ABBN.SW",
+        "CFR.SW", "LONN.SW", "SIKA.SW", "GIVN.SW", "HOLN.SW", "ALC.SW",
+        "SREN.SW", "GEBN.SW", "SCMN.SW", "SLHN.SW", "PGHN.SW", "BAER.SW",
+        "LOGN.SW", "KNIN.SW", "SOON.SW", "TEMN.SW", "VACN.SW"
+      ]
+    },
+    {
+      "name": "Frankreich — CAC 40",
+      "land": "FR",
+      "symbole": [
+        "MC.PA", "OR.PA", "RMS.PA", "TTE.PA", "SU.PA", "AI.PA", "SAN.PA",
+        "AIR.PA", "EL.PA", "BNP.PA", "DG.PA", "SAF.PA", "CS.PA", "KER.PA",
+        "BN.PA", "GLE.PA", "ACA.PA", "ORA.PA", "VIE.PA", "ENGI.PA", "CAP.PA",
+        "PUB.PA", "LR.PA", "ML.PA", "RI.PA", "SGO.PA", "HO.PA", "VIV.PA", "EN.PA"
+      ]
+    },
+    {
+      "name": "Niederlande — AEX",
+      "land": "NL",
+      "symbole": [
+        "ASML.AS", "PRX.AS", "INGA.AS", "AD.AS", "PHIA.AS", "HEIA.AS", "WKL.AS",
+        "DSFIR.AS", "AKZA.AS", "RAND.AS", "ASM.AS", "BESI.AS", "KPN.AS",
+        "NN.AS", "ABN.AS", "AGN.AS", "IMCD.AS", "ADYEN.AS"
+      ]
+    },
+    {
+      "name": "Italien — FTSE MIB",
+      "land": "IT",
+      "symbole": [
+        "ENEL.MI", "ISP.MI", "UCG.MI", "ENI.MI", "RACE.MI", "G.MI", "TIT.MI",
+        "MB.MI", "BAMI.MI", "SRG.MI", "TRN.MI", "LDO.MI", "CPR.MI", "MONC.MI",
+        "PST.MI", "PIRC.MI"
+      ]
+    },
+    {
+      "name": "Spanien — IBEX 35",
+      "land": "ES",
+      "symbole": [
+        "SAN.MC", "BBVA.MC", "ITX.MC", "IBE.MC", "TEF.MC", "REP.MC", "AMS.MC",
+        "FER.MC", "AENA.MC", "CLNX.MC", "ELE.MC", "ACS.MC", "GRF.MC", "MAP.MC",
+        "ANA.MC"
+      ]
+    },
+    {
+      "name": "Grossbritannien — FTSE 100",
+      "land": "GB",
+      "symbole": [
+        "SHEL.L", "AZN.L", "HSBA.L", "ULVR.L", "BP.L", "RIO.L", "GSK.L",
+        "DGE.L", "BATS.L", "REL.L", "LSEG.L", "NG.L", "GLEN.L", "VOD.L",
+        "BARC.L", "LLOY.L", "PRU.L", "TSCO.L", "AAL.L", "IMB.L", "CPG.L",
+        "RKT.L", "SSE.L", "BA.L"
+      ]
+    },
+    {
+      "name": "Skandinavien",
+      "land": null,
+      "symbole": [
+        "NOVO-B.CO", "DSV.CO", "NOKIA.HE", "VOLV-B.ST", "ATCO-A.ST",
+        "INVE-B.ST", "ERIC-B.ST", "EQNR.OL", "DNB.OL", "SAND.ST", "ASSA-B.ST",
+        "HEXA-B.ST", "SEB-A.ST", "SWED-A.ST", "TELIA.ST", "NDA-SE.ST"
+      ]
+    },
+    {
+      "name": "Japan — Nikkei",
+      "land": "JP",
+      "symbole": [
+        "7203.T", "6758.T", "8306.T", "6861.T", "9984.T", "6098.T", "8035.T",
+        "4063.T", "9432.T", "7974.T", "6501.T", "8058.T", "8001.T", "6902.T",
+        "4502.T", "7267.T", "6367.T", "9433.T", "8316.T", "6954.T"
+      ]
+    },
+    {
+      "name": "Hongkong — Hang Seng",
+      "land": "HK",
+      "symbole": [
+        "0700.HK", "9988.HK", "0941.HK", "1299.HK", "0388.HK", "3690.HK",
+        "0005.HK", "1810.HK", "0883.HK", "2318.HK"
+      ]
+    },
+    {
+      "name": "Kanada — TSX",
+      "land": "CA",
+      "symbole": [
+        "RY.TO", "TD.TO", "ENB.TO", "CNR.TO", "BNS.TO", "BMO.TO", "CP.TO",
+        "SU.TO", "TRP.TO", "ABX.TO"
+      ]
+    },
+    {
+      "name": "Australien — ASX",
+      "land": "AU",
+      "symbole": [
+        "BHP.AX", "CBA.AX", "CSL.AX", "NAB.AX", "WBC.AX", "ANZ.AX", "WES.AX",
+        "MQG.AX", "FMG.AX", "WDS.AX"
+      ]
+    },
+    {
+      "name": "Leitindizes als Bezugsgrössen",
+      "land": null,
+      "klasse": "Index",
+      "symbole": [
+        "^GDAXI", "^ATX", "^SSMI", "^FCHI", "^AEX", "^FTSE", "^N225", "^HSI",
+        "^STOXX50E", "^GSPTSE", "^AXJO", "^IBEX", "^GSPC", "^IXIC", "^DJI",
+        "^VIX", "EURUSD=X", "GBPUSD=X", "JPY=X", "CHF=X"
+      ]
+    }
+  ]
+}

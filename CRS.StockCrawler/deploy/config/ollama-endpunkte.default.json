@@ -1,0 +1,28 @@
+[
+  {
+    "Id": "lokal",
+    "Name": "Dieser Rechner",
+    "BaseUrl": "http://localhost:11434",
+    "IstStandard": false,
+    "NutztTunnel": false,
+    "SshHost": null,
+    "SshPort": 22,
+    "SshUser": "root",
+    "SshKeyPath": null,
+    "RemotePort": 11434,
+    "Schluessel": null
+  },
+  {
+    "Id": "vast48559385",
+    "Name": "vast.ai 1× RTX 5090",
+    "BaseUrl": "ssh://180.189.55.43:16054 → 127.0.0.1:11434",
+    "IstStandard": true,
+    "NutztTunnel": true,
+    "SshHost": "180.189.55.43",
+    "SshPort": 16054,
+    "SshUser": "root",
+    "SshKeyPath": null,
+    "RemotePort": 11434,
+    "Schluessel": null
+  }
+]
