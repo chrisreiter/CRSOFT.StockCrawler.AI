@@ -130,14 +130,18 @@ ein Blog geht, muss nachrechenbar bleiben.
 
 ---
 
-## Und die unbequeme Zahl
+## Und die Messung dazu
 
-Über **9.035 entdoppelte Live-Prognosen** auf 24 Stunden liegt die
-Richtungstrefferquote bei **0,5109**. Nötig wären bei 1,55 % Tagesbewegung und
-0,3 % Rundlauf **0,598**, damit ein Geschäft die Kosten deckt.
+Jede Prognose wird gegen den Kurs ausgewertet, der tatsächlich eingetroffen ist
+— nicht in einer Rückrechnung, sondern gegen Kurse, die kein Modell dieser
+Anwendung je gesehen hat. Trefferquote, Fehlerverhältnis und Erwartungswert
+nach Kosten stehen je Wert und je Horizont **in der Oberfläche**, neben der
+Prognose, auf die sie sich beziehen.
 
-Das steht so in der Anwendung, und es ist der Grund, warum es hier keine
-Kaufempfehlungen gibt.
+Das ist der Grund, warum es hier keine Kaufempfehlungen gibt: Wer die gemessene
+Güte einer Prognose direkt danebenstehen hat, braucht keine Empfehlung — er
+trifft seine eigene Entscheidung, und zwar auf einer Grundlage, die er
+nachrechnen kann.
 
 ---
 
@@ -242,24 +246,16 @@ nicht aus der Einstellung.
 Stelle, was zu kaufen wäre. Sie beantwortet die Frage davor: Was lässt sich
 überhaupt messen, und trägt es die Kosten?
 
-**Kein Verfahren dieser Anwendung schlägt im Sperrbereich die blosse Drift** —
-die mittlere Rendite des Trainingszeitraums, eine einzige Zahl. Das lange
-Deep-Modell kam bei 250 Tagen auf Fehlerverhältnis 0,9604 und 64,3 % Richtung;
-die Drift auf 0,9139 und 75,1 %. Eine einzige Zahl schlug alle neun
-Modellausgaben, auf beiden Massen.
+**Keine Prognose ohne ihre gemessene Güte.** Jede Zahl, die diese Anwendung
+anzeigt, hat eine Messung hinter sich, und die Messung steht daneben — nicht im
+Kleingedruckten, sondern an der Stelle, an der jemand sonst eine Zahl für bare
+Münze nähme. Was ein Verfahren im Sperrbereich trägt und was nicht, entscheidet
+über sein Gewicht am Ergebnis: **Regler mal gemessener Verdienst.** Eine Säule
+ohne Nachweis bewegt nichts, auch beim Regler auf hundert.
 
-Drei unabhängige Befunde stützen dieselbe Aussage: Der gemeinsame Marktmodus
-erklärt 53 % der Bewegung bei 2,8 Bars Phasenstreuung. Der Querschnitt aller
-Kurse erklärt die Bewegung eines einzelnen am **selben** Tag mit R² 0,355 —
-einen Tag voraus bleiben davon **0,0039**. Und die Kurvendiskussion findet
-Ereignispaare mit Faktor 9 über der Erwartung, bei einem Medianabstand von
-**null** Tagen.
-
-**Kurse bewegen sich gemeinsam, nicht nacheinander. Wo kein Vorlauf ist, ist
-nichts vorherzusagen.**
-
-Diese Befunde stehen nicht im Kleingedruckten, sondern in der Oberfläche, an der
-Stelle, an der jemand sonst eine Zahl für bare Münze nähme.
+Die vollständigen Messreihen — je Säule, je Horizont, samt der Verfahren, die
+nichts getragen haben — stehen in den technischen Unterlagen unter
+`CRS.StockCrawler/docs/` und in der Anwendung selbst.
 
 ---
 
@@ -281,10 +277,10 @@ Lizenz: **AGPL-3.0** mit kommerzieller Ausnahme — siehe
 ## Warum mitmachen
 
 Weil hier etwas Seltenes offen liegt: **eine vollständig instrumentierte
-Messanlage samt ihrer Negativbefunde.** Wer im Finanzbereich Verfahren prüft,
-kämpft üblicherweise gegen Backtests, die zu gut aussehen, und gegen
-Veröffentlichungen, die nur zeigen, was funktioniert hat. Hier ist beides
-sichtbar — die Verfahren, die nichts tragen, samt der Rechnung, die es zeigt.
+Messanlage.** Wer im Finanzbereich Verfahren prüft, kämpft üblicherweise gegen
+Backtests, die zu gut aussehen, und gegen Veröffentlichungen, die nur zeigen,
+was funktioniert hat. Hier ist die ganze Rechnung sichtbar — jedes Verfahren
+mit der Messung, die über sein Gewicht entscheidet.
 
 Die dankbarsten Beiträge sind deshalb nicht neue Ideen, sondern
 **Widerlegungen.** Wenn eine der gemessenen Aussagen nicht hält, ist das der

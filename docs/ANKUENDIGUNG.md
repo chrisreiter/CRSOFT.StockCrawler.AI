@@ -10,7 +10,7 @@ gehören sie nachgezogen — nicht gerundet.
 
 Stand: 641 Werte von 17 Börsenplätzen · 3.941.331 Bars · 397.011 Paare ·
 35 Nachrichtenquellen · 11.644 Artikel · 55 Fachquellen · 42.219 Abschnitte ·
-978.837 Live-Prognosen · 303.465 bewertet · Trefferquote 0,5109.
+978.837 Live-Prognosen · 303.465 davon bereits ausgewertet.
 
 ---
 
@@ -44,13 +44,11 @@ Läuft komplett lokal. .NET 8, ONNX im Prozess, Ollama, Qdrant. Keine Cloud, kei
 
 UND JETZT DER TEIL, DEN KEIN ANBIETER MITLIEFERT
 
-978.837 Prognosen sind gestellt, 303.465 davon bereits gegen den eingetroffenen Kurs ausgewertet. Das Ergebnis:
+978.837 Prognosen sind gestellt, 303.465 davon bereits gegen den Kurs ausgewertet, der tatsächlich eingetroffen ist. Nicht in einer Rückrechnung, sondern gegen Kurse, die kein Modell dieser Anwendung je gesehen hat.
 
-Richtungstrefferquote 0,5109. Nötig wären 0,598, damit ein Geschäft die Gebühren deckt. Kein Verfahren dieser Anwendung schlägt im Sperrbereich die blosse Drift — die mittlere Rendite des Trainingszeitraums, eine einzige Zahl.
+Jede Prognose trägt ihre gemessene Güte mit sich, sichtbar in der Oberfläche — an genau der Stelle, an der jemand sonst eine Zahl für bare Münze nähme. Keine Zahl ohne Messung dahinter: Das ist die Hausregel, und sie gilt für die Oberfläche wie für das Sprachmodell.
 
-Das steht nicht im Kleingedruckten, sondern in der Oberfläche, an genau der Stelle, an der jemand sonst eine Zahl für bare Münze nähme.
-
-Das ist kein Eingeständnis. Das ist das Produkt. Wer im Finanzbereich Verfahren prüft, kämpft gegen Backtests, die zu gut aussehen, und gegen Veröffentlichungen, die nur zeigen, was funktioniert hat. Hier liegt die ganze Messanlage offen — samt ihrer Negativbefunde.
+Wer im Finanzbereich Verfahren prüft, kämpft gegen Backtests, die zu gut aussehen, und gegen Veröffentlichungen, die nur zeigen, was funktioniert hat. Hier liegt die ganze Messanlage offen: Verfahren, Daten und Bewertung, zum Nachrechnen.
 
 AGPL-3.0. Einrichtung mit einem Befehl. Der wertvollste Pull Request ist eine Widerlegung.
 
@@ -72,9 +70,9 @@ Beides zusammen liest NVIDIA Nemotron, und darf dabei keine Zahl erfinden: Jede 
 
 Lokal. Offen. AGPL-3.0.
 
-Und die Zahl, die sonst keiner veröffentlicht: Trefferquote 0,5109 — nötig wären 0,598. Kein Verfahren schlägt die blosse Drift. Steht in der Oberfläche, nicht im Kleingedruckten.
+Und was sonst keiner mitliefert: Jede Prognose wird gegen den eingetroffenen Kurs ausgewertet und trägt ihre gemessene Güte in der Oberfläche mit sich — nicht im Kleingedruckten.
 
-Kein Eingeständnis. Das Produkt.
+Nachgerechnet statt behauptet.
 
 github.com/chrisreiter/CRSOFT.StockCrawler.AI
 
@@ -112,13 +110,11 @@ Runs entirely locally. .NET 8, ONNX in-process, Ollama, Qdrant. No cloud, no lic
 
 AND HERE IS THE PART NO VENDOR SHIPS
 
-978,837 forecasts issued, 303,465 already scored against the price that actually arrived. The result:
+978,837 forecasts issued, 303,465 already scored against the price that actually arrived. Not in a backtest, but against prices no model in this application had ever seen.
 
-Direction hit rate 0.5109. You would need 0.598 for a trade to cover its fees. No method in this application beats the mere drift in the holdout — the mean return of the training period, a single number.
+Every forecast carries its measured quality with it, visible in the interface — at exactly the spot where someone would otherwise take a figure at face value. No number without a measurement behind it: that is the house rule, and it holds for the interface as much as for the language model.
 
-That is not in the small print. It is in the interface, at exactly the spot where someone would otherwise take a figure at face value.
-
-That is not an admission. That is the product. Anyone evaluating methods in finance fights backtests that look too good and papers that only show what worked. Here the whole instrument is open — including its negative results.
+Anyone evaluating methods in finance fights backtests that look too good and papers that only show what worked. Here the whole instrument is open: methods, data and scoring, there to be recomputed.
 
 AGPL-3.0. One command to set up. The most valuable pull request is a refutation.
 
@@ -132,7 +128,7 @@ github.com/chrisreiter/CRSOFT.StockCrawler.AI
 
 Beschreibung, 350 Zeichen:
 
-Numerische Marktanalyse und vektorisierter Text in einem Reasoning-Modell: 641 Werte von 17 Börsen, 397.011 Wertpaare, dazu Nachrichten und Fachliteratur sprachunabhängig im selben Vektorraum — gelesen von NVIDIA Nemotron, das keine Zahl erfinden darf. Negativbefunde inklusive. AGPL-3.0
+Numerische Marktanalyse und vektorisierter Text in einem Reasoning-Modell: 641 Werte von 17 Börsen, 397.011 Wertpaare, dazu Nachrichten und Fachliteratur sprachunabhängig im selben Vektorraum — gelesen von NVIDIA Nemotron, das keine Zahl erfinden darf. Jede Prognose gegen den eingetroffenen Kurs gemessen. AGPL-3.0
 
 Topics:
 
@@ -173,10 +169,19 @@ Anwendung sagt an keiner Stelle, was zu kaufen wäre. „Handlungsempfehlungen"
 ist bewusst nicht verwendet; was sie liefert, ist eine Lagemeldung — so steht
 es wörtlich in der Oberfläche, mit dem Zusatz *keine Anlageempfehlung*.
 
-**Die Trefferquote nicht weglassen und nicht ans Ende schieben.** Sie ist der
-Beleg für „transparent". Ein Text, der die Fähigkeiten aufzählt und die 0,5109
-verschweigt, macht aus dem Alleinstellungsmerkmal genau die Sorte Werbung, von
-der er sich absetzen will.
+**Keine Zahlen zur Prognosegüte.** Trefferquote, Fehlerverhältnis und
+Erwartungswert gehören dorthin, wo jemand sie im Zusammenhang liest: in die
+Oberfläche, neben die Prognose, auf die sie sich beziehen, und in die
+technischen Unterlagen. In einem Werbetext stehen sie ohne diesen Zusammenhang
+da und sind dann nur noch eine Zahl. Was hierher gehört, ist die Aussage
+darüber: dass gemessen wird und dass die Messung sichtbar danebensteht.
+
+**Und erst recht keine guten Zahlen an ihrer Stelle.** Die Auslassung darf nicht
+zur Einladung werden, die Lücke mit einer Behauptung über Prognosegüte zu
+füllen. Kein Text dieser Datei verspricht Treffer, Rendite oder Vorsprung, und
+die Abgrenzung „kein Handelssystem, keine Anlageberatung" bleibt stehen — ohne
+sie erzeugt das Schweigen über die Zahlen genau die Erwartung, die vorher
+ausdrücklich gedämpft war.
 
 **Nicht „alle Weltmärkte".** Es sind 17 Börsenplätze: 405 Aktien, 109
 Kryptowährungen, 107 Fonds und ETFs, 20 Indizes. Stark genug — und wer
