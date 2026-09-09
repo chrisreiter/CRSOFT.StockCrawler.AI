@@ -1,108 +1,164 @@
 # CRSOFT.StockCrawler.AI
 
-**Ein offenes Labor für Marktanalyse und Prognose — samt seiner
-Negativbefunde.**
+**An open laboratory for market analysis and forecasting — published together
+with its negative results.**
 
-Es sammelt Kurse, Nachrichten und Fachliteratur in *ein* Datenmodell, untersucht
-die Wechselwirkungen darin, erzeugt daraus selbstlernende Prognosen — und misst
-schonungslos nach, was davon trägt.
+It collects prices, news and specialist literature into *one* data model,
+studies the interactions inside it, produces self-learning forecasts — and then
+measures, without flattery, how much of that actually carries.
 
-Der letzte Halbsatz ist der Unterschied. Alles hier ist gegen einen Sperrbereich
-geprüft, und wo ein Verfahren nichts leistet, steht das in der Oberfläche.
+That last clause is the difference. Everything here is tested against a
+holdout, and where a method achieves nothing, the interface says so.
 
 ---
 
-## Die Zahlen
+## The numbers
 
 | | |
 | ---: | --- |
-| **641** | verfolgte Werte — Aktien, ETFs, Krypto, Indizes, Devisen |
-| **3.941.331** | Bars, Tages- und Stundenauflösung, bis 2001 zurück |
-| **978.837** | Live-Prognosen über sieben Horizonte |
-| **303.465** | davon gegen den eingetroffenen Kurs ausgewertet |
-| **397.011** | ausgewertete Wertpaare |
-| **42.219** | Abschnitte Fachliteratur, jeder mit Fundstelle |
-| **11.644** | Nachrichtenartikel aus 35 Quellen weltweit |
+| **641** | tracked instruments — equities, ETFs, crypto, indices, FX |
+| **3,941,331** | bars, daily and hourly, back to 2001 |
+| **978,837** | live forecasts across seven horizons |
+| **303,465** | of them already scored against the price that arrived |
+| **397,011** | evaluated instrument pairs |
+| **42,219** | sections of specialist literature, each with its source location |
+| **11,644** | news articles from 35 sources worldwide |
 
-Und die Zahl, die sonst niemand veröffentlicht:
+And the number nobody else publishes:
 
-> **Die Richtungstrefferquote liegt bei 0,5109.** Nötig wären **0,598**, damit
-> ein Geschäft die Gebühren deckt. Kein Verfahren dieser Anwendung schlägt im
-> Sperrbereich die blosse Drift — die mittlere Rendite des Trainingszeitraums,
-> eine einzige Zahl.
+> **The direction hit rate is 0.5109.** It would need to be **0.598** for a
+> trade to cover its fees. **No method in this application beats the mere
+> drift** in the holdout — the mean return of the training period, a single
+> number.
 
-Das steht nicht im Kleingedruckten, sondern in der Oberfläche, an genau der
-Stelle, an der jemand sonst eine Zahl für bare Münze nähme.
+That does not sit in the small print. It sits in the interface, at exactly the
+spot where someone would otherwise take a figure at face value.
 
-**Das ist kein Eingeständnis. Das ist das Produkt.** Wer Verfahren im
-Finanzbereich prüft, kämpft gegen Backtests, die zu gut aussehen, und gegen
-Veröffentlichungen, die nur zeigen, was funktioniert hat. Hier liegt beides
-offen.
-
----
-
-## Was es kann
-
-- **Kurse** aus mehreren Anbietern in einem einheitlichen Modell, weltweit,
-  mit sauberer Behandlung unterschiedlicher Handelskalender und Zeitzonen
-- **Nachrichten sprachunabhängig** — das Einbettungsmodell ist mehrsprachig,
-  eine deutsche Frage findet eine japanische Meldung, ohne Übersetzung
-- **Fachliteratur** in überlappenden Abschnitten mit Quelle, Seite und Anker
-- **Acht Säulen**, gewichtet mit *Regler × gemessenem Verdienst* — eine Säule
-  ohne Nachweis bewegt nichts, auch bei Regler auf hundert
-- **Ein Reasoning-Modell, das keine Zahl erfinden darf**: jede Zahl stammt aus
-  einem Werkzeugaufruf, und die Aufrufe stehen unter jeder Antwort
-- **Virtuelles Depot** mit vier Autopilot-Strategien, darunter eine
-  Gegenkontrolle, die das Signal absichtlich umdreht
-- **Oberfläche in Deutsch und Englisch** — eine weitere Sprache ist eine
-  XML-Datei und sonst nichts
-
-Vollständig: [UEBERBLICK.md](UEBERBLICK.md)
+**This is not an admission. It is the product.** Anyone evaluating methods in
+finance fights backtests that look too good and papers that only show what
+worked. Here the whole instrument is open, including the parts that failed.
 
 ---
 
-## Loslegen
+## What it does
+
+- **Prices** from several providers in one unified model, worldwide, with
+  honest handling of differing trading calendars and time zones
+- **News, language-independently** — the embedding model is multilingual, so a
+  German question finds a Japanese report with nothing translated anywhere
+- **Specialist literature** in overlapping sections, every hit carrying source,
+  page and a text anchor
+- **Eight pillars**, weighted by *slider × measured merit* — a pillar without
+  evidence moves nothing, even at a slider of one hundred
+- **A reasoning model that may not invent a number**: every figure comes from a
+  tool call, and the calls are printed beneath every answer
+- **A virtual portfolio** with four autopilot strategies, including a
+  counter-control that deliberately inverts the signal
+- **Interface in German and English**, 2,272 strings each — a further language
+  is one XML file and nothing else
+
+Full detail: [UEBERBLICK.md](UEBERBLICK.md) *(German)*
+
+---
+
+## Getting started
 
 ```
 claude "/startup"
 ```
 
-Claude Code arbeitet [`startUp.md`](startUp.md) ab: Voraussetzungen prüfen,
-.NET, SQL Server, Schema, Ollama mit `bge-m3`, Qdrant, erster Verwalter,
-Kursdaten. Ohne Claude Code steht jeder Schritt auch als Befehl da.
+Claude Code works through [`startUp.md`](startUp.md): check prerequisites,
+.NET, SQL Server, schema, Ollama with `bge-m3`, Qdrant, first administrator,
+price data. Without Claude Code, every step is also written out as a command.
 
-Läuft komplett lokal — keine Cloud nötig.
-
----
-
-## Was es **nicht** ist
-
-**Kein Handelssystem und keine Anlageberatung.** Die Anwendung sagt an keiner
-Stelle, was zu kaufen wäre. Sie beantwortet die Frage davor: Was lässt sich
-überhaupt messen, und trägt es die Kosten?
+Runs entirely locally — no cloud required. Prerequisites: .NET 8 SDK, SQL
+Server, and for the knowledge and semantics pillars Ollama plus Qdrant.
 
 ---
 
-## Mitarbeiten
+## A note on language
 
-**Der wertvollste Pull Request ist eine Widerlegung.** Wenn eine der gemessenen
-Aussagen nicht hält, ist das der beste Beitrag, den dieses Projekt bekommen
-kann.
+**The codebase is German** — comments, documentation, domain identifiers and
+several database columns. That is deliberate, and it is not going to change:
+translating it was measured at about 143,500 words, and it would still leave
+604 German identifiers and 264 German database columns behind. A half-translated
+codebase is worse than an honest one.
 
-[CONTRIBUTING.md](CONTRIBUTING.md) — Hausstil und Rechteeinräumung. Bitte vorher
-lesen: Der Projektstil ist ungewöhnlich (alles auf Deutsch, keine Zahl ohne
-Messung) und ausdrücklich gewollt.
+**Two bridges make that workable:**
+
+1. [`docs/GLOSSARY.md`](CRS.StockCrawler/docs/GLOSSARY.md) — the sixty terms
+   that carry almost everything. `Sperrbereich` = holdout, `Trefferquote` = hit
+   rate, `Erwartungswert` = expected value, `Nulllinie` = break-even.
+2. **Claude Code reads German fluently and will talk to you in English.** Open
+   any file and ask *“what does this do and why?”* — you get an English answer
+   about German code, including the reasoning in the comments, which is where
+   most of the value of this repository sits. The comments here are unusual:
+   nearly every long one is the note on a failure that led to the current
+   solution.
+
+The user interface itself is fully localised and switches with one click.
 
 ---
 
-## Lizenz
+## What it is **not**
 
-**AGPL-3.0.** Benutzen, ändern, weitergeben und betreiben ist frei, auch
-geschäftlich — wer die Software weitergibt **oder als Netzdienst anbietet**,
-muss den Quelltext seiner Fassung offenlegen (§ 13 schliesst die Lücke, die die
-gewöhnliche GPL bei Webanwendungen lässt).
+**Not a trading system and not investment advice.** The application never says
+what to buy. It answers the question before that one: what can be measured at
+all, and does it cover its costs?
 
-Wer eine Fassung **ohne** diese Offenlegungspflicht braucht, wendet sich wegen
-einer kommerziellen Lizenz an CRSOFT: [LICENSING.md](LICENSING.md).
+---
+
+## Contributing
+
+**The most valuable pull request is a refutation.** If one of the measured
+statements does not hold, that is the best contribution this project can
+receive — and it is meant seriously, not as a figure of speech.
+
+Also very welcome: tests for `Ingest.Core/Analysis` (the mathematics is
+deliberately dependency-free and easy to test, but barely covered), further
+language files, and additional data providers.
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) first. The house style is
+unusual and deliberate: everything in German, comments explain *why* rather
+than *what*, and **no number without a measurement behind it.**
+
+Contributions require a sign-off (`git commit -s`); a check enforces it. Why,
+and what it means for your rights, is in [LICENSING.md](LICENSING.md).
+
+---
+
+## Licence
+
+**AGPL-3.0.** Use, modify, redistribute and operate it freely, including
+commercially — but anyone who distributes it **or offers it as a network
+service** must publish the source of their version. (§ 13 closes the gap plain
+GPL leaves open for web applications.)
+
+If you need a version **without** that obligation — for a closed product —
+contact CRSOFT about a commercial licence: [LICENSING.md](LICENSING.md).
 
 © 2026 CRSOFT — Chris Reiter
+
+---
+---
+
+# Auf Deutsch
+
+Ein offenes Labor für Marktanalyse und Prognose — samt seiner Negativbefunde.
+Es sammelt Kurse, Nachrichten und Fachliteratur in *ein* Datenmodell, untersucht
+die Wechselwirkungen darin, erzeugt daraus selbstlernende Prognosen und misst
+schonungslos nach, was davon trägt.
+
+Der zentrale Befund steht in der Oberfläche und nicht im Kleingedruckten: Die
+Richtungstrefferquote liegt bei **0,5109**, nötig wären **0,598**. Kein
+Verfahren dieser Anwendung schlägt im Sperrbereich die blosse Drift.
+
+| | |
+| --- | --- |
+| Vollständige Beschreibung | [UEBERBLICK.md](UEBERBLICK.md) |
+| Einrichtung mit einem Befehl | [startUp.md](startUp.md) · `/startup` |
+| Mitarbeiten und Hausstil | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Lizenz und kommerzielle Ausnahme | [LICENSING.md](LICENSING.md) |
+| Die rund hundert Regeln aus Fehlschlägen | `CRS.StockCrawler/CLAUDE.md` |
+
+**Der wertvollste Pull Request ist eine Widerlegung.**
