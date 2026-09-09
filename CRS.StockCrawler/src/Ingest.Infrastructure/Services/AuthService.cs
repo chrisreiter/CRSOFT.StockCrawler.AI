@@ -25,6 +25,26 @@ public interface IAuthService
     Task<(bool Ok, string? Fehler)> EinrichtenAsync(
         string token, string login, string kennwort, CancellationToken ct = default);
 
+    /// <summary>
+    /// Legt in der ENTWICKLUNG einen Zugang <c>admin</c>/<c>admin</c> an, falls
+    /// noch kein Benutzer existiert. Liefert <c>true</c>, wenn er entstanden ist.
+    ///
+    /// <para><b>Warum es das gibt.</b> Der reguläre Weg über das
+    /// Einrichtungswort ist auf einem erreichbaren Server richtig und für
+    /// jemanden, der das Projekt zum ersten Mal auscheckt, eine Hürde: Er
+    /// müsste ein Wort aus dem Startprotokoll fischen, bevor er überhaupt
+    /// etwas sieht.</para>
+    ///
+    /// <para><b>Warum es trotzdem kein Loch ist.</b> Der Aufrufer ruft es nur
+    /// unter <c>IsDevelopment()</c>. Die Auslieferung setzt
+    /// <c>ASPNETCORE_ENVIRONMENT=Production</c> fest (siehe
+    /// <c>2-install-target.ps1</c>), dort entsteht dieser Zugang also nie.
+    /// Und er entsteht auch in der Entwicklung nur, solange die
+    /// Benutzertabelle leer ist — wer einen echten Verwalter angelegt hat,
+    /// bekommt ihn nicht nachträglich untergeschoben.</para>
+    /// </summary>
+    Task<bool> EntwicklerzugangAsync(CancellationToken ct = default);
+
     /// <summary>Prüft Anmeldedaten und bindet die Sitzung an den Benutzer.</summary>
     Task<(Angemeldet? Benutzer, string? Fehler)> AnmeldenAsync(
         Guid sitzung, string login, string kennwort, CancellationToken ct = default);
@@ -154,6 +174,25 @@ public sealed class AuthService : IAuthService
         }
 
         return (ok, fehler);
+    }
+
+    public async Task<bool> EntwicklerzugangAsync(CancellationToken ct = default)
+    {
+        if (await IstEingerichtetAsync(ct)) return false;
+
+        var (ok, fehler) = await AnlegenAsync(
+            "admin", "admin", "admin", "Entwicklerzugang", regelnPruefen: false, ct);
+
+        if (!ok)
+        {
+            _log.LogError("Entwicklerzugang nicht angelegt: {Fehler}", fehler);
+            return false;
+        }
+
+        /*  Das Einrichtungswort verfaellt mit -- sonst stuenden zwei Wege in
+            die frische Anlage offen, und der zweite waere der unbemerkte.    */
+        Einrichtungswort = null;
+        return true;
     }
 
     // -------------------------------------------------------------- Anmelden
@@ -299,9 +338,14 @@ public sealed class AuthService : IAuthService
         return rows.ToList();
     }
 
-    public async Task<(bool Ok, string? Fehler)> AnlegenAsync(
+    public Task<(bool Ok, string? Fehler)> AnlegenAsync(
         string login, string kennwort, string rolle, string? anzeigename,
         CancellationToken ct = default)
+        => AnlegenAsync(login, kennwort, rolle, anzeigename, true, ct);
+
+    private async Task<(bool Ok, string? Fehler)> AnlegenAsync(
+        string login, string kennwort, string rolle, string? anzeigename,
+        bool regelnPruefen, CancellationToken ct)
     {
         login = (login ?? "").Trim();
 
@@ -311,7 +355,12 @@ public sealed class AuthService : IAuthService
         if (rolle is not ("admin" or "user"))
             return (false, "Rolle muss admin oder user sein.");
 
-        if (Kennwort.Beanstandung(kennwort) is { } b) return (false, b);
+        /*  Die Kennwortregeln gelten fuer jeden Weg, der von aussen erreichbar
+            ist. Nur der Entwicklerzugang setzt sie aus -- „admin" verstiesse
+            gegen die Mindestlaenge von zwoelf Zeichen UND gegen die Liste
+            verbreiteter Zeichenfolgen, und genau das ist dort beabsichtigt.  */
+        if (regelnPruefen && Kennwort.Beanstandung(kennwort) is { } b)
+            return (false, b);
 
         await using var conn = await _factory.OpenAsync(ct);
 

@@ -330,20 +330,52 @@ antwortet mit `200`.
 
 ## 8 · Der erste Verwalter
 
-Die frische Anwendung hat **keinen Benutzer**. „Wer sich zuerst meldet, wird
-Verwalter“ wäre auf einem erreichbaren Server genau das Loch, das die Anmeldung
-schliessen soll. Stattdessen schreibt der Start ein **Einrichtungswort ins
-Protokoll** — wer es lesen kann, hat ohnehin Zugriff auf den Rechner.
+### In der Entwicklung: admin / admin
 
-> **Claude: lies das Einrichtungswort aus der Startausgabe** (Zeile
-> `EINRICHTUNGSWORT:`) und lege damit den ersten Verwalter an. Das Wort gilt nur
-> für diesen Programmlauf.
+Läuft die Anwendung mit `ASPNETCORE_ENVIRONMENT=Development` — das setzt
+`dotnet run` über `launchSettings.json` von selbst —, legt sie beim Start einen
+Verwalter an, **solange die Benutzertabelle leer ist**:
+
+> **admin / admin**
+
+Das Startprotokoll sagt es ausdrücklich:
+
+```
+[WRN] ENTWICKLERZUGANG angelegt: admin / admin — gilt nur, weil
+      ASPNETCORE_ENVIRONMENT=Development steht. Vor dem ersten erreichbaren
+      Betrieb ein eigenes Kennwort setzen (System → Benutzer) oder den
+      Benutzer löschen.
+```
+
+Dieses Kennwort verstösst gegen die eigenen Regeln der Anwendung — mindestens
+zwölf Zeichen, keine verbreitete Zeichenfolge — und wird für genau diesen einen
+Fall ausgesetzt. **Dieses Repository ist öffentlich; das Kennwort steht damit
+für jeden lesbar da.** Es taugt für einen Rechner unter Ihrem Schreibtisch und
+für nichts sonst.
+
+### In der Auslieferung: das Einrichtungswort
+
+Auf einem erreichbaren Server greift der Zweig **nicht** — `2-install-target.ps1`
+setzt `ASPNETCORE_ENVIRONMENT=Production`. Dort schreibt der Start ein
+einmaliges Wort ins Protokoll:
+
+```
+[WRN] Noch kein Benutzer angelegt. EINRICHTUNGSWORT: <wort> — damit über
+      POST /api/auth/einrichten den ersten Verwalter anlegen.
+```
+
+> **Claude: lies das Wort aus der Startausgabe** und lege damit den ersten
+> Verwalter an. Es gilt nur für diesen Programmlauf.
 
 ```bash
-curl -X POST "http://localhost:5011/api/auth/einrichten" \
-     -H "Content-Type: application/json" \
-     -d '{"token":"<Einrichtungswort>","login":"<anmeldename>","kennwort":"<mind. 12 Zeichen>"}'
+curl -X POST "http://localhost:5011/api/auth/einrichten"      -H "Content-Type: application/json"      -d '{"token":"<Einrichtungswort>","login":"<anmeldename>","kennwort":"<mind. 12 Zeichen>"}'
 ```
+
+**Warum zwei Wege.** „Wer sich zuerst meldet, wird Verwalter" ist auf einem
+erreichbaren Server genau das Loch, das die Anmeldung schliessen soll. Wer das
+Protokoll lesen kann, hat ohnehin Zugriff auf den Rechner — deshalb das Wort.
+Auf dem Entwicklungsrechner ist dieselbe Hürde nur lästig: Man müsste ein Wort
+aus dem Protokoll fischen, bevor man überhaupt etwas sieht.
 
 ---
 

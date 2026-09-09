@@ -74,6 +74,25 @@ price data. Without Claude Code, every step is also written out as a command.
 Runs entirely locally — no cloud required. Prerequisites: .NET 8 SDK, SQL
 Server, and for the knowledge and semantics pillars Ollama plus Qdrant.
 
+### Signing in the first time
+
+On a **development** run (`dotnet run`, which sets
+`ASPNETCORE_ENVIRONMENT=Development`) the application creates an administrator
+for you if the user table is still empty:
+
+> **admin / admin**
+
+The startup log says so, loudly. Change it under *System → Benutzer* before the
+instance is reachable by anyone else, or delete the user — this repository is
+public, so that password is public too.
+
+**On a deployed instance this does not happen.** `2-install-target.ps1` sets
+`ASPNETCORE_ENVIRONMENT=Production`, and there the original mechanism applies:
+the start writes a one-time **setup word** into the log, and whoever can read
+the log creates the first administrator with it. That is deliberate — “whoever
+signs in first becomes administrator” is exactly the hole the sign-in is meant
+to close.
+
 ---
 
 ## A note on language
