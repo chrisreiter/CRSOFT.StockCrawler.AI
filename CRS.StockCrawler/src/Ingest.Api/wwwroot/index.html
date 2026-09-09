@@ -1,0 +1,2408 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CRSOFT.StockCrawler</title>
+  <link rel="stylesheet" href="/vendor/uplot/uPlot.min.css">
+  <link rel="stylesheet" href="/app.css?v=@BUILD@">
+</head>
+<body>
+
+<!-- ================================================ Anmeldung -->
+<!--
+  Hier stand ein Anmeldeschleier: Die vollständige Anwendung wurde geladen und
+  mit einem halbdurchsichtigen Kasten überdeckt. Wer den im Browser wegräumte,
+  sah die Anwendung -- als Zugangskontrolle war das Kosmetik.
+
+  Ersetzt durch eine serverseitige Sperre: Ohne gültige Sitzung liefert
+  `Anmeldepflicht` nur `anmeldung.html` aus, eine eigenständige Seite ohne
+  jedes Bauteil der Anwendung. Was nie ausgeliefert wird, kann niemand
+  freilegen. Läuft eine Sitzung während der Benutzung ab, lädt die Seite neu
+  und der Server zeigt die Anmeldung.
+-->
+
+
+<div id="nurlesen-band" class="nurlesen-band" hidden>
+  Sie sind als <b>Nutzer</b> angemeldet und sehen den vollständigen Inhalt
+  <b>lesend</b>. Läufe anstoßen, Daten holen und Einstellungen ändern ist
+  Verwaltern vorbehalten.
+</div>
+
+
+<header class="topbar">
+  <div class="brand"><span class="brand-org">CRSOFT.</span>StockCrawler</div>
+  <!--  Die Sprachwahl.
+
+        data-loc-aus: Die Liste nennt jede Sprache in IHRER Sprache -- „Italiano",
+        nicht „Italienisch". Wer das übersätze, machte die Liste genau für den
+        unbrauchbar, der sie braucht.                                          -->
+  <div class="sprachwahl" id="sprachwahl" data-loc-aus hidden>
+    <select id="sprache" title="Sprache der Oberfläche"></select>
+  </div>
+
+  <div class="wer" id="wer" hidden>
+    <span id="wer-name"></span>
+    <button id="wer-abmelden" title="Abmelden">abmelden</button>
+  </div>
+
+  <nav class="tabs" id="tabs">
+    <button data-view="charts" class="active">Kurse</button>
+    <button data-view="select">Auswahl</button>
+    <button data-view="analysis">Analyse</button>
+    <button data-view="forecast">Prognose</button>
+    <button data-view="langfrist">Langfrist</button>
+    <button data-view="herde">Bot-Herde</button>
+    <button data-view="daytrading">Day Trading</button>
+    <button data-view="swap">Tausch</button>
+    <button data-view="neuzugang">Neuzugänge</button>
+    <button data-view="pillars">Säulen</button>
+    <button data-view="system">System</button>
+  </nav>
+  <div class="viewswitch" id="view-switch">
+    <button data-cview="line" class="active" title="Kursverlauf, mehrere Werte überlagert">Linie</button>
+    <button data-cview="invest" title="Virtuelles Depot: was aus einem heute eingesetzten Betrag würde">Investings</button>
+    <button data-cview="candle" title="Eröffnung, Hoch, Tief, Schluss je Bar">Kerzen</button>
+    <button data-cview="volume" title="Gehandeltes Volumen — Grundlage für Kapitalfluss">Volumen</button>
+    <button data-cview="matrix" title="Korrelation aller gewählten Werte untereinander">Korrelation</button>
+    <button data-cview="flow" title="Kapitalfluss: wohin das Geld wandert">Fluss</button>
+  </div>
+  <div class="autofind" id="autofind">
+    <select id="autofind-mode" title="Wonach im gesamten Bestand gesucht wird">
+      <option value="negative">gegenläufigste Paare</option>
+      <option value="crossings">meiste Kreuzungen</option>
+      <option value="lead">stärkster Vorlauf</option>
+      <option value="positive">gleichlaufendste Paare</option>
+    </select>
+    <button id="autofind-go" title="Durchsucht alle verfolgten Werte, unabhängig von der aktuellen Auswahl">Auto-Suche</button>
+  </div>
+  <div class="status" id="status"></div>
+</header>
+
+<!-- Was gerade laeuft, seit wann, und was als naechstes kommt.
+
+     NACH der Kopfzeile, nicht davor: Als erstes Element im Dokument schob die
+     Leiste die Kopfzeile um ihre eigene Hoehe nach unten (gemessen: Kopfzeile bei
+     y=25 statt 0), und ihr `top` klebte sie dann mitten in die Kopfzeile hinein --
+     sichtbar, mit Text, und vollstaendig verdeckt.
+
+     Direkt unter der Kopfzeile und auf jeder Ansicht sichtbar: Die Frage „arbeitet
+     das Ding gerade?" stellt sich ueberall, nicht nur auf der Systemseite. Ohne die
+     Leiste musste man dorthin wechseln und nachsehen -- und wer das nicht weiss,
+     haelt eine Anwendung, die gerade zehn Minuten Kurse holt, fuer eingefroren. -->
+<div id="taktleiste" class="taktleiste" hidden>
+  <span id="takt-punkt" class="takt-punkt"></span>
+  <span id="takt-was"></span>
+  <span id="takt-dauer" class="dim"></span>
+  <span class="takt-trenner">·</span>
+  <span id="takt-naechster" class="dim"></span>
+</div>
+
+
+<!-- ======================================================== Kurse -->
+<main id="view-charts" class="view active">
+  <aside class="sidebar">
+    <div class="field">
+      <label for="chart-search">Suche</label>
+      <input id="chart-search" type="search" placeholder="Symbol oder Name">
+    </div>
+    <div class="field">
+      <label for="chart-class">Filter</label>
+      <select id="chart-class">
+        <option value="">showAll — alles anzeigen</option>
+        <option value="Stock">showStock — nur Aktien</option>
+        <option value="Crypto">showKryptos — nur Krypto</option>
+        <option value="Etf">showFunds — nur Fonds / ETF</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="chart-sector">Geschäftsbereich</label>
+      <select id="chart-sector">
+        <option value="">alle Branchen</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="chart-country">Land / Börse</label>
+      <select id="chart-country">
+        <option value="">alle Länder</option>
+      </select>
+    </div>
+    <div class="picker-head">
+      <span>Verfügbar</span>
+      <button id="chart-clear" class="link">Auswahl leeren</button>
+    </div>
+    <ul id="chart-available" class="picker"></ul>
+    <div class="picker-head"><span>Ausgewählt (<span id="sel-count">0</span>)</span></div>
+    <ul id="chart-selected" class="picker selected"></ul>
+  </aside>
+
+  <section class="content">
+    <div class="toolbar">
+      <div class="group" id="grp-layout">
+        <label>Anordnung</label>
+        <div class="segmented" id="layout-mode">
+          <button data-mode="overlay" class="active">übereinander</button>
+          <button data-mode="grid">nebeneinander</button>
+        </div>
+      </div>
+      <div class="group">
+        <label>Auflösung</label>
+        <div class="segmented" id="interval-mode">
+          <button data-interval="1d" class="active">Tag</button>
+          <button data-interval="1h">Stunde</button>
+        </div>
+      </div>
+      <div class="group" id="grp-range">
+        <label>Zeitraum</label>
+        <div class="daterange">
+          <input id="from-date" type="date" title="Von (leer = Monatsangabe verwenden)">
+          <span class="dash">–</span>
+          <input id="to-date" type="date" title="Bis (leer = heute)">
+        </div>
+      </div>
+      <div class="group" id="grp-presets">
+        <label>Schnellwahl</label>
+        <div class="segmented" id="range-presets">
+          <button data-months="1">1M</button>
+          <button data-months="6">6M</button>
+          <button data-months="12" class="active">1J</button>
+          <button data-months="60">5J</button>
+          <button data-months="0">Max</button>
+        </div>
+      </div>
+      <input id="months" type="hidden" value="12">
+      <div class="group" id="grp-forecast">
+        <label class="check">
+          <input id="show-forecast" type="checkbox">
+          Prognose einblenden
+        </label>
+        <label class="check" title="Mischt die Prognose nach Gewicht mal gemessenem Verdienst statt allein aus dem Ensemble. Der Verdienst kommt aus dem Sperrbereich, nicht aus der Einstellung.">
+          <input id="apply-weights" type="checkbox">
+          Säulengewichte anwenden
+        </label>
+        <label class="check">
+          <input id="show-forecast-past" type="checkbox">
+          Rückschau: was wurde damals prognostiziert
+        </label>
+        <label class="check">
+          <input id="show-anchor" type="checkbox">
+          Bezugspunkt beim Zeigen einblenden
+        </label>
+        <span class="hint">gestrichelt und heller — gelerntes Modell, keine Messung</span>
+      </div>
+      <div class="group" id="grp-flow-scope">
+        <label>Betrachtungsraum</label>
+        <div class="segmented" id="flow-scope">
+          <button data-scope="all" class="active">alle verfolgten</button>
+          <button data-scope="sel">nur Auswahl</button>
+        </div>
+      </div>
+      <div class="group" id="grp-asof">
+        <label for="asof-dates">Stichtage</label>
+        <div class="daterange">
+          <input id="asof-input" type="date" title="Datum wählen und hinzufügen">
+          <button id="asof-add" title="Stichtag hinzufügen">+</button>
+        </div>
+        <div id="asof-list" class="asof-list"></div>
+        <span class="hint">zeigt den Prognosepfad, den das Modell an diesem Tag zeichnete</span>
+      </div>
+      <div class="group" id="grp-fc-horizon">
+        <label>Horizonte (mehrfach)</label>
+        <div class="segmented multi" id="fc-horizons">
+          <button data-h="24" class="active" title="1 Tag voraus">1T</button>
+          <button data-h="168" title="1 Woche voraus">1W</button>
+          <button data-h="336" title="2 Wochen voraus">2W</button>
+          <button data-h="720" title="1 Monat voraus">1M</button>
+          <button data-h="2160" title="3 Monate voraus">3M</button>
+          <button data-h="4380" title="6 Monate voraus">6M</button>
+          <button data-h="8760" title="1 Jahr voraus">1J</button>
+        </div>
+      </div>
+      <div class="group" id="grp-rebase">
+        <label class="check">
+          <input id="rebase" type="checkbox" checked>
+          auf 100 normalisiert
+        </label>
+        <span class="hint">macht Kurse unterschiedlicher Größenordnung vergleichbar</span>
+      </div>
+      <div class="group" id="grp-logscale">
+        <label class="check">
+          <input id="logscale" type="checkbox">
+          logarithmische Achse
+        </label>
+        <span class="hint">
+          nötig, sobald sich die Verläufe stark auseinanderentwickeln: Auf einer
+          linearen Achse von 0 bis 2.400 sind 67 und 23 nicht zu unterscheiden —
+          beide kleben am Nullpunkt. Logarithmisch belegt eine Verzwanzigfachung
+          genauso viel Platz wie eine Zwanzigstelung.
+        </span>
+      </div>
+      <button id="chart-reload" class="primary">Anzeigen</button>
+    </div>
+
+    <p class="hint chart-help" id="chart-help">
+      Ziehen verschiebt · Mausrad zoomt · Umschalt+Rad verschiebt ·
+      Doppelklick setzt zurück · Pfeiltasten blättern
+    </p>
+    <div id="legend" class="legend"></div>
+    <div id="charts-skipped" class="notice" style="display:none"></div>
+    <div id="charts" class="charts"></div>
+    <div id="matrix" class="matrix-wrap"></div>
+    <div id="flow" class="flow-wrap"></div>
+    <div id="invest" class="invest-wrap"></div>
+
+<!-- Journal eines Depots.
+
+     Ein natives <dialog>: Es bringt Esc, den Hintergrundklick und die
+     Fokusfalle von sich aus mit. Ein selbstgebautes Overlay muesste das alles
+     nachbilden, und die Tastaturbedienung waere das Erste, was dabei
+     vergessen wird. -->
+<dialog id="journal-dialog" class="journal-dialog">
+  <div class="journal-kopf">
+    <h3 id="journal-titel">Journal</h3>
+    <button id="journal-zu" title="Schliessen (Esc)">×</button>
+  </div>
+  <div id="journal-inhalt"></div>
+</dialog>
+    <div id="charts-empty" class="empty">Links Werte auswählen und auf <b>Anzeigen</b> klicken.</div>
+  </section>
+</main>
+
+<!-- ====================================================== Auswahl -->
+<main id="view-select" class="view">
+  <section class="content wide">
+    <div class="toolbar">
+      <div class="group">
+        <label for="sel-search">Suche</label>
+        <input id="sel-search" type="search" placeholder="Symbol oder Name">
+      </div>
+      <div class="group">
+        <label for="sel-class">Filter</label>
+        <select id="sel-class">
+          <option value="">showAll — alles anzeigen</option>
+          <option value="Stock">showStock — nur Aktien</option>
+          <option value="Crypto">showKryptos — nur Krypto</option>
+          <option value="Etf">showFunds — nur Fonds / ETF</option>
+        </select>
+      </div>
+      <div class="group">
+        <label for="sel-tracked">Status</label>
+        <select id="sel-tracked">
+          <option value="">alle</option>
+          <option value="true">nur getrackt</option>
+          <option value="false">nicht getrackt</option>
+        </select>
+      </div>
+      <button id="sel-reload">Aktualisieren</button>
+      <button id="universe-refresh" class="primary">Universum neu laden</button>
+    </div>
+    <p class="hint block">
+      Getrackte Werte werden regelmäßig abgerufen, analysiert und prognostiziert.
+      Die Liste stammt aus dem, was die Provider liefern — hier wird ausgewählt,
+      was das Backend tatsächlich verfolgt.
+    </p>
+    <table class="grid" id="sel-table">
+      <thead>
+        <tr>
+          <th>#</th><th>Symbol</th><th>Name</th><th>Klasse</th>
+          <th class="num">Marktkap.</th><th>Währung</th><th>Getrackt</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+
+<!-- ====================================================== Analyse -->
+<main id="view-analysis" class="view">
+  <section class="content wide">
+    <div class="toolbar">
+      <div class="group">
+        <label for="ana-asset">Wert</label>
+        <select id="ana-asset"></select>
+      </div>
+      <div class="group">
+        <label for="ana-interval">Auflösung</label>
+        <select id="ana-interval">
+          <option value="1d">Tag</option>
+          <option value="1h">Stunde</option>
+        </select>
+      </div>
+      <button id="ana-reload" class="primary">Laden</button>
+      <button id="ana-recompute">Analyse neu rechnen</button>
+    </div>
+
+    <div class="cols">
+      <div class="card">
+        <h3>Frühindikatoren</h3>
+        <p class="hint">
+          Werte, deren Bewegungen denen des gewählten Papiers vorauslaufen.
+          Vorlauf in Bars — bei Tagesauflösung also Handelstage.
+        </p>
+        <table class="grid" id="ana-leaders">
+          <thead><tr><th>Symbol</th><th>Name</th><th class="num">Vorlauf</th><th class="num">Korrelation</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h3>Korrelationen</h3>
+        <p class="hint">Gleichlauf der Tagesrenditen. 1 = im Gleichschritt, −1 = gegenläufig.</p>
+        <table class="grid" id="ana-corr">
+          <thead><tr><th>Symbol</th><th class="num">Korrelation</th><th class="num">bester Lag</th><th>Richtung</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Kreuzungen — Rangliste nach Paargewinn</h3>
+      <p class="hint">
+        Welches Paar seit dem Kippen am meisten eingebracht hätte: Rendite der oberen
+        Seite <b>minus</b> Rendite der unteren. Nur so ist die Zahl vom allgemeinen
+        Marktgang unabhängig — steigt alles um fünf Prozent, hat ein Paar nichts geleistet.
+      </p>
+
+      <p class="hint block">
+        <b>Der Paargewinn setzt ZWEI Positionen voraus.</b> Alles in dieser
+        Tabelle — Trefferquote, Ø Gewinn, Paargewinn — gilt für die
+        <b>Differenz</b>: obere Seite kaufen <i>und</i> untere Seite
+        leerverkaufen. Wer nur die Kaufseite kauft, bekommt deren eigene
+        Rendite samt dem ganzen Marktgang und <b>nicht</b> das, was hier
+        gemessen wurde.
+      </p>
+
+      <p class="hint block">
+        <b>Ohne Leerverkauf bleibt die Zeile brauchbar — als Umschichtung.</b>
+        „Halte ENA-USD statt FIL-USD" ist der Fall, für den die Seite
+        <a href="#" data-goto="swap">Tausch</a> gebaut ist; dort geben Sie Ihren
+        Bestand ein und bekommen dieselbe Rechnung auf Ihr Kapital bezogen.
+        „Kaufe ENA-USD" ist etwas anderes und hier nicht gemessen.
+      </p>
+
+      <p class="hint block">
+        <b>Wie Sie die Tabelle lesen.</b> Sortiert wird nach <i>Paargewinn</i> —
+        das ist Vergangenheit, und ein Paar steht oben, <i>weil</i> es schon
+        gelaufen ist. Die Spalte mit der Aussage über die Zukunft heißt
+        <b>Ø&nbsp;Gewinn</b>: der Durchschnitt über alle früheren Kreuzungen
+        desselben Paares nach Kosten. Daneben zählt <b>frühere</b> — acht ist
+        das Minimum, ab dreißig wird es belastbar. Eine schöne Trefferquote auf
+        zehn Fällen ist die Kombination, die am zuverlässigsten täuscht.
+      </p>
+
+      <div class="toolbar">
+        <div class="group">
+          <label for="kx-interval">Auflösung</label>
+          <select id="kx-interval">
+            <option value="1d">Tag</option>
+            <option value="1h">Stunde</option>
+          </select>
+        </div>
+        <div class="group">
+          <label for="kx-tage">Kreuzung höchstens vor</label>
+          <select id="kx-tage">
+            <option value="7">7 Tagen</option>
+            <option value="14">14 Tagen</option>
+            <option value="30" selected>30 Tagen</option>
+            <option value="90">90 Tagen</option>
+          </select>
+        </div>
+        <div class="group">
+          <label for="kx-halte">Haltedauer der Bewährung</label>
+          <select id="kx-halte">
+            <option value="5">5 Bars</option>
+            <option value="10">10 Bars</option>
+            <option value="20" selected>20 Bars</option>
+            <option value="60">60 Bars</option>
+          </select>
+        </div>
+        <div class="group">
+          <label for="kx-max">Je Wert höchstens</label>
+          <select id="kx-max">
+            <option value="1">1 Zeile</option>
+            <option value="2">2 Zeilen</option>
+            <option value="3" selected>3 Zeilen</option>
+            <option value="100">unbegrenzt</option>
+          </select>
+        </div>
+        <div class="group">
+          <label for="kx-wechsel">Nur Aktie ⇄ Krypto</label>
+          <select id="kx-wechsel">
+            <option value="false" selected>nein</option>
+            <option value="true">ja</option>
+          </select>
+        </div>
+        <div class="group">
+          <label for="kx-nurbew">Nur bewährte</label>
+          <select id="kx-nurbew">
+            <option value="false" selected>nein</option>
+            <option value="true">ja</option>
+          </select>
+        </div>
+        <button id="kx-load" class="primary">Laden</button>
+      </div>
+
+      <p class="hint" id="kx-hinweis"></p>
+
+      <table class="grid" id="kx-grid">
+        <thead>
+          <tr>
+            <th>Kaufen</th><th>Verkaufen</th>
+            <th>Kreuzung</th><th class="num">Tage</th>
+            <th class="num">Kaufseite</th><th class="num">Verkaufseite</th>
+            <th class="num">Paargewinn</th>
+            <th class="num">frühere</th><th class="num">Trefferquote</th><th class="num">Ø Gewinn</th>
+            <th>bewährt</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <p class="hint" id="kx-aus"></p>
+    </div>
+
+    <div class="card">
+      <h3>Kreuzungen — Einzelfunde</h3>
+      <p class="hint">
+        Zeitpunkte, an denen zwei normalisierte Kurven die Plätze getauscht haben —
+        die relative Stärke also gekippt ist.
+      </p>
+      <table class="grid" id="ana-cross">
+        <thead><tr><th>Zeitpunkt</th><th>A</th><th>B</th><th>Richtung</th><th class="num">Abstand vorher</th><th class="num">nachher</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<!-- ===================================================== Prognose -->
+<main id="view-forecast" class="view">
+  <section class="content wide">
+    <div class="toolbar">
+      <div class="group">
+        <label for="fc-asset">Wert</label>
+        <select id="fc-asset"></select>
+      </div>
+      <button id="fc-reload" class="primary">Laden</button>
+      <button id="fc-run">Prognose neu rechnen</button>
+      <button id="fc-score">Fällige auswerten</button>
+    </div>
+
+    <p class="hint block">
+      Jede Prognose wird gespeichert und später gegen den tatsächlichen Kurs
+      geprüft. Aus dem Ergebnis werden die Gewichte der Teilmodelle nachgezogen —
+      die Spalte <b>Treffer</b> zeigt, wie oft die Richtung bisher stimmte.
+      Ohne Auswertungen ist eine Prognose noch ungeprüft.
+    </p>
+
+    <div class="card">
+      <h3>Aktuelle Prognosen</h3>
+      <table class="grid" id="fc-table">
+        <thead>
+          <tr>
+            <th>Horizont</th><th>Zielzeitpunkt</th><th class="num">Basis</th>
+            <th class="num">Prognose</th><th class="num">Änderung</th>
+            <th class="num">Zuversicht</th><th class="num">Treffer bisher</th><th class="num">Ø Fehler</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="cols">
+      <div class="card" id="sm-card">
+        <h3>Woraus die Prognose entsteht</h3>
+
+        <p class="hint block">
+          Die Schätzung entsteht aus mehreren Säulen. Gewichtet wird mit
+          <b>Regler × gemessenem Verdienst</b> — nicht mit dem Regler allein. Der
+          Regler bestimmt, <i>wie viel</i> von etwas Brauchbarem einfliesst; ob
+          etwas brauchbar ist, entscheidet die Messung. Eine Säule ohne
+          nachgewiesenen Vorsprung bekommt null und bewegt nichts, auch bei
+          Regler auf hundert.
+        </p>
+
+        <p class="hint block">
+          <b>Zwei Arten von Beitrag.</b> <i>Grundlagen</i> schätzen die Rendite
+          selbst und werden gewichtet gemittelt — Kurslernen und
+          Spektralanalyse. <i>Aufschläge</i> kommen obendrauf: Sie sagen, was
+          <b>zusätzlich</b> zum üblichen Gang zu erwarten ist — gemessene
+          Bot-Muster und Nachrichtenstimmung. Ohne diese Trennung zog ein
+          Musterüberschuss von einem Viertelprozent eine Monatsprognose von
+          −15,7 % auf −4,1 %, weil er formal „genauer" war.
+        </p>
+
+        <div class="toolbar">
+          <div class="group">
+            <label for="sm-symbol">Wert</label>
+            <input id="sm-symbol" size="12" value="BTC-USD">
+          </div>
+          <div class="group">
+            <label for="sm-h">Horizont</label>
+            <select id="sm-h">
+              <option value="24">1 Tag</option>
+              <option value="168" selected>1 Woche</option>
+              <option value="336">2 Wochen</option>
+              <option value="720">1 Monat</option>
+              <option value="2160">3 Monate</option>
+              <option value="4380">6 Monate</option>
+              <option value="8760">1 Jahr</option>
+            </select>
+          </div>
+          <button id="sm-zeigen" class="primary">Zeigen</button>
+          <button id="sm-skill">Rückhalt aller Säulen</button>
+          <button id="sm-vergleich">Bringt das Mischen etwas?</button>
+        </div>
+
+        <div id="sm-out"></div>
+      </div>
+
+      <div class="card" id="gu-card">
+        <h3>Prognose gegen Ist — welche haben wir getroffen?</h3>
+
+        <p class="hint block">
+          Wertet ab einem Startdatum <b>jede abgegebene Prognose</b> gegen den
+          eingetroffenen Kurs aus, getrennt nach Horizont. Der nachträglich
+          gerechnete Walk-Forward bleibt draussen — er kennt die Zukunft, die er
+          vorhersagt, und belegt deshalb nichts.
+        </p>
+
+        <p class="hint block">
+          <b>Verglichen wird gegen den Stillstand</b>, nicht gegen null. Ein
+          mittlerer Fehler von 1,2 % sagt für sich nichts: Hat sich der Kurs in
+          derselben Zeit ohnehin nur um 0,9 % bewegt, wäre Nichtstun besser
+          gewesen. Das <b>Verhältnis</b> ist der Fehler geteilt durch genau diese
+          Bewegung — unter 1 heisst besser als nichts tun.
+        </p>
+
+        <p class="hint block">
+          <b>Je Wert und Zieltag zählt eine Prognose</b>, die zuletzt gestellte.
+          Ohne das zählen bei ruhigen Werten dieselben Beobachtungen mehrfach:
+          Ein Anleihen-ETF lieferte vier Stunden lang dieselbe Basis, dieselbe
+          Prognose und denselben Ist-Wert — als vier Fälle gezählt sah das nach
+          100 % Treffern aus, wo eine einzige Beobachtung stand.
+        </p>
+
+        <div class="toolbar">
+          <div class="group">
+            <label for="gu-von">ab Startdatum</label>
+            <input id="gu-von" type="date" value="2026-08-23">
+          </div>
+          <div class="group">
+            <label for="gu-min" title="Werte mit weniger Beobachtungen bleiben draussen">mindestens</label>
+            <input id="gu-min" type="number" min="1" max="100" value="2" size="4">
+          </div>
+          <div class="group">
+            <label for="gu-top">je Horizont</label>
+            <input id="gu-top" type="number" min="3" max="50" value="10" size="4">
+          </div>
+          <button id="gu-start" class="primary">Auswerten</button>
+        </div>
+
+        <div id="gu-bilanz"></div>
+
+        <h4>Wird es besser?</h4>
+
+        <p class="hint block">
+          <b>Dass gelernt wird, steht fest</b> — die Modellgewichte bewegen sich
+          und folgen der Trefferquote. Ob die Prognose dadurch <i>besser</i> wird,
+          ist damit nicht gesagt: Ein Verfahren kann fleissig lernen und trotzdem
+          auf der Stelle treten, weil das Signal nicht da ist. Nur diese Kurve
+          entscheidet das.
+        </p>
+
+        <div id="gu-kurve"></div>
+        <div id="gu-out"></div>
+      </div>
+
+      <div class="card">
+        <h3>Treffsicherheit gesamt</h3>
+        <table class="grid" id="fc-accuracy">
+          <thead><tr><th>Horizont</th><th class="num">bewertet</th><th class="num">Ø Fehler</th><th class="num">Richtung korrekt</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h3>Gelernte Modellgewichte</h3>
+        <p class="hint">Welches Teilmodell sich für diesen Wert durchgesetzt hat.</p>
+        <div class="field inline">
+          <label for="fc-horizon">Horizont</label>
+          <select id="fc-horizon"></select>
+        </div>
+        <table class="grid" id="fc-weights">
+          <thead><tr><th>Modell</th><th class="num">Gewicht</th><th class="num">Beobachtungen</th><th class="num">Trefferquote</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ======================================================= System -->
+<!-- ====================================================== Säulen -->
+<main id="view-pillars" class="view">
+  <section class="content wide">
+
+    <p class="hint block">
+      Die Prognose ruht auf mehreren Säulen, die verschiedene Fragen an dieselben
+      Daten stellen. Jede lässt sich einzeln zuschalten und gewichten. Die
+      Gewichte werden gegeneinander normiert — es zählt also nur ihr Verhältnis,
+      nicht ihre Summe.
+    </p>
+
+    <div class="pillar-tabs" id="pillar-tabs">
+      <button data-pillar="learning" class="active">Kurslernen</button>
+      <button data-pillar="math">Mathematische Analyse</button>
+      <button data-pillar="flow">Kapitalfluss</button>
+      <button data-pillar="deep">Deep Learning</button>
+      <button data-pillar="knowledge">Knowledge</button>
+      <button data-pillar="reasoning">Reasoning</button>
+      <button data-pillar="semantic">Semantik</button>
+    </div>
+
+    <!-- ------------------------------------------------ Säule 1 -->
+    <div class="pillar-panel active" data-panel="learning">
+      <div class="pillar-head">
+        <label class="check">
+          <input type="checkbox" class="pillar-on" data-key="learning" checked>
+          in die Prognose einbeziehen
+        </label>
+        <div class="weight">
+          <label>Gewichtung</label>
+          <input type="range" class="pillar-weight" data-key="learning" min="0" max="100" value="70">
+          <output class="pillar-weight-out" data-key="learning">70</output>
+          <span class="share" data-share="learning"></span>
+        </div>
+      </div>
+
+      <p class="hint block">
+        Wechselwirkung der Kurse untereinander über die Zeit: fünf Teilmodelle,
+        deren Gewichte laufend aus dem eigenen Prognosefehler nachgezogen werden.
+        Diese Säule ist die einzige, die derzeit in die gespeicherten Prognosen
+        einfließt und deren Treffsicherheit gemessen ist.
+      </p>
+
+      <div class="card">
+        <h3>Stand</h3>
+        <dl class="kv" id="pillar-learning-state"><dt>—</dt><dd>wird geladen …</dd></dl>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------ Säule 2 -->
+    <div class="pillar-panel" data-panel="math">
+      <div class="pillar-head">
+        <label class="check">
+          <input type="checkbox" class="pillar-on" data-key="math" checked>
+          in die Prognose einbeziehen
+        </label>
+        <div class="weight">
+          <label>Gewichtung</label>
+          <input type="range" class="pillar-weight" data-key="math" min="0" max="100" value="30">
+          <output class="pillar-weight-out" data-key="math">30</output>
+          <span class="share" data-share="math"></span>
+        </div>
+      </div>
+
+      <p class="hint block">
+        Signalverarbeitung auf der einzelnen Kursreihe. Zwei der Verfahren
+        erzeugen bewusst <b>keine</b> Prognose — sie beurteilen, ob den anderen
+        zu trauen ist. Eine Frequenzspitze allein beweist weder einen stabilen
+        Zyklus noch dessen Handelbarkeit.
+      </p>
+
+      <div class="toolbar">
+        <div class="group">
+          <label for="ma-asset">Wert</label>
+          <select id="ma-asset"></select>
+        </div>
+        <div class="group">
+          <label for="ma-interval">Auflösung</label>
+          <select id="ma-interval">
+            <option value="1d">Tag</option>
+            <option value="1h">Stunde</option>
+          </select>
+        </div>
+        <div class="group">
+          <label for="ma-months">Monate</label>
+          <input id="ma-months" type="number" min="6" max="600" value="60">
+        </div>
+        <button id="ma-run" class="primary">Analysieren</button>
+      </div>
+
+      <!-- ----------------------------------------- Kurvendiskussion -->
+      <div class="card" id="ma-curve">
+        <h3>Kurvendiskussion über alle Kurse</h3>
+
+        <p class="hint block">
+          Jede Kursreihe wird leicht geglättet und dann diskutiert wie eine
+          Funktion: Hoch- und Tiefpunkte als Nullstellen der ersten Ableitung,
+          Wendepunkte als Nullstellen der zweiten, dazu Sattelpunkte und die
+          Stellen, an denen Steigung oder Krümmung aus dem Rahmen fallen.
+        </p>
+
+        <p class="hint block">
+          Geglättet und abgeleitet wird über eine <b>lokale Polynomanpassung</b>
+          (Savitzky–Golay), nicht über gleitendes Mittel und Differenzen. Ein
+          gleitendes Mittel verschmiert genau an den Wenden am stärksten, und
+          jede Differenz verdoppelt den Rauschanteil — die zweite Ableitung
+          wäre damit unbrauchbar. Gerechnet wird auf <b>Log-Kursen</b>, sonst
+          hinge die Steigung am Kursniveau und wäre zwischen Werten nicht
+          vergleichbar.
+        </p>
+
+        <div class="toolbar">
+          <div class="group">
+            <label for="cv-half">Halbfenster</label>
+            <input id="cv-half" type="number" min="3" max="120" value="10">
+          </div>
+          <div class="group">
+            <label for="cv-minz">Schwelle (σ)</label>
+            <input id="cv-minz" type="number" min="1" max="8" step="0.1" value="2.5">
+          </div>
+          <div class="group">
+            <label for="cv-minsev">Mindeststufe</label>
+            <input id="cv-minsev" type="number" min="0" max="99" value="20">
+          </div>
+          <div class="group">
+            <label for="cv-link">Verknüpfung ±Bars</label>
+            <input id="cv-link" type="number" min="0" max="30" value="3">
+          </div>
+          <label class="check" title="Kausal: nur zurückblickend. Zentriert: genauer, aber nicht prognosetauglich.">
+            <input id="cv-causal" type="checkbox">
+            kausal glätten
+          </label>
+          <label class="check">
+            <input id="cv-selected" type="checkbox">
+            nur ausgewählte Werte
+          </label>
+          <button id="cv-scan" class="primary">Durchgang starten</button>
+        </div>
+
+        <div id="cv-runinfo"></div>
+      </div>
+
+      <div class="card" id="ma-curve-grid">
+        <h3>Gefundene Stellen</h3>
+
+        <div class="toolbar">
+          <div class="group">
+            <label for="cv-run">Lauf</label>
+            <select id="cv-run"></select>
+          </div>
+          <div class="group">
+            <label for="cv-type">Art</label>
+            <select id="cv-type"><option value="">alle</option></select>
+          </div>
+          <div class="group">
+            <label for="cv-asset">Wert</label>
+            <select id="cv-asset"><option value="">alle</option></select>
+          </div>
+          <div class="group">
+            <label for="cv-fsev">ab Stufe</label>
+            <input id="cv-fsev" type="number" min="0" max="99" value="0">
+          </div>
+          <div class="group">
+            <label for="cv-sort">Sortierung</label>
+            <select id="cv-sort">
+              <option value="stufe">Stufe</option>
+              <option value="ts">Datum, neueste zuerst</option>
+              <option value="ts_asc">Datum, älteste zuerst</option>
+              <option value="asset">Wert</option>
+              <option value="slope">Steigung</option>
+            </select>
+          </div>
+          <div class="group">
+            <label for="cv-size">je Seite</label>
+            <select id="cv-size">
+              <option>25</option><option selected>50</option>
+              <option>100</option><option>200</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="cv-stats"></div>
+        <div id="cv-grid"></div>
+        <div id="cv-pager" class="pager"></div>
+      </div>
+
+      <div class="card" id="ma-curve-links">
+        <h3>Ereignisse, die zusammen auftreten</h3>
+
+        <p class="hint block">
+          Der <b>Faktor</b> ist beobachtet geteilt durch erwartet. Ohne diese
+          Normierung gewännen immer die Werte mit den meisten Ereignissen —
+          zwei rege Kurse treffen sich in zehn Jahren zwangsläufig oft, ohne
+          dass das etwas bedeutet.
+        </p>
+
+        <p class="hint block">
+          <b>Ein hoher Faktor bei einem Abstand um null ist kein Vorlauf.</b> Er
+          heißt, die beiden bewegen sich gemeinsam — eine Aussage über Struktur,
+          nicht über Vorhersagbarkeit. Erst ein Abstand deutlich über null bei
+          einem Vorlaufanteil klar über 0,5 wäre einer, und auch der müsste sich
+          in einem getrennten Zeitraum wiederholen.
+        </p>
+
+        <div id="cv-links"></div>
+      </div>
+
+      <div class="strategies" id="ma-strategies">
+
+        <div class="strategy" data-strategy="spectrum">
+          <label class="check">
+            <input type="checkbox" class="strat-on" data-key="spectrum" checked>
+            <b>Spektrum</b> — welche Periodenlängen stecken in der Reihe
+          </label>
+          <p class="hint">
+            Welch-Schätzung über überlappende Teilfenster. Gemessen wird gegen den
+            örtlichen Untergrund des Spektrums, nicht gegen einen flachen: Kurse
+            haben rotes Rauschen, in dem die längste betrachtete Periode ohne
+            jeden Zyklus immer die stärkste ist.
+          </p>
+          <div class="params">
+            <label>Teilfenster <input type="number" class="strat-param" data-key="spectrum" data-param="segment" min="32" max="1024" value="256"></label>
+            <label>Periode ab <input type="number" class="strat-param" data-key="spectrum" data-param="minPeriod" min="3" max="60" value="5"></label>
+            <label>bis <input type="number" class="strat-param" data-key="spectrum" data-param="maxPeriod" min="10" max="400" value="120"></label>
+          </div>
+          <div class="result" id="ma-res-spectrum"></div>
+        </div>
+
+        <div class="strategy" data-strategy="stability">
+          <label class="check">
+            <input type="checkbox" class="strat-on" data-key="stability" checked>
+            <b>Zyklenstabilität</b> — hält der gefundene Zyklus über die Zeit
+          </label>
+          <p class="hint">
+            Dieselbe Rechnung auf rollierenden Abschnitten. Ein Zyklus, der nur
+            über den Gesamtzeitraum erscheint und in einzelnen Fenstern
+            verschwindet, ist die Fensterlänge und nicht der Markt. Das Ergebnis
+            dämpft alle Zyklusbeiträge dieser Säule.
+          </p>
+          <div class="result" id="ma-res-stability"></div>
+        </div>
+
+        <div class="strategy" data-strategy="hilbert">
+          <label class="check">
+            <input type="checkbox" class="strat-on" data-key="hilbert" checked>
+            <b>Momentanzyklus</b> — wo im Zyklus stehen wir gerade
+          </label>
+          <p class="hint">
+            Kausaler Hilbert-Diskriminator: Phase und Zykluslänge zum jetzigen
+            Zeitpunkt, gebildet ausschließlich aus zurückliegenden Werten. In der
+            Fortschreibung läuft die Phase weiter, die Amplitude wird gedämpft —
+            dass eine Schwingung gerade stark ist, sagt nichts darüber, ob sie es
+            bleibt.
+          </p>
+          <div class="params">
+            <label>Halbwertszeit <input type="number" class="strat-param" data-key="hilbert" data-param="halfLife" min="2" max="200" value="20"></label>
+          </div>
+          <div class="result" id="ma-res-hilbert"></div>
+        </div>
+
+        <div class="strategy" data-strategy="ssa">
+          <label class="check">
+            <input type="checkbox" class="strat-on" data-key="ssa" checked>
+            <b>Singuläre Spektralanalyse</b> — Zerlegung in Trend, Schwingung, Rauschen
+          </label>
+          <p class="hint">
+            Legt keine Kurvenform fest, sondern liest die Bausteine aus den Daten
+            selbst ab. Aus den führenden Komponenten folgt eine lineare Rekursion,
+            die sich fortschreiben lässt — das einzige Verfahren dieser Säule mit
+            einer eigenständigen Prognose über längere Horizonte.
+          </p>
+          <div class="params">
+            <label>Fensterlänge <input type="number" class="strat-param" data-key="ssa" data-param="ssaWindow" min="0" max="400" value="0" title="0 = automatisch aus der Reihenlänge"></label>
+            <label>Komponenten <input type="number" class="strat-param" data-key="ssa" data-param="ssaComponents" min="1" max="12" value="4"></label>
+          </div>
+          <div class="result" id="ma-res-ssa"></div>
+        </div>
+
+        <div class="strategy" data-strategy="regime">
+          <label class="check">
+            <input type="checkbox" class="strat-on" data-key="regime" checked>
+            <b>Marktverhalten</b> — läuft es weiter oder kehrt es um
+          </label>
+          <p class="hint">
+            Trendbereinigte Fluktuationsanalyse. Liefert selbst keine Prognose,
+            sondern verschiebt die Vorabgewichte der ersten Säule: In einer
+            trendfolgenden Phase hat das Momentum-Modell recht, in einer
+            rückkehrenden das Gegenteil. Bislang findet die Gewichtung das erst
+            heraus, indem sie sich irrt.
+          </p>
+          <div class="result" id="ma-res-regime"></div>
+        </div>
+
+      </div>
+
+      <div class="card">
+        <h3>Spektrum</h3>
+        <p class="hint">Leistung je Periodenlänge im Verhältnis zu ihrer eigenen
+          Nachbarschaft. Eine strukturlose Reihe liegt flach bei eins — nur was
+          deutlich darüber hinausragt, ist überhaupt ein Hinweis. Und auch dann
+          kein Zyklus.</p>
+        <div id="ma-chart"></div>
+      </div>
+
+      <div class="card">
+        <h3>Prognosebeitrag dieser Säule</h3>
+        <div id="ma-forecast"></div>
+      </div>
+
+      <h3 class="section-split">Über alle Werte</h3>
+
+      <p class="hint block">
+        Die Verfahren oben fragen, was in <b>einem</b> Kurs steckt. Das ist die
+        schwächere Frage — die Energie verteilt sich in einer einzelnen Reihe
+        glatt über die Frequenzen. Hier wird die stärkere gestellt: Gibt es
+        Zeitskalen, auf denen <b>viele</b> Kurse dasselbe tun? Eine gemeinsame
+        Ursache bewegt nicht einen Wert, sondern hunderte, und nur das überlagert
+        sich über das Universum hinweg konstruktiv.
+      </p>
+
+      <div class="toolbar">
+        <div class="group">
+          <label>Betrachtungsraum</label>
+          <div class="segmented" id="mm-scope">
+            <button data-scope="stocks" class="active">Aktien + ETFs</button>
+            <button data-scope="crypto">nur Krypto</button>
+            <button data-scope="sel">aktuelle Auswahl</button>
+          </div>
+        </div>
+        <div class="group">
+          <label for="mm-segment">Teilfenster</label>
+          <input id="mm-segment" type="number" min="64" max="1024" value="192">
+        </div>
+        <div class="group">
+          <label for="mm-max">Periode bis</label>
+          <input id="mm-max" type="number" min="20" max="500" value="250">
+        </div>
+        <div class="group">
+          <label for="mm-modes">Moden</label>
+          <input id="mm-modes" type="number" min="1" max="8" value="5">
+        </div>
+        <div class="group">
+          <label for="mm-surrogates">Ersatzläufe</label>
+          <input id="mm-surrogates" type="number" min="0" max="120" value="20" title="0 rechnet schnell, aber ohne Einordnung der Anteile">
+        </div>
+        <button id="mm-run" class="primary">Über alle Werte rechnen</button>
+      </div>
+
+      <p class="hint block" id="mm-warning">
+        Aktien und Krypto haben verschiedene Handelskalender und werden deshalb
+        getrennt gerechnet — gemischt fände die Auswertung den Kalender statt den
+        Markt. Der Aufwand wächst mit dem <b>Quadrat</b> der Wertezahl und linear
+        mit den Ersatzläufen: Ein Lauf über 200 Werte dauert ein Vielfaches eines
+        Laufs über 40. Ohne Ersatzläufe steht das Ergebnis schnell, aber die
+        Anteile sind dann nicht einzuordnen.
+      </p>
+
+      <div class="card">
+        <h3>Gemeinsame Schwingungen</h3>
+        <div id="mm-modes-out"></div>
+      </div>
+
+      <div class="card">
+        <h3>Gemeinsamer Anteil über die Zeitskalen</h3>
+        <p class="hint">
+          Wie viel der gesamten Marktbewegung auf jeder Zeitskala eine einzige
+          Schwingung erklärt. Ein flacher Verlauf heißt: Die gemeinsame Bewegung
+          ist breitbandig — ein Faktor, keine Schwingung.
+        </p>
+        <div id="mm-chart"></div>
+      </div>
+
+      <div class="card">
+        <h3>Vorläufer und Nachzügler</h3>
+        <p class="hint">
+          Aus den Moden <b>jenseits</b> des Marktfaktors. Die führende Mode wird
+          übersprungen: In ihr laufen alle gleichzeitig, und was gleichzeitig
+          geschieht, sagt zwischen den Werten nichts voraus.
+        </p>
+        <div id="mm-leaders"></div>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------ Säule 3 -->
+    <div class="pillar-panel" data-panel="flow">
+      <div class="pillar-head">
+        <label class="check">
+          <input type="checkbox" class="pillar-on" data-key="flow">
+          in die Prognose einbeziehen
+        </label>
+        <div class="weight">
+          <label>Gewichtung</label>
+          <input type="range" class="pillar-weight" data-key="flow" min="0" max="100" value="0">
+          <output class="pillar-weight-out" data-key="flow">0</output>
+          <span class="share" data-share="flow"></span>
+        </div>
+      </div>
+
+      <p class="hint block">
+        Kapitalbewegung im verfolgten Markt. Gerechnet wird auf
+        <b>Umsatz × Kurs</b> — das ist kein beobachteter Geldfluss, denn wer von
+        wem gekauft hat, steht in Kursdaten nicht. Es ist eine Modellrechnung
+        unter der Annahme eines geschlossenen Systems.
+      </p>
+
+      <p class="hint block">
+        <b>Der Handelskalender ist hier die zentrale Falle.</b> Samstags handelt
+        nur Krypto, der Aktienumsatz ist null. Wer über das rohe Zeitraster
+        rechnet, misst den Kalender statt den Markt — und zwar überzeugend genug,
+        um es zu glauben. Drei Anläufe sind daran gescheitert: Rotationsverdacht
+        kam für jedes Krypto-Aktien-Paar auf −0,93, die Flusszuordnung wies
+        17.192 Mrd $ von Krypto in Aktien aus, die Kapitalauffälligkeiten waren
+        zu hundert Prozent Wochenenden. Je Schritt werden deshalb nur Werte
+        einbezogen, die zu <b>beiden</b> Zeitpunkten gehandelt haben.
+      </p>
+
+      <div class="toolbar">
+        <div class="group">
+          <label for="kf-interval">Auflösung</label>
+          <select id="kf-interval">
+            <option value="1d">Tag</option>
+            <option value="1h">Stunde</option>
+          </select>
+        </div>
+        <div class="group">
+          <label for="kf-months">Monate</label>
+          <input id="kf-months" type="number" min="3" max="300" value="24">
+        </div>
+        <label class="check">
+          <input id="kf-selected" type="checkbox">
+          nur ausgewählte Werte
+        </label>
+        <button id="kf-run" class="primary">Auswerten</button>
+      </div>
+
+      <div class="card">
+        <h3>Flussbilanz — Umverteilung gegen Zu- und Abfluss</h3>
+        <p class="hint">
+          Bleibt die Summe aller Umsätze gleich und ein Wert verliert, ist das
+          Kapital im System geblieben. Steigt die Summe, kam etwas von außen
+          dazu. Die Zerlegung trennt beides.
+        </p>
+        <div id="kf-attribution"></div>
+      </div>
+
+      <div class="card">
+        <h3>Frühindikatoren — Kurs auffällig VOR der Kapitalbewegung</h3>
+        <p class="hint">
+          Der einzige Teil dieser Säule, der als Prognosebeitrag taugen könnte.
+          Ein <b>negativer Versatz</b> heißt: Der Kurs war auffällig, bevor sich
+          das Kapital bewegte. Der Faktor rechnet gegen die eigene Unruhe des
+          Wertes — 1,0 heißt zufällig, erst darüber ist es ein Hinweis.
+        </p>
+        <div id="kf-coincidence"></div>
+      </div>
+
+      <div class="card">
+        <h3>Kapitalauffälligkeiten</h3>
+        <p class="hint">
+          Stufe 1 bis 100, gemessen an der üblichen Schwankung des jeweiligen
+          Wertes. Als <b>verdächtig</b> markierte Zeilen sind vermutlich
+          Datenfehler und keine Marktbewegung — sie bleiben sichtbar, statt
+          stillschweigend zu verschwinden.
+        </p>
+        <div class="toolbar">
+          <div class="group">
+            <label for="kf-minsev">ab Stufe</label>
+            <input id="kf-minsev" type="number" min="1" max="99" value="80">
+          </div>
+          <label class="check">
+            <input id="kf-suspect" type="checkbox" checked>
+            verdächtige ausblenden
+          </label>
+        </div>
+        <div id="kf-events"></div>
+      </div>
+
+      <div class="card">
+        <h3>Rotationsverdacht</h3>
+        <p class="hint">
+          Gewinnt der eine regelmäßig Umsatzanteil, während der andere verliert,
+          ergibt sich ein stark negativer Wert. Verglichen wird nur an
+          Zeitpunkten, an denen beide gehandelt haben.
+        </p>
+        <div id="kf-rotation"></div>
+      </div>
+
+      <div class="card">
+        <h3>Gruppen mit erhaltener Summe</h3>
+        <p class="hint">
+          Werte, deren Umsatzsumme untereinander weitgehend konstant bleibt —
+          innerhalb solcher Gruppen wäre eine Kreisbewegung zu erwarten. Geprüft
+          wird auf einer zweiten, unabhängigen Zeithälfte: Eine Gruppe, die nur
+          im Anpassungszeitraum hält, ist eine Anpassung und keine Gruppe.
+        </p>
+        <p class="hint block">
+          <b>Nur eine Anlageklasse auf einmal.</b> Aktien und Krypto haben
+          verschiedene Handelskalender; gemischt bleiben über zehn Jahre nur
+          zwei Werte mit durchgehendem Handel übrig, und die bilden keine
+          Gruppe. Getrennt findet das Verfahren sofort welche.
+        </p>
+
+        <div class="toolbar">
+          <div class="group">
+            <label for="kf-gclass">Anlageklasse</label>
+            <select id="kf-gclass">
+              <option value="Stock">Aktien</option>
+              <option value="Etf">ETFs und Fonds</option>
+              <option value="Crypto">Krypto</option>
+            </select>
+          </div>
+          <div class="group">
+            <label for="kf-gmonths">Monate</label>
+            <input id="kf-gmonths" type="number" min="12" max="300" value="60">
+          </div>
+          <div class="group">
+            <label for="kf-gcount">Gruppen</label>
+            <input id="kf-gcount" type="number" min="1" max="12" value="4">
+          </div>
+          <button id="kf-groups-run">Gruppen suchen</button>
+        </div>
+
+        <div id="kf-groups"></div>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------ Säule Deep Learning -->
+    <div class="pillar-panel" data-panel="deep">
+      <div class="pillar-head">
+        <label class="check">
+          <input type="checkbox" class="pillar-on" data-key="deep">
+          in die Prognose einbeziehen
+        </label>
+        <div class="weight">
+          <label>Gewichtung</label>
+          <input type="range" class="pillar-weight" data-key="deep" min="0" max="100" value="0">
+          <output class="pillar-weight-out" data-key="deep">0</output>
+          <span class="share" data-share="deep"></span>
+        </div>
+      </div>
+
+      <p class="hint block">
+        Ein einziges Modell für alle Werte, trainiert auf sämtlichen Tagesdaten
+        seit 2001. Es sagt nicht den Kurs voraus, sondern die Rendite — und es
+        gibt zu jeder Vorhersage seine eigene Unsicherheit mit an.
+      </p>
+
+      <p class="hint block">
+        <b>Diese Säule kann sich nicht erklären.</b> Was sie gelernt hat, steht
+        in Gewichten und nicht in Sätzen. Deshalb liegt die Latte hier höher:
+        Sie zeigt mit jeder Vorhersage die Zahlen, die im Sperrbereich gemessen
+        wurden — also auf Daten, die das Training nie gesehen hat. Schlägt sie
+        dort die Annahme, es ändere sich nichts, nicht, bekommt sie Gewicht null.
+      </p>
+
+      <div class="card">
+        <h3>Die drei Modelle</h3>
+
+        <p class="hint block">
+          Ein Modell über alle Horizonte scheiterte am Maßstab der Zielgrößen:
+          Deren Streuung reicht von 0,032 bei einem Tag bis 0,445 bei 250 —
+          Faktor vierzehn. Bei gemeinsamer Normierung stammt fast der ganze
+          Verlust aus den langen Horizonten, und die kurzen werden praktisch
+          nicht trainiert. Inhaltlich sind es ohnehin verschiedene Aufgaben.
+        </p>
+
+        <p class="hint block">
+          Jedes Band bekommt sein eigenes Gewicht. Die drei zusammen ergeben,
+          <b>wie sich das Urteil der Säule zusammensetzt</b>; das Gewicht der
+          Säule oben entscheidet, <b>wie stark sie gegenüber den anderen Säulen
+          zählt</b>. Beides ist unabhängig voneinander.
+        </p>
+
+        <div id="dl-bands"></div>
+      </div>
+
+      <div class="toolbar">
+        <div class="group">
+          <label for="dl-asset">Wert</label>
+          <select id="dl-asset"></select>
+        </div>
+        <button id="dl-run" class="primary">Vorhersagen</button>
+      </div>
+
+      <div class="card">
+        <h3>Vorhersage über alle Horizonte</h3>
+        <div id="dl-forecast"></div>
+      </div>
+
+      <div class="card">
+        <h3>Prognose gegen Wirklichkeit</h3>
+
+        <p class="hint block">
+          Dieselbe Frage, an jedem Tag der Vergangenheit gestellt, und daneben
+          das, was tatsächlich eintrat. Gerechnet wird ausschließlich im
+          <b>Sperrbereich</b> — auf Tagen also, die das Training nie gesehen
+          hat. Über den Trainingszeitraum sähe dieselbe Kurve erheblich besser
+          aus und hieße nichts.
+        </p>
+
+        <div class="toolbar">
+          <div class="group">
+            <label for="dl-bt-band">Band</label>
+            <select id="dl-bt-band"></select>
+          </div>
+          <div class="group">
+            <label for="dl-bt-horizon">Horizont</label>
+            <select id="dl-bt-horizon"></select>
+          </div>
+          <button id="dl-backtest">Rückblick rechnen</button>
+        </div>
+
+        <div id="dl-bt-summary"></div>
+        <div id="dl-bt-chart" class="chart-box"></div>
+        <div id="dl-bt-err" class="chart-box"></div>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------ Säule 4 -->
+    <!-- ------------------------------------------------ Säule Knowledge -->
+    <div class="pillar-panel" data-panel="knowledge">
+      <div class="pillar-head">
+        <label class="check">
+          <input type="checkbox" class="pillar-on" data-key="knowledge">
+          in die Prognose einbeziehen
+        </label>
+        <div class="weight">
+          <label>Gewichtung</label>
+          <input type="range" class="pillar-weight" data-key="knowledge" min="0" max="100" value="0">
+          <output class="pillar-weight-out" data-key="knowledge">0</output>
+          <span class="share" data-share="knowledge"></span>
+        </div>
+      </div>
+
+      <p class="hint block">
+        Hochgeladene Fachliteratur — Handelsstrategien, Lehrbücher, Arbeiten.
+        Der Text wird in überlappende Abschnitte zerlegt, mit
+        <b>bge-m3</b> eingebettet und in <b>Qdrant</b> abgelegt. Der Volltext
+        bleibt in der Datenbank: Qdrant kennt nur die Nachbarschaft, nicht den
+        Inhalt.
+      </p>
+
+      <p class="hint block">
+        <b>Was diese Säule nicht kann.</b> Sie findet Stellen, die zu einer
+        Frage passen — nicht Stellen, die recht haben. Ein Buch, das eine
+        Strategie empfiehlt, ist kein Beleg dafür, dass sie funktioniert. Der
+        Beitrag zur Prognose muss deshalb denselben Rückhalt-Test bestehen wie
+        jede andere Säule, sonst bleibt das Gewicht bei null.
+      </p>
+
+      <div class="card">
+        <h3>Umgebung</h3>
+        <div id="kn-health"></div>
+      </div>
+
+      <div class="card">
+        <h3>Quellen</h3>
+
+        <div class="toolbar">
+          <div class="group">
+            <label for="kn-file">Dateien (PDF, TXT, MD, CSV)</label>
+            <input id="kn-file" type="file" multiple accept=".pdf,.txt,.md,.csv">
+          </div>
+          <button id="kn-upload" class="primary">Hochladen</button>
+          <button id="kn-curated">Freie Quellen eintragen</button>
+          <button id="kn-refresh">Liste neu laden</button>
+        </div>
+
+        <div class="toolbar">
+          <div class="group">
+            <label for="kn-alle-umfang">Alle einbetten</label>
+            <select id="kn-alle-umfang">
+              <option value="fehlend">nur was fehlt</option>
+              <option value="auchLeere">auch „kein Text gefunden“</option>
+              <option value="alles">alles neu aufbauen</option>
+            </select>
+          </div>
+          <button id="kn-alle-start" class="primary">Starten</button>
+          <button id="kn-alle-stop" hidden>Abbrechen</button>
+        </div>
+
+        <div id="kn-alle-stand"></div>
+
+        <p class="hint block">
+          <b>Der Lauf läuft im Server, nicht im Browser</b> — das Fenster darf zu.
+          Der vorige Knopf schickte eine Anfrage je Quelle und lud dazwischen
+          jedes Mal die ganze Liste neu; bei 504 offenen Quellen waren das über
+          tausend Anfragen, und mit dem Tab war er weg.
+        </p>
+
+        <p class="hint block">
+          <b>„nur was fehlt" lässt Quellen mit „kein Text gefunden" aus.</b> Dort
+          scheiterte die Textgewinnung, nicht das Einbetten — ein erneuter Versuch
+          lädt dieselbe Seite und scheitert genauso. Beim Stand vom 25.08.2026 sind
+          das 469 von 504. „Auch kein Text" lohnt erst, wenn an der Textgewinnung
+          etwas geändert wurde.
+        </p>
+
+        <p class="hint block">
+          <b>Freie Quellen</b> trägt zwölf gemeinfreie Klassiker aus dem
+          Project Gutenberg ein — Lefèvre, Selden, Harper, Clews, Crump und
+          andere —, dazu eine offen zugängliche Dissertation zu
+          Marktmikrostruktur, zwei arXiv-Übersichtsarbeiten und ein
+          BIZ-Arbeitspapier. Die Liste steht unter
+          <code>infra/quellen.json</code>; zu jedem Eintrag ist dort die
+          Rechtslage vermerkt.
+        </p>
+
+        <p class="hint block">
+          Hundert Jahre alte Bücher sind keine überholte Wahl, sondern eine
+          bewusste: Was sie beschreiben — Panik, Herdenverhalten, das Verhältnis
+          von Kurs und Erwartung — ist genau das, was auch heute in den Kursen
+          steht. Und sie sind gemeinfrei, was für neuere Literatur nicht gilt.
+        </p>
+
+        <div id="kn-grid"></div>
+      </div>
+
+      <div class="card">
+        <h3>Wissen durchsuchen</h3>
+
+        <div class="toolbar wide">
+          <div class="group grow">
+            <label for="kn-query">Frage</label>
+            <input id="kn-query" type="text" placeholder="z. B. Wie wirkt sich Verlustaversion auf Handelsentscheidungen aus?">
+          </div>
+          <button id="kn-search" class="primary">Suchen</button>
+        </div>
+
+        <div id="kn-results"></div>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------ Säule Reasoning -->
+    <div class="pillar-panel" data-panel="reasoning">
+      <div class="pillar-head">
+        <label class="check">
+          <input type="checkbox" class="pillar-on" data-key="reasoning" disabled>
+          in die Prognose einbeziehen
+        </label>
+        <div class="weight">
+          <label>Gewichtung</label>
+          <input type="range" class="pillar-weight" data-key="reasoning" min="0" max="100" value="0" disabled>
+          <output class="pillar-weight-out" data-key="reasoning">0</output>
+          <span class="share" data-share="reasoning"></span>
+        </div>
+      </div>
+
+      <p class="hint block">
+        Der Agent beantwortet Fragen zu Prognosen, Kurvenereignissen,
+        Verknüpfungen und dem gesammelten Wissen. Er <b>erzeugt keine
+        Prognose</b> — er liest die vorhandenen ab. Deshalb hat diese Säule
+        kein Gewicht am Ergebnis: Sie erklärt, sie rechnet nicht mit.
+      </p>
+
+      <p class="hint block">
+        <b>Er darf keine Zahl erfinden.</b> Jede Zahl seiner Antwort stammt aus
+        einem Werkzeugaufruf, und die Aufrufe stehen unter jeder Antwort — Name,
+        Argumente, Ergebnis. Wer misstraut, kann nachsehen, und genau das ist
+        hier vorgesehen. Ein Agent, der eine Prognose weitergibt, ohne ihren
+        gemessenen Wert zu nennen, wäre die gefährlichste Komponente dieses
+        Systems: Er klänge kompetent und wäre es nicht.
+      </p>
+
+      <div class="card" id="rs-journal-card">
+        <h3>Tagesjournal</h3>
+
+        <p class="hint block">
+          Was sich bewegt hat, was darüber berichtet wurde und was die Messung
+          dazu hergibt — in zusammenhängender Form, als Markdown zum
+          Weiterverwenden.
+        </p>
+
+        <p class="hint block">
+          <b>Ohne Sprachmodell geschrieben.</b> Jede Zahl darin stammt aus einer
+          Abfrage; der Satz drumherum ist Vorlage, nicht Erzeugnis. Der Grund
+          steht in der Messung: Ein kleineres Modell las hier ein
+          Fehlerverhältnis von 1,0034 als „nahezu perfekt“ und behauptete das
+          Gegenteil der Werkzeugausgabe. Was in ein Blog geht, muss
+          nachrechenbar bleiben.
+        </p>
+
+        <div class="toolbar">
+          <label class="check">
+            <input id="rs-journal-sel" type="checkbox">
+            nur ausgewählte Werte
+          </label>
+          <button id="rs-journal" class="primary">Journal schreiben</button>
+          <button id="rs-journal-copy">Markdown kopieren</button>
+          <a id="rs-journal-dl" class="link" download="marktjournal.md" style="display:none">herunterladen</a>
+        </div>
+
+        <div id="rs-journal-out"></div>
+      </div>
+
+      <div class="card" id="rs-heute-card">
+        <h3>Heute</h3>
+
+        <p class="hint block">
+          Was die Säulen für den heutigen Tag hergeben — <b>keine
+          Anlageempfehlung</b>. Der Unterschied ist nicht juristische Vorsicht,
+          sondern der Stand der Messung: Diese Anwendung hat bis heute kein
+          Verfahren hervorgebracht, das im Sperrbereich besser wäre als die
+          blosse Drift. Eine Kaufempfehlung wäre eine Behauptung ohne Deckung.
+        </p>
+
+        <p class="hint block">
+          Jeder Punkt trägt ein <b>Gewicht</b>. Es entsteht aus der
+          Auffälligkeit des Einzelfalls <i>mal</i> dem Gewicht seiner Säule —
+          ohne das stünde ein Kurvenereignis der Stufe 100 neben einer
+          Modellvorhersage, die nachweislich nichts taugt, und beide sähen
+          gleich wichtig aus.
+        </p>
+
+        <div class="toolbar">
+          <label class="check">
+            <input id="rs-heute-sel" type="checkbox">
+            nur ausgewählte Werte
+          </label>
+          <button id="rs-heute" class="primary">Tagesübersicht erstellen</button>
+        </div>
+
+        <div id="rs-heute-out"></div>
+      </div>
+
+      <div class="card">
+        <h3>Zustand und Modell</h3>
+
+        <div class="toolbar">
+          <div class="group">
+            <label for="rs-modell">Modell</label>
+            <select id="rs-modell"></select>
+          </div>
+          <label class="check" title="Denkt das Modell vor der Antwort? Achtmal langsamer, aber genau — ohne Denken verlor qwen3:8b sämtliche Zahlen und las „Sperrbereich“ als Handelsverbot.">
+            <input id="rs-denken" type="checkbox" checked>
+            denken lassen
+          </label>
+          <button id="rs-modell-setzen">Übernehmen</button>
+        </div>
+
+        <p class="hint block">
+          <b>Gemessen an derselben Frage</b> („Welche Modelle sind geladen und
+          was taugen sie?"): <code>nemotron3:33b</code> 251 s und korrekt,
+          <code>qwen3:8b</code> mit Denken 264 s und korrekt, ohne Denken 19 s
+          und <b>inhaltlich falsch</b>. <code>qwen3-vl:4b</code> war schnell und
+          las ein Fehlerverhältnis von 1,0034 als „nahezu perfekt" —
+          das Gegenteil der Werkzeugausgabe.
+        </p>
+
+        <div id="rs-health"></div>
+      </div>
+
+      <div class="card" id="rs-gpu-card">
+        <h3>Wo Ollama läuft</h3>
+
+        <p class="hint block">
+          <b>Warum das eine Auswahl braucht.</b> <code>nemotron3:33b</code> kostet
+          auf dieser CPU vier Minuten je Runde, und der Agent ruft mehrfach
+          Werkzeuge auf. Ein kleineres Modell wäre die billige Antwort gewesen —
+          es hat den Rückhalt-Test nicht bestanden. Bleibt der Weg über mehr
+          Rechenleistung.
+        </p>
+
+        <p class="hint block">
+          <b>Nur das Reasoning braucht das.</b> Die drei Prognosemodelle laufen
+          als ONNX im eigenen Prozess auf der CPU; <code>bge-m3</code> zum
+          Einbetten ebenso. Eine gemietete Karte ändert an keiner Zahl dieser
+          Anwendung etwas — sie macht die Antwort schneller, nicht besser.
+        </p>
+
+        <table class="grid" id="rs-ep-liste">
+          <thead><tr>
+            <th>Endpunkt</th><th>Adresse</th><th>Art</th><th>Anmeldung</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+
+        <div id="rs-ep-pruefung"></div>
+
+        <h4>Eigenen Endpunkt eintragen</h4>
+
+        <div class="toolbar">
+          <div class="group">
+            <label for="rs-ep-name">Name</label>
+            <input id="rs-ep-name" size="16" placeholder="gemietete GPU">
+          </div>
+          <div class="group">
+            <label for="rs-ep-url">Adresse</label>
+            <input id="rs-ep-url" size="22" placeholder="http://host:11434">
+          </div>
+          <div class="group">
+            <label for="rs-ep-ssh">SSH-Host</label>
+            <input id="rs-ep-ssh" size="16" placeholder="leer = kein Tunnel">
+          </div>
+          <div class="group">
+            <label for="rs-ep-sshport">Port</label>
+            <input id="rs-ep-sshport" size="5" value="22">
+          </div>
+          <div class="group">
+            <label for="rs-ep-key" title="vastai:&lt;OPEN_BUTTON_TOKEN&gt; ergibt Basic, alles ohne Doppelpunkt einen Bearer-Token.">Schlüssel</label>
+            <input id="rs-ep-key" type="password" size="16" autocomplete="new-password"
+                   placeholder="nur ohne Tunnel">
+          </div>
+          <button id="rs-ep-anlegen">Eintragen</button>
+        </div>
+
+        <p class="hint block">
+          <b>Mit SSH-Host wird getunnelt</b>, und dann ist die Adresse nur
+          Beschriftung — die echte entsteht beim Verbinden, weil das
+          Betriebssystem den lokalen Port vergibt. Eine feste Nummer würde mit
+          einem lokal laufenden Ollama auf 11434 kollidieren, und das ist der
+          Normalfall. Über den Tunnel entfällt auch der Schlüssel: Er endet
+          hinter dem Reverse-Proxy, direkt an Ollama.
+        </p>
+
+        <h4>vast.ai</h4>
+
+        <div class="toolbar">
+          <button id="rs-vast-laden">Instanzen abrufen</button>
+        </div>
+
+        <table class="grid" id="rs-vast-liste">
+          <thead><tr>
+            <th>Instanz</th><th>GPU</th><th>Zustand</th><th>Kosten/h</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+
+        <div id="rs-vast-hinweis"></div>
+
+        <p class="hint block">
+          <b>Angehalten kostet weiter, aber wenig</b> — gemessen 0,0210 USD/h
+          gegen 0,3543 USD/h laufend, also rund 6 %. Wer zwischen zwei Fragen
+          laufen lässt, zahlt für nichts. Beim Fortsetzen vergibt vast.ai
+          <b>neue</b> Adresse und neuen SSH-Port; die Übernahme muss danach
+          erneut laufen, sonst zeigt der Endpunkt ins Leere.
+        </p>
+
+        <p class="hint block">
+          <b>Mieten und Zerstören stehen hier nicht.</b> Das eine schließt einen
+          Vertrag, das andere löscht Daten unwiederbringlich. Beides gehört in
+          die Oberfläche von vast.ai, wo Preis und Laufzeit sichtbar sind.
+        </p>
+      </div>
+
+      <div class="card" id="rs-log-card">
+        <h3>Nachlese</h3>
+
+        <p class="hint block">
+          <b>Jede Frage wird abgelegt</b>, nicht nur die auf Knopfdruck
+          gemerkte — vor dem Lesen weiss man nicht, ob eine Antwort es wert ist,
+          und die Rechenzeit ist an dieser Stelle ohnehin verbraucht. Ein
+          Neuladen des Fensters verlor bisher jedes Gespräch.
+        </p>
+
+        <p class="hint block">
+          <b>Die Werkzeugspur wird mitgeschrieben.</b> Ohne sie wäre eine
+          abgelegte Antwort eine Behauptung: Der Sinn dieser Säule ist, dass
+          jede Zahl aus einem Werkzeugaufruf stammt und nachprüfbar bleibt.
+        </p>
+
+        <div class="toolbar">
+          <div class="group">
+            <label for="rs-log-suche">Suche</label>
+            <input id="rs-log-suche" type="search" size="22"
+                   placeholder="in Frage, Antwort und Notiz">
+          </div>
+          <label class="check">
+            <input id="rs-log-gemerkt" type="checkbox">
+            nur Gemerkte
+          </label>
+          <button id="rs-log-laden">Anzeigen</button>
+          <button id="rs-log-mehr">mehr laden</button>
+          <button id="rs-log-aufraeumen" title="Entfernt nicht gemerkte Einträge, die älter als 30 Tage sind. Gemerkte bleiben.">älter als 30 Tage wegräumen</button>
+        </div>
+
+        <table class="grid" id="rs-log-liste">
+          <thead><tr>
+            <th>wann</th><th>Frage</th><th>Modell</th><th>Dauer</th>
+            <th>Werkzeuge</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+
+        <div id="rs-log-detail"></div>
+      </div>
+
+      <div class="card">
+        <h3>Gespräch</h3>
+
+        <div id="rs-chat" class="chat"></div>
+
+        <div class="toolbar wide">
+          <div class="group grow">
+            <label for="rs-input">Frage</label>
+            <textarea id="rs-input" rows="2"
+              placeholder="z. B. Was sagt das Modell zu NVDA, und wie gut war es im Sperrbereich?"></textarea>
+          </div>
+          <button id="rs-send" class="primary">Fragen</button>
+          <button id="rs-clear">Neu beginnen</button>
+        </div>
+
+        <p class="hint block">
+          Beispiele: „Welche Modelle sind geladen und was taugen sie?" ·
+          „Zeig mir die stärksten Kurvenereignisse von BTC-USD" ·
+          „Welche Werte bewegen sich auffällig gleichzeitig mit NVDA?" ·
+          „Was sagt die Literatur zu Verlustaversion?"
+        </p>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------- Säule Semantik -->
+    <div class="pillar-panel" data-panel="semantic">
+      <div class="pillar-head">
+        <label class="check">
+          <input type="checkbox" class="pillar-on" data-key="semantic">
+          in die Prognose einbeziehen
+        </label>
+        <div class="weight">
+          <label>Gewichtung</label>
+          <input type="range" class="pillar-weight" data-key="semantic" min="0" max="100" value="0">
+          <output class="pillar-weight-out" data-key="semantic">0</output>
+          <span class="share" data-share="semantic"></span>
+        </div>
+      </div>
+
+      <p class="hint block">
+        Beobachtete Adressen — Nachrichtenseiten, Kanäle, Feeds. Ein
+        Zeitplan holt in festem Abstand nach, was neu ist, bettet es ein und
+        legt es in derselben Qdrant-Installation ab wie das Wissen, nur in
+        einer eigenen Sammlung.
+      </p>
+
+      <p class="hint block">
+        <b>Unverändertes wird nicht erneut eingebettet.</b> Zu jeder Quelle
+        steht die Prüfsumme ihres Inhalts; stimmt sie noch, kostet der
+        Durchgang nichts. Ohne das würde jede Seite bei jedem Lauf neu
+        eingebettet, für ein Ergebnis, das schon dasteht.
+      </p>
+
+      <div class="card">
+        <h3>Beobachtete Adressen</h3>
+
+        <div class="toolbar wide">
+          <div class="group grow">
+            <label for="sm-url">Adresse</label>
+            <input id="sm-url" type="text" placeholder="https://…">
+          </div>
+          <div class="group">
+            <label for="sm-title">Bezeichnung</label>
+            <input id="sm-title" type="text" placeholder="optional">
+          </div>
+          <div class="group">
+            <label for="sm-poll">Abstand (min)</label>
+            <input id="sm-poll" type="number" min="15" max="10080" value="240">
+          </div>
+          <button id="sm-add" class="primary">Eintragen</button>
+        </div>
+
+        <div class="toolbar">
+          <button id="sm-curated">Startliste eintragen</button>
+          <button id="sm-feeds" class="primary">Feeds abholen</button>
+          <div class="group">
+            <label for="sm-perfeed">je Quelle höchstens</label>
+            <input id="sm-perfeed" type="number" min="1" max="100" value="15">
+          </div>
+          <button id="sm-refresh-all">Einzelseiten abholen</button>
+        </div>
+
+        <div class="toolbar">
+          <div class="group">
+            <label for="sm-alle-umfang">Alle einbetten</label>
+            <select id="sm-alle-umfang">
+              <option value="fehlend">nur was fehlt</option>
+              <option value="auchLeere">auch „kein Text gefunden“</option>
+              <option value="alles">alles neu aufbauen</option>
+            </select>
+          </div>
+          <button id="sm-alle-start" class="primary">Starten</button>
+          <button id="sm-alle-stop" hidden>Abbrechen</button>
+        </div>
+
+        <div id="sm-alle-stand"></div>
+
+        <p class="hint block">
+          <b>Der Lauf läuft im Server, nicht im Browser</b> — das Fenster darf zu.
+          Der vorige Knopf schickte eine Anfrage je Quelle und lud dazwischen
+          jedes Mal die ganze Liste neu; bei 504 offenen Quellen waren das über
+          tausend Anfragen, und mit dem Tab war er weg.
+        </p>
+
+        <p class="hint block">
+          <b>„nur was fehlt" lässt Quellen mit „kein Text gefunden" aus.</b> Dort
+          scheiterte die Textgewinnung, nicht das Einbetten — ein erneuter Versuch
+          lädt dieselbe Seite und scheitert genauso. Beim Stand vom 25.08.2026 sind
+          das 469 von 504. „Auch kein Text" lohnt erst, wenn an der Textgewinnung
+          etwas geändert wurde.
+        </p>
+
+        <p class="hint block">
+          Die <b>Startliste</b> bringt 35 Quellen mit: Reuters, WSJ, MarketWatch,
+          CNBC, FT, Handelsblatt, NZZ, Der Standard, Nikkei, SCMP, Economic
+          Times, CoinDesk, Cointelegraph sowie Fed, EZB, Bank of England, BIZ
+          und SEC — dazu UN News und NASA-Naturereignisse, weil Weltereignisse
+          auf Kurse wirken. Sie steht als Datei unter
+          <code>infra/quellen.json</code> und lässt sich dort ergänzen, ohne
+          etwas zu übersetzen.
+        </p>
+
+        <p class="hint block">
+          <b>Ein Feed ist etwas anderes als eine Seite.</b> Eine Nachrichtenseite
+          abzurufen liefert bei jedem Lauf dieselbe Seite mit anderem Inhalt —
+          man weiß danach nicht, was neu war. Ein Feed liefert einzelne
+          Meldungen mit Adresse und Zeitstempel. Erst das erlaubt beides:
+          <b>nur Neues einzubetten</b> und eine Aussage später in Bezug zu einer
+          Kursbewegung zu setzen.
+        </p>
+
+        <div id="sm-feedrun"></div>
+
+        <div id="sm-grid"></div>
+      </div>
+
+      <div class="card">
+        <h3>Gesammeltes durchsuchen</h3>
+
+        <div class="toolbar wide">
+          <div class="group grow">
+            <label for="sm-query">Frage</label>
+            <input id="sm-query" type="text" placeholder="z. B. Zinsentscheidung der Notenbank">
+          </div>
+          <button id="sm-search" class="primary">Suchen</button>
+        </div>
+
+        <div id="sm-results"></div>
+      </div>
+    </div>
+
+  </section>
+</main>
+
+<!-- ================================================== Neuzugänge -->
+<main id="view-neuzugang" class="view">
+  <section class="content">
+    <div class="card" id="nz-card">
+      <h3>Neuzugänge — was neu an den Markt kommt</h3>
+
+      <p class="hint block">
+        Erstnotizen und neue Börsenlistings, <b>bevor</b> sie handelbar sind.
+        Quellen: der IPO-Kalender von Nasdaq (mit erwartetem Datum) und Binances
+        Katalog „New Cryptocurrency Listing“.
+      </p>
+
+      <p class="hint block">
+        <b>Warum diese Seite überhaupt nötig ist.</b> Neuzugänge lassen sich aus
+        dem eigenen Bestand nicht auswerten: Das Universum ist die Rangliste nach
+        Marktkapitalisierung, ein Wert taucht dort erst auf, <b>nachdem</b> er
+        gestiegen ist. Ein Neuling, der nach dem ersten Tag um achtzig Prozent
+        fiel, ist nie erschienen — und genau er ist der Fall, auf den es ankommt.
+        Diese Sammlung ist die vollständige Kohorte: eingetragen wird bei der
+        <i>Ankündigung</i>, nicht wenn etwas auffällt. Sie wächst nur vorwärts
+        und lässt sich nicht rückwirkend füllen.
+      </p>
+
+      <div class="toolbar">
+        <button id="nz-sammeln" class="primary">Jetzt abholen</button>
+        <button id="nz-laeufe">Quellen-Protokoll</button>
+        <span class="hint">Läuft sonst einmal täglich im Tageslauf.</span>
+      </div>
+
+      <div id="nz-out"></div>
+    </div>
+  </section>
+</main>
+
+<!-- ================================================== Langfrist -->
+<main id="view-langfrist" class="view">
+  <section class="content wide">
+
+    <p class="hint block" id="lf-kern">wird geladen …</p>
+
+    <p class="hint block">
+      <b>Warum ausgerechnet diese Seite belastbar ist.</b> Der zentrale Befund
+      dieses Projekts lautet, dass die blosse Drift — die mittlere Rendite eines
+      Zeitraums — jedes Prognosemodell schlägt. Auf kurze Sicht ist das ein
+      Negativbefund. Auf lange Sicht <b>ist</b> die Drift die Rendite. Was hier
+      steht, ist also genau die Größe, die sich als einzige als tragfähig
+      erwiesen hat.
+    </p>
+
+    <p class="hint block" id="lf-verzerrung"></p>
+
+    <div class="toolbar">
+      <div class="group">
+        <label for="lf-jahre">Zeitraum</label>
+        <select id="lf-jahre">
+          <option value="3">3 Jahre</option>
+          <option value="5" selected>5 Jahre</option>
+          <option value="10">10 Jahre</option>
+          <option value="20">20 Jahre</option>
+        </select>
+      </div>
+      <div class="group">
+        <label for="lf-mintage">Mindesthistorie</label>
+        <select id="lf-mintage">
+          <option value="250">1 Jahr</option>
+          <option value="400" selected>1,5 Jahre</option>
+          <option value="750">3 Jahre</option>
+        </select>
+      </div>
+      <div class="group">
+        <label for="lf-limit">Einzelwerte zeigen</label>
+        <select id="lf-limit">
+          <option value="20">20</option>
+          <option value="40" selected>40</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+      <div class="group">
+        <label for="lf-sort">Sortierung</label>
+        <select id="lf-sort">
+          <option value="rendite" selected>Rendite p.a.</option>
+          <option value="jeSchwankung">Rendite je Schwankung</option>
+          <option value="jeRueckgang">Rendite je Einbruch</option>
+          <option value="positiv">Anteil positiver Jahre</option>
+        </select>
+      </div>
+      <button id="lf-load" class="primary">Neu rechnen</button>
+    </div>
+
+    <div class="card">
+      <h3>Kombinationen</h3>
+      <p class="hint">
+        Gleich gewichtet, täglich neu ausgeglichen. <b>Die Zeilen mit dem
+        Vermerk „Sperrbereich" sind die einzigen, die etwas sagen</b> — dort ist
+        die Zusammenstellung auf der ersten Hälfte des Zeitraums getroffen und
+        auf der zweiten gemessen worden.
+      </p>
+      <p class="hint">
+        <b>Die Spalte „engste Bindung" ist wichtiger als der Durchschnitt.</b>
+        Fünf Werte mit einer Paarkorrelation von 0,99 sind ein Wert in fünf
+        Verpackungen — und ein Mittelwert über alle Paare verdeckt das
+        zuverlässig.
+      </p>
+      <table class="grid" id="lf-koerbe">
+        <thead><tr>
+          <th>Kombination</th><th class="num">p. a.</th>
+          <th class="num">Schwankung</th><th class="num">tiefster Einbruch</th>
+          <th class="num">Rendite je Einbruch</th><th class="num">pos. Jahre</th>
+          <th class="num">engste Bindung</th><th class="num">bei Auswahl</th>
+          <th>Bestandteile</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <div id="lf-korbtexte"></div>
+    </div>
+
+    <div class="card">
+      <h3>Anweisungen</h3>
+      <ol id="lf-anweisungen" class="hint block"></ol>
+    </div>
+
+    <div class="card">
+      <h3>Einzelwerte</h3>
+      <p class="hint">
+        Jeder Wert auf <b>seiner eigenen</b> Zeitachse gerechnet — ein Papier,
+        das an 365 Tagen handelt, und eines mit 252 haben beide eine gültige
+        Jahresrendite. <b>Lesen Sie den tiefsten Einbruch und die schlechteste
+        Zwölfmonatsstrecke vor der Rendite.</b>
+      </p>
+      <table class="grid" id="lf-werte">
+        <thead><tr>
+          <th>Symbol</th><th>Name</th><th>Klasse</th>
+          <th class="num">Jahre</th><th class="num">p. a.</th>
+          <th class="num">Schwankung</th><th class="num">tiefster Einbruch</th>
+          <th class="num">Rendite je Einbruch</th>
+          <th class="num">pos. Jahre</th><th class="num">schlechtestes Jahr</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<!-- ================================================== Bot-Herde -->
+<main id="view-herde" class="view">
+  <section class="content wide">
+
+    <p class="hint block">
+      <b>Die Überlegung.</b> Hunderte automatischer Handelssysteme folgen
+      denselben, öffentlich bekannten Auslösern: dem Kreuzen zweier gleitender
+      Mittel, einer RSI-Schwelle, dem Ausbruch aus einem Bollinger-Band, dem
+      neuen Jahreshoch. Wenn viele zugleich handeln, muss das eine Spur
+      hinterlassen — auffälliges Volumen am Auslösetag und eine Bewegung, die
+      sich von einem beliebigen Tag unterscheidet. <b>Das ist prüfbar, und hier
+      steht die Prüfung.</b>
+    </p>
+
+    <p class="hint block" id="he-kern">wird geladen …</p>
+
+    <p class="hint block">
+      <b>Zur Deutung.</b> Verglichen wird gegen den Median über <i>alle</i> Tage
+      derselben Werte im selben Zeitraum — ohne diese Latte misst man den
+      Marktgang. Gerechnet wird mit dem Median und nicht dem Mittelwert: Ein
+      Mittelwert lieferte für Krypto „RSI unter 30 → +45 Prozent am Folgetag"
+      und einen Volumenfaktor von 15.591, und das beschreibt sterbende
+      Kleinstwerte, nicht den Markt. <b>Die Fenster überlappen</b> — die Anzahl
+      ist deshalb keine Fallzahl, und ein t-Wert stünde um rund die Wurzel der
+      Fensterlänge zu hoch.
+    </p>
+
+    <div class="toolbar">
+      <button id="he-load" class="primary">Neu laden</button>
+      <button id="he-rechnen">Auslöser neu rechnen (Minuten)</button>
+      <button id="he-umkehr-rechnen">Umkehrtest neu rechnen (Minuten)</button>
+      <button id="he-zz-rechnen">Zeitzonen neu rechnen</button>
+    </div>
+
+    <div class="card">
+      <h3>Was die Auslöser hinterlassen</h3>
+      <p class="hint">
+        <b>Überschuss</b> = Median der Rendite nach dem Auslöser minus Median
+        über alle Tage. <b>Richtung</b> = Anteil der Fälle, in denen es in die
+        Richtung ging, die der Auslöser nahelegt — bei einem Verkaufssignal also
+        abwärts. Liegt sie unter 0,5, sagt das Signal das Gegenteil dessen, was
+        es soll.
+      </p>
+      <table class="grid" id="he-ausloeser">
+        <thead><tr>
+          <th>Auslöser</th><th>Klasse</th><th class="num">Fälle</th><th class="num">Werte</th>
+          <th class="num">Δ 1 Tag</th><th class="num">Δ 5 Tage</th><th class="num">Δ 20 Tage</th>
+          <th class="num">Richtung 20</th><th class="num">Volumen</th><th>Urteil</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Zeitzonen-Vorlauf</h3>
+      <p class="hint">
+        <b>Die Frage.</b> Solange nur US-Werte im Bestand waren, handelten alle
+        im selben Fenster — da <i>kann</i> es keinen Vorlauf geben, weil es keine
+        Reihenfolge gibt. Mit Tokio (Schluss 06:00 UTC), Europa (16:00) und New
+        York (20:00) gibt es eine.
+      </p>
+      <p class="hint">
+        <b>Die Falle.</b> Alle Tagesbars sind auf Stunde 0 gerastert — Tokio und
+        New York sitzen auf demselben Rasterpunkt. Wer daraus eine
+        „gleichzeitige" Korrelation macht, misst in Wahrheit vierzehn Stunden
+        Vorsprung und hat Lookahead in Reinform. Die Reihenfolge kommt deshalb
+        aus der <b>Börse</b> und nicht aus dem Zeitstempel.
+      </p>
+      <p class="hint">
+        <b>Die drei Spalten.</b> <code>naiv</code> vergleicht ganze Tage.
+        <code>Sprung</code> fragt, ob die Information im Eröffnungskurs der
+        späteren Region landet. <code>handelbar</code> fragt, ob danach noch
+        etwas übrig ist — <b>nur diese Spalte lässt eine Handlung zu</b>, denn
+        was im Eröffnungssprung steckt, war zum Schluss des Vortages noch nicht
+        da. <code>Gegenprobe</code> misst die umgekehrte Richtung: Findet die
+        auch etwas, ist es ein gemeinsamer Faktor und kein Vorlauf.
+      </p>
+
+      <p class="hint block" id="he-zz-antwort"></p>
+
+      <table class="grid" id="he-zeitzonen">
+        <thead><tr>
+          <th>früher</th><th>später</th>
+          <th class="num">Vorsprung</th><th class="num">Überlappung</th>
+          <th class="num">Tage</th>
+          <th class="num">naiv</th><th class="num">Eröffnungssprung</th>
+          <th class="num">handelbar</th><th class="num">Schwelle</th>
+          <th class="num">Gegenprobe</th><th>als Vorlauf lesbar</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Der Umkehrschluss</h3>
+      <p class="hint">
+        <b>Die Frage:</b> Wenn die meisten Prognosen nichts taugen — lässt sich
+        daraus invers etwas ableiten? Ein Signal umzudrehen nützt nur, wenn es
+        <i>zuverlässig falsch</i> ist. Eine Trefferquote von 49,8 Prozent
+        umgedreht ergibt 50,2 Prozent, und die Kosten bleiben dieselben.
+      </p>
+      <p class="hint block" id="he-umkehr-antwort"></p>
+      <p class="hint" id="he-umkehr-zahlen"></p>
+
+      <p class="hint">
+        Die zwanzig am stärksten negativ abweichenden Paare. <b>Achten Sie auf
+        die letzte Spalte:</b> Wo beide Seiten dasselbe abbilden — eine
+        goldgedeckte Marke gegen einen Gold-ETF, irgendetwas gegen eine an den
+        Dollar gebundene Marke — ist das Zurückschwingen zu erwarten. Das heißt
+        Paarhandel und nicht „das Signal ist falsch herum".
+      </p>
+      <table class="grid" id="he-umkehr">
+        <thead><tr>
+          <th>Paar</th><th class="num">Kreuzungen</th><th class="num">Trefferquote</th>
+          <th class="num">z</th><th class="num">Ø Ertrag</th>
+          <th class="num">invertiert nach Kosten</th><th>Einordnung</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<!-- ================================================ Day Trading -->
+<main id="view-daytrading" class="view">
+  <section class="content wide">
+
+    <p class="hint block" id="dt-kern">wird geladen …</p>
+
+    <p class="hint block">
+      <b>Die Frage vor der Frage.</b> Diese Seite sagt nicht, was heute zu kaufen
+      wäre. Sie beantwortet, was davor zu klären ist: <b>Trägt der Markt heute
+      überhaupt einen Handel innerhalb des Tages — nachdem die Gebühren abgezogen
+      sind?</b> Diese Frage hat eine messbare Antwort. Die andere hat in diesem
+      System keine.
+    </p>
+
+    <div class="toolbar">
+      <div class="group">
+        <label for="dt-stunden">Messzeitraum</label>
+        <select id="dt-stunden">
+          <option value="168">7 Tage</option>
+          <option value="720" selected>30 Tage</option>
+          <option value="2160">90 Tage</option>
+        </select>
+      </div>
+      <button id="dt-load" class="primary">Neu rechnen</button>
+    </div>
+
+    <div class="card">
+      <h3>Was jetzt gehandelt wird</h3>
+      <p class="hint">
+        Abgelesen an der jüngsten Stundenbar, nicht an einem hinterlegten
+        Börsenkalender — ein Kalender wäre eine zweite Wahrheit, die still
+        veralten kann.
+      </p>
+      <table class="grid" id="dt-fenster">
+        <thead><tr><th>Klasse</th><th>jüngste Bar</th><th class="num">Alter</th>
+          <th>Lage</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Beweglichkeit gegen Kosten</h3>
+      <p class="hint">
+        <b>Die entscheidende Spalte ist „über Kosten".</b> Sie sagt, welcher Anteil
+        der Stunden sich überhaupt so weit bewegt, dass ein Rundlauf aus Gebühr
+        und Schlupf hereinkäme. Was darunter liegt, ist verloren, bevor die
+        Richtungsfrage gestellt ist — man kann eine Bewegung nicht handeln, die
+        kleiner ist als ihre Kosten.
+      </p>
+      <table class="grid" id="dt-beweg">
+        <thead><tr>
+          <th>Klasse</th><th class="num">Bars</th><th class="num">Werte</th>
+          <th class="num">Ø Bewegung</th><th class="num">Median</th>
+          <th class="num">über Kosten</th><th class="num">über doppelten Kosten</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Was auf Stundenbasis gemessen wurde</h3>
+      <p class="hint">
+        Der Erwartungswert entscheidet, nicht die Trefferquote:
+        <code>(2p − 1) · Bewegung − Kosten</code>. Eine Trefferquote knapp über der
+        Hälfte bringt fast nichts ein, weil der Nettoanteil (2p − 1) bei 52 Prozent
+        gerade 0,04 beträgt.
+      </p>
+      <table class="grid" id="dt-guete">
+        <thead><tr><th>Quelle</th><th class="num">Horizont</th>
+          <th class="num">Trefferquote</th><th>Urteil</th><th>trägt</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Anweisungen</h3>
+      <p class="hint">
+        Regeln über das Verfahren, nicht über einzelne Werte. Was dieses System
+        belastbar sagen kann, ist, unter welchen Bedingungen ein Handel innerhalb
+        des Tages eine Chance hat — nicht, welcher Wert.
+      </p>
+      <ol id="dt-anweisungen" class="hint block"></ol>
+    </div>
+
+    <div class="card">
+      <h3>Bewegung der letzten Stunden</h3>
+      <p class="hint">Die zwanzig stärksten Bewegungen in der jüngsten Stundenbar.</p>
+      <table class="grid" id="dt-bewegungen">
+        <thead><tr><th>Symbol</th><th>Name</th><th>Klasse</th>
+          <th class="num">Kurs</th><th class="num">1 Stunde</th>
+          <th class="num">6 Stunden</th><th class="num">Spannweite</th>
+          <th>Zeitpunkt</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Was die Fachliteratur dazu sagt</h3>
+      <p class="hint">
+        Aus der eingebetteten Wissenssäule. Die Fragen sind auf das gerichtet, was
+        die Zahlen oben behaupten — eine Stelle, die widerspricht, ist wertvoller
+        als eine, die bestätigt.
+      </p>
+      <div id="dt-literatur"></div>
+    </div>
+  </section>
+</main>
+
+<!-- ===================================================== Tausch -->
+<main id="view-swap" class="view">
+  <section class="content wide">
+
+    <p class="hint block">
+      <b>Was diese Seite tut.</b> Sie nimmt Ihren Bestand und sucht je Position
+      die Gegenseite einer Kreuzung, bei der genau dieser Wert die
+      <b>untere</b> Seite geworden ist — die Kurve, von der er überholt wurde.
+    </p>
+
+    <p class="hint block">
+      <b>Warum hier kein Leerverkauf nötig ist.</b> Die Rangliste unter
+      <a href="#" data-goto="analysis">Analyse</a> misst ein Paar — obere Seite
+      kaufen, untere leerverkaufen. Diese Seite misst dasselbe, aber als
+      <b>Umschichtung</b>: Sie halten den Wert bereits, und die Frage lautet,
+      ob ein anderer an seine Stelle treten soll. Verkaufen und kaufen, zwei
+      Beine, kein Leerverkauf. Deshalb ist die Rechnung hier auf Ihr Kapital
+      bezogen und dort auf einen Prozentsatz.
+    </p>
+
+    <p class="hint block">
+      <b>Was sie nicht tut.</b> Sie sagt nicht voraus. Jede Prozentzahl unten
+      ist Vergangenheit: was der Tausch seit dem Kippen eingebracht
+      <i>hätte</i>. Die einzige Spalte, die über die Zukunft überhaupt etwas
+      andeutet, ist <b>Rückhalt</b> — wie oft frühere Kreuzungen desselben
+      Paares gehalten haben. Steht dort „ohne Rückhalt", dann hat das Signal
+      in der Vergangenheit nicht häufiger getroffen als ein Münzwurf.
+    </p>
+
+    <div class="card">
+      <h3>Bestand</h3>
+      <p class="hint">
+        Eine Zeile je Wert. Symbol in der verfolgten Schreibweise — Krypto trägt
+        das Suffix <code>-USD</code>. Der Einstandskurs ist freiwillig; ohne ihn
+        bleibt der Buchstand offen, geraten wird er nicht.
+      </p>
+
+      <div class="toolbar">
+        <div class="group">
+          <label for="sw-symbol">Symbol</label>
+          <input id="sw-symbol" list="sw-symbole" placeholder="BTC-USD" size="14">
+          <datalist id="sw-symbole"></datalist>
+        </div>
+        <div class="group">
+          <label for="sw-kapital">Kapital</label>
+          <input id="sw-kapital" type="number" min="0" step="any" placeholder="5000" size="10">
+        </div>
+        <div class="group">
+          <label for="sw-waehrung">Währung</label>
+          <input id="sw-waehrung" value="USD" size="5">
+        </div>
+        <div class="group">
+          <label for="sw-einstand">Einstandskurs</label>
+          <input id="sw-einstand" type="number" min="0" step="any" placeholder="optional" size="10">
+        </div>
+        <div class="group">
+          <label for="sw-notiz">Notiz</label>
+          <input id="sw-notiz" placeholder="optional" size="18">
+        </div>
+        <button id="sw-add" class="primary">Eintragen</button>
+      </div>
+
+      <table class="grid" id="sw-bestand">
+        <thead>
+          <tr>
+            <th>Symbol</th><th>Name</th><th>Klasse</th>
+            <th class="num">Kapital</th><th class="num">Kurs</th>
+            <th class="num">Einstand</th><th class="num">Buchstand</th>
+            <th>Notiz</th><th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p class="hint" id="sw-summe"></p>
+    </div>
+
+    <div class="card">
+      <h3>Wogegen tauschen</h3>
+
+      <div class="toolbar">
+        <div class="group">
+          <label for="sw-interval">Auflösung</label>
+          <select id="sw-interval">
+            <option value="1d">Tag</option>
+            <option value="1h">Stunde</option>
+          </select>
+        </div>
+        <div class="group">
+          <label for="sw-tage">Kreuzung höchstens vor</label>
+          <select id="sw-tage">
+            <option value="7">7 Tagen</option>
+            <option value="14">14 Tagen</option>
+            <option value="30" selected>30 Tagen</option>
+            <option value="90">90 Tagen</option>
+          </select>
+        </div>
+        <div class="group">
+          <label for="sw-halte">Haltedauer der Bewährung</label>
+          <select id="sw-halte">
+            <option value="5">5 Bars</option>
+            <option value="10">10 Bars</option>
+            <option value="20" selected>20 Bars</option>
+            <option value="60">60 Bars</option>
+          </select>
+        </div>
+        <div class="group">
+          <label for="sw-je">Ziele je Position</label>
+          <select id="sw-je">
+            <option value="1">1</option>
+            <option value="3" selected>3</option>
+            <option value="5">5</option>
+            <option value="10">10</option>
+          </select>
+        </div>
+        <div class="group">
+          <label for="sw-nurbew">Nur mit Rückhalt</label>
+          <select id="sw-nurbew">
+            <option value="false" selected>nein</option>
+            <option value="true">ja</option>
+          </select>
+        </div>
+        <button id="sw-load" class="primary">Vorschläge holen</button>
+      </div>
+
+      <p class="hint" id="sw-hinweis"></p>
+      <div id="sw-ziele"></div>
+    </div>
+  </section>
+</main>
+
+<main id="view-system" class="view">
+  <section class="content wide" id="benutzerverwaltung" hidden>
+    <div class="card">
+      <h3>Benutzer</h3>
+      <p class="hint">
+        <b>Zwei Rollen.</b> <b>Verwalter</b> dürfen alles — Benutzer anlegen,
+        Läufe anstoßen, Daten holen. <b>Nutzer</b> sehen denselben Inhalt, aber
+        nur lesend.
+      </p>
+      <p class="hint">
+        <b>Durchgesetzt wird das an der HTTP-Methode, nicht an einer Liste von
+        Seiten.</b> Lesen ist GET, alles andere verändert etwas. Eine Liste
+        müsste bei jedem neuen Endpunkt gepflegt werden, und wer einen vergisst,
+        hat ein Loch, das niemandem auffällt — weil alles funktioniert.
+      </p>
+
+      <div class="toolbar">
+        <div class="group">
+          <label for="bv-login">Anmeldename</label>
+          <input id="bv-login" size="16" autocomplete="off">
+        </div>
+        <div class="group">
+          <label for="bv-name">Anzeigename</label>
+          <input id="bv-name" size="18" placeholder="optional" autocomplete="off">
+        </div>
+        <div class="group">
+          <label for="bv-kennwort">Kennwort</label>
+          <input id="bv-kennwort" type="password" size="20" autocomplete="new-password">
+          <span class="hint">mindestens 12 Zeichen</span>
+        </div>
+        <div class="group">
+          <label for="bv-rolle">Rolle</label>
+          <select id="bv-rolle">
+            <option value="user">Nutzer — nur lesen</option>
+            <option value="admin">Verwalter — alles</option>
+          </select>
+        </div>
+        <button id="bv-anlegen" class="primary">Anlegen</button>
+      </div>
+
+      <p class="hint">
+        <b>Kennwort zurücksetzen.</b> Ein Verwalter setzt ein neues Kennwort
+        direkt in der Zeile — das bisherige muss er dafür nicht kennen und
+        bekommt es auch nicht zu sehen. <b>Alle Sitzungen dieses Benutzers
+        enden dabei sofort</b>: Wird zurückgesetzt, weil ein Konto übernommen
+        wurde, wäre alles andere wirkungslos — das Cookie des Angreifers bliebe
+        vierzehn Tage gültig.
+      </p>
+
+      <table class="grid" id="bv-liste">
+        <thead><tr>
+          <th>Anmeldename</th><th>Anzeigename</th><th>Rolle</th><th>Zustand</th>
+          <th>zuletzt angemeldet</th><th>neues Kennwort</th><th></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Eigenes Kennwort ändern</h3>
+      <div class="toolbar">
+        <div class="group">
+          <label for="pw-alt">bisheriges</label>
+          <input id="pw-alt" type="password" size="20" autocomplete="current-password">
+        </div>
+        <div class="group">
+          <label for="pw-neu">neues</label>
+          <input id="pw-neu" type="password" size="20" autocomplete="new-password">
+        </div>
+        <button id="pw-aendern" class="primary">Ändern</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="content wide">
+    <div class="toolbar">
+      <button id="sys-reload" class="primary">Aktualisieren</button>
+      <button id="sys-update-1d">Tagesdaten nachladen</button>
+      <button id="sys-update-1h">Stundendaten nachladen</button>
+    </div>
+    <div class="cols">
+      <div class="card"><h3>Bestand</h3><div id="sys-stats"></div></div>
+      <div class="card"><h3>Provider</h3><div id="sys-providers"></div></div>
+    </div>
+
+    <div class="card">
+      <h3>Scheduler</h3>
+      <p class="hint">
+        Holt stündlich neue Bars, bewertet fällige Prognosen — dabei wird
+        gelernt — und stellt neue. Täglich zusätzlich Universum und Analyse.
+        Angehaltene Termine werden übersprungen, nicht nachgeholt.
+      </p>
+      <div class="toolbar" style="border:0; margin-bottom:8px; padding-bottom:0">
+        <label class="check">
+          <input id="sched-enabled" type="checkbox">
+          <span id="sched-label">aktiv</span>
+        </label>
+        <button id="sched-run-hourly">Stundenlauf jetzt</button>
+        <button id="sched-run-daily">Tageslauf jetzt</button>
+      </div>
+      <div id="sched-status"></div>
+    </div>
+    <div class="card">
+      <h3>Letzte Läufe</h3>
+      <table class="grid" id="sys-runs">
+        <thead><tr><th>Job</th><th>Start</th><th>Dauer</th><th class="num">OK</th><th class="num">Fehler</th><th class="num">Zeilen</th><th>Notiz</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script src="/vendor/uplot/uPlot.iife.min.js"></script>
+<script src="/app.js?v=@BUILD@"></script>
+
+<!--  Nach app.js: Die Übersetzungsschicht legt sich über das fertige DOM und
+      braucht dafür nichts aus der Anwendung. Umgekehrt braucht die Anwendung
+      nichts von ihr — fällt loc.js aus, bleibt die Oberfläche deutsch und
+      voll bedienbar.                                                          -->
+<script src="/loc.js?v=@BUILD@"></script>
+</body>
+</html>

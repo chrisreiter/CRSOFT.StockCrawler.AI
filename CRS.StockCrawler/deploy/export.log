@@ -1,0 +1,34 @@
+﻿[export] Repo:   C:\work\github\chrisreiter\stockcrawler\CRS.StockCrawler
+[export] Ziel:   C:\work\github\chrisreiter\stockcrawler\CRS.StockCrawler\deploy\bundle
+[export] SQL-Backup von 'stockcrawler' ...
+10 percent processed.
+20 percent processed.
+30 percent processed.
+40 percent processed.
+50 percent processed.
+60 percent processed.
+70 percent processed.
+80 percent processed.
+90 percent processed.
+100 percent processed.
+Processed 452280 pages for database 'stockcrawler', file 'stockcrawler' on file 1.
+Processed 2 pages for database 'stockcrawler', file 'stockcrawler_log' on file 1.
+BACKUP DATABASE successfully processed 452282 pages in 4.714 seconds (749.564 MB/sec).
+[  ok  ] SQL-Backup: 1,043.2 MB
+[export] Qdrant-Snapshot 'crs_wissen' ...
+[  ok  ] Snapshot crs_wissen: 689.2 MB
+[export] Qdrant-Snapshot 'crs_semantik' ...
+[  ok  ] Snapshot crs_semantik: 689.1 MB
+[export] dotnet publish Ingest.Api (Release) ...
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+C:\work\github\chrisreiter\stockcrawler\CRS.StockCrawler\src\Ingest.Core\Analysis\FeatureMatrix.cs(202,30): warning CS8604: Possible null reference argument for parameter 'series' in 'double FeatureMatrix.Mean(double[] series, int t, int window)'. [C:\work\github\chrisreiter\stockcrawler\CRS.StockCrawler\src\Ingest.Core\Ingest.Core.csproj]
+  Ingest.Core -> C:\work\github\chrisreiter\stockcrawler\CRS.StockCrawler\src\Ingest.Core\bin\Release\net8.0\Ingest.Core.dll
+  Ingest.Infrastructure -> C:\work\github\chrisreiter\stockcrawler\CRS.StockCrawler\src\Ingest.Infrastructure\bin\Release\net8.0\Ingest.Infrastructure.dll
+  Ingest.Api -> C:\work\github\chrisreiter\stockcrawler\CRS.StockCrawler\src\Ingest.Api\bin\Release\net8.0\Ingest.Api.dll
+  Ingest.Api -> C:\work\github\chrisreiter\stockcrawler\CRS.StockCrawler\deploy\bundle\app\
+[  ok  ] App veroeffentlicht.
+[export] Config + Modelle kopieren ...
+[  ok  ] Bundle fertig: C:\work\github\chrisreiter\stockcrawler\CRS.StockCrawler\deploy\bundle  (2,639.3 MB)
+[export] Naechster Schritt: Ordner auf den Zielserver kopieren, dort als Admin:
+[export]   powershell -ExecutionPolicy Bypass -File .\2-install-target.ps1

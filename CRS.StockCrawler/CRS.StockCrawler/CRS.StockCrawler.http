@@ -1,0 +1,6 @@
+@CRS.StockCrawler_HostAddress = http://localhost:5011
+
+GET {{CRS.StockCrawler_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
