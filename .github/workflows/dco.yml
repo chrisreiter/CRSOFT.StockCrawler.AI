@@ -1,0 +1,89 @@
+# Prueft, dass jeder Commit eines Pull Requests eine Signed-off-by-Zeile traegt.
+#
+# WARUM DAS NOETIG IST. Dieses Projekt ist doppelt lizenziert: AGPL-3.0 fuer
+# alle, dazu eine kommerzielle Lizenz von CRSOFT fuer den, der nicht offenlegen
+# will. Das funktioniert nur, solange CRSOFT die Rechte an ALLEM Code haelt.
+# Ein einziger angenommener Pull Request ohne Rechteeinraeumung legt das
+# Projekt dauerhaft auf AGPL-only fest -- und zwar unbemerkt, denn ein PR ohne
+# Signatur sieht aus wie jeder andere. Genau deshalb prueft es eine Maschine
+# und nicht der gute Wille des Betreuers.
+#
+# Was die Signatur bedeutet, steht in CONTRIBUTING.md. Gesetzt wird sie mit
+# `git commit -s`.
+
+name: DCO
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  signed-off:
+    name: Signed-off-by
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Die ganze Historie, sonst fehlt der Vergleichspunkt zum Zielzweig.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Jeder Commit braucht eine Signatur
+        env:
+          BASIS: ${{ github.event.pull_request.base.sha }}
+          KOPF: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags --quiet origin "$BASIS" 2>/dev/null || true
+
+          fehlend=0
+          geprueft=0
+
+          for sha in $(git rev-list "$BASIS..$KOPF"); do
+            geprueft=$((geprueft + 1))
+            kurz=$(git log -1 --format='%h %s' "$sha")
+
+            if git log -1 --format='%B' "$sha" \
+                 | grep -qiE '^[[:space:]]*Signed-off-by:[[:space:]]+.+[[:space:]]+<.+@.+>[[:space:]]*$'; then
+              echo "  ok       $kurz"
+            else
+              echo "::error::Ohne Signed-off-by: $kurz"
+              fehlend=$((fehlend + 1))
+            fi
+          done
+
+          echo
+          echo "$geprueft Commit(s) geprüft, $fehlend ohne Signatur."
+
+          if [ "$fehlend" -gt 0 ]; then
+            cat <<'HINWEIS'
+
+          ────────────────────────────────────────────────────────────────
+          Es fehlt die Zeile "Signed-off-by:" in mindestens einem Commit.
+
+          Sie ist hier die Zustimmung zur Rechteeinräumung aus
+          CONTRIBUTING.md — Ihr Urheberrecht bleibt bei Ihnen, CRSOFT
+          bekommt zusätzlich das Recht, den Beitrag auch kommerziell zu
+          lizenzieren. Ohne das könnte die kommerzielle Ausnahme des
+          Projekts nicht bestehen bleiben.
+
+          Nachtragen:
+
+              git commit --amend -s --no-edit        # letzter Commit
+              git rebase --signoff origin/main       # alle im Zweig
+              git push --force-with-lease
+
+          ────────────────────────────────────────────────────────────────
+
+          It is the agreement to the grant of rights in CONTRIBUTING.md.
+          You keep your copyright; CRSOFT additionally gets the right to
+          license the contribution commercially. Add it with the commands
+          above.
+          HINWEIS
+            exit 1
+          fi
