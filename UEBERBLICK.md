@@ -1,11 +1,15 @@
 # CRSOFT.StockCrawler — was dieses Projekt kann
 
-**17 Börsenplätze. 641 Werte. 3,9 Millionen Kursbars. 397.011 ausgewertete
-Wertpaare. 35 Nachrichtenquellen in jeder Sprache. 42.219 Abschnitte
-Fachliteratur. Und ein NVIDIA-Nemotron-Modell obendrauf, das keine Zahl
-erfinden darf.**
+**Aktien, ETFs, Kryptowährungen und Indizes von 17 Börsenplätzen —
+mathematisch analysiert.
+Börsennachrichten aus aller Welt und die Fachliteratur dazu — sprachunabhängig
+als Vektoren.
+Und beides zusammen, Zahlen wie Text, gelesen von NVIDIA Nemotron.**
 
 Auf einem Rechner. Ohne Cloud. Offen und kostenlos.
+
+In Zahlen: 641 Werte · 3,9 Millionen Kursbars · 397.011 ausgewertete Wertpaare ·
+35 Nachrichtenquellen · 42.219 Abschnitte Fachliteratur · 978.837 Prognosen.
 
 Die ganze Kette, in einem System:
 
