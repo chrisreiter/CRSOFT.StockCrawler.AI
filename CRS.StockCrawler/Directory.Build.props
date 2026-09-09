@@ -1,0 +1,31 @@
+<Project>
+
+  <!--  Gilt fuer alle Projekte darunter, src wie tests.
+
+        Die Fassungsnummer stand bisher NIRGENDS. Die DLLs meldeten trotzdem
+        1.0.0.0, weil das SDK genau das als Voreinstellung einsetzt. Der
+        Unterschied ist nicht die Zahl, sondern die Absicht: Solange sie
+        nirgends steht, bemerkt niemand, dass sie sich nie bewegt.
+
+        AssemblyVersion bleibt auch dann bei 1.0.0.0, wenn Version steigt. Sie
+        ist der Bindungsvertrag zwischen Assemblies, und jede Aenderung daran
+        bricht bestehende Verweise. Bewegt werden Version und FileVersion.
+
+        (Kein doppelter Bindestrich in diesem Kommentar. XML erlaubt ihn
+        nicht, und MSBuild bricht den ganzen Bau ab.)
+  -->
+
+  <PropertyGroup>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+
+    <Company>CRSOFT</Company>
+    <Authors>Chris Reiter</Authors>
+    <Product>CRSOFT.StockCrawler.AI</Product>
+    <Copyright>Copyright (C) 2026 CRSOFT, Chris Reiter</Copyright>
+    <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/chrisreiter/CRSOFT.StockCrawler.AI</RepositoryUrl>
+  </PropertyGroup>
+
+</Project>

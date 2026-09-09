@@ -195,13 +195,33 @@ try
     {
         var auth = start.ServiceProvider.GetRequiredService<IAuthService>();
 
-        if (!await auth.IstEingerichtetAsync())
+        if (await auth.IstEingerichtetAsync())
+        {
+            Log.Information("Zugangskontrolle aktiv.");
+        }
+        else if (app.Environment.IsDevelopment() && await auth.EntwicklerzugangAsync())
+        {
+            /*  Bequemlichkeit fuer den, der das Projekt zum ersten Mal
+                auscheckt -- und nur fuer den. Die Auslieferung setzt
+                ASPNETCORE_ENVIRONMENT auf Production; dort faellt dieser
+                Zweig weg, und es bleibt beim Einrichtungswort.
+
+                Die Warnung ist laut und bleibt laut: Ein Standardzugang, den
+                man vergisst, ist genau das Loch, das die Anmeldung schliessen
+                soll -- und dieses Repository ist oeffentlich, das Kennwort
+                steht also fuer jeden lesbar in der README.                   */
+            Log.Warning("ENTWICKLERZUGANG angelegt: admin / admin — gilt nur, weil "
+                      + "ASPNETCORE_ENVIRONMENT=Development steht. Vor dem ersten "
+                      + "erreichbaren Betrieb ein eigenes Kennwort setzen "
+                      + "(System → Benutzer) oder den Benutzer loeschen.");
+        }
+        else
+        {
             Log.Warning(
                 "Noch kein Benutzer angelegt. EINRICHTUNGSWORT: {Wort} — damit über "
                 + "POST /api/auth/einrichten den ersten Verwalter anlegen. Das Wort gilt "
                 + "nur für diesen Programmlauf.", auth.Einrichtungswort);
-        else
-            Log.Information("Zugangskontrolle aktiv.");
+        }
 
         /* Läufe schliessen, die ein früherer Prozess offen gelassen hat.
 

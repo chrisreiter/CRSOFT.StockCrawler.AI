@@ -1348,6 +1348,13 @@ Versehen.** Sie in einer anderen Sprache zu erzeugen heisst deshalb, die 144
 Vorlagen zu übersetzen, nicht das Modell schreiben zu lassen. Der schnelle Weg
 holte genau das Risiko zurück, wegen dessen die Vorlagen existieren.
 
+**Ein XML-Kommentar darf kein `--` enthalten — und zwar auch in MSBuild
+nicht.** Diese Regel steht hier seit dem Sprachkatalog, und ich bin beim
+Anlegen von `Directory.Build.props` erneut hineingelaufen: `error MSB4024 ... An
+XML comment cannot contain '--'`. Der Unterschied zum ersten Mal ist der
+Ausgang — dort blieb die Sprachliste stillschweigend leer, hier bricht der
+ganze Bau ab. Die laute Variante ist die freundlichere.
+
 **Ein XML-Kommentar darf kein `--` enthalten.** Der erzeugte Sprachkatalog
 trug im Kopfkommentar Gedankenstriche als `--`; `XDocument.Load` scheiterte
 daran, der Dienst fing es je Datei ab — und die Sprachliste blieb **leer**, was
