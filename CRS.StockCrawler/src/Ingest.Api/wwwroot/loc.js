@@ -294,8 +294,17 @@ const Loc = (() => {
           bleiben deutsch. Das ist eine sichtbare Lücke und eine schnelle
           Oberfläche — die umgekehrte Wahl wäre eine vollständige Übersetzung
           und eine unbenutzbare Anwendung.                                    */
+      /*  Mehrwortig -- ODER lang genug UND mit Satzzeichen.
+
+          Die zweite Bedingung holt genau die Faelle zurueck, die sonst
+          unuebersetzt stehenbleiben: „(Prognose)" in einer Legende, die
+          „BTC-USD (Prognose)" heisst. Ein Klammerausdruck kann nicht mitten
+          in einem Wort treffen, das Risiko der Einzelwoerter besteht hier
+          also nicht -- und es sind eine Handvoll Schluessel, nicht tausend. */
       const roh = [...wb.keys()]
-        .filter(k => k.length >= 6 && k.length <= 200 && /\s/.test(k))
+        .filter(k => k.length <= 200 && (
+          (k.length >= 6 && /\s/.test(k)) ||
+          (k.length >= 8 && /[^\p{L}\p{N}]/u.test(k))))
         .sort((a, b) => b.length - a.length)
         .map(k => (WORTZEICHEN.test(k[0]) ? VOR : '')
                 + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

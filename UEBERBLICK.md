@@ -1,46 +1,137 @@
 # CRSOFT.StockCrawler — was dieses Projekt kann
 
-Ein offenes Labor für Marktanalyse und Prognose. Es sammelt Kurse, Nachrichten
-und Fachliteratur in **ein** Datenmodell, untersucht die Wechselwirkungen
-darin, erzeugt daraus selbstlernende Prognosen — und **misst schonungslos
-nach, was davon trägt.**
+**17 Börsenplätze. 641 Werte. 3,9 Millionen Kursbars. 397.011 ausgewertete
+Wertpaare. 35 Nachrichtenquellen in jeder Sprache. 42.219 Abschnitte
+Fachliteratur. Und ein NVIDIA-Nemotron-Modell obendrauf, das keine Zahl
+erfinden darf.**
 
-Der letzte Halbsatz ist der eigentliche Unterschied. Alles hier ist gegen einen
-Sperrbereich geprüft, und wo ein Verfahren nichts leistet, steht das in der
-Oberfläche. Auf Deutsch und auf Englisch.
+Auf einem Rechner. Ohne Cloud. Offen und kostenlos.
+
+Die ganze Kette, in einem System:
+
+```
+   Kurse          17 Börsen, live, stündlich, zurück bis 2001
+      ↓
+   Mathematik     Korrelationen · Kreuzungen · Vorlauf · Kurvendiskussion
+      ↓           Spektralanalyse · Kapitalfluss · Zeitzonen
+   Nachrichten    35 Quellen weltweit, in JEDER Sprache
+      ↓
+   Vektorraum     sprachunabhängig — und darin zugleich die Fachliteratur:
+      ↓           arXiv, Dissertationen, Klassiker
+   Reasoning      NVIDIA Nemotron, das jede Zahl belegen muss
+      ↓
+   Täglich        Journal · Auffälligkeiten · Trends · Prognosen
+```
+
+Das ist der Aufbau, für den Anbieter fünfstellige Jahreslizenzen verlangen.
+
+**Und dann der Teil, den keiner von denen mitliefert: die Messung, was davon
+trägt.** Alles hier ist gegen einen Sperrbereich geprüft, und wo ein Verfahren
+nichts leistet, steht das in der Oberfläche — nicht im Kleingedruckten.
 
 ---
 
-## Die Kernpunkte
+## Die Kette im Einzelnen
 
-**Kurse.** 641 verfolgte Werte — Aktien, Fonds/ETFs, Kryptowährungen, Indizes,
-Devisen — aus mehreren Anbietern in einem einheitlichen Modell. **3,94 Millionen
-Bars**, Tages- und Stundenauflösung, bis 2001 zurück.
+### 1 · Märkte — 641 Werte von 17 Börsenplätzen
 
-**Nachrichten, sprachunabhängig.** 35 Feeds von Reuters, WSJ, FT, CNBC über
-Handelsblatt, NZZ und Der Standard bis Nikkei, SCMP und Economic Times, dazu
-Fed, EZB, Bank of England, BIZ und SEC. **11.644 Artikel** eingelesen und
-eingebettet. Das Einbettungsmodell (`bge-m3`) ist mehrsprachig — eine deutsche
-Frage findet eine japanische Meldung, ohne dass irgendwo übersetzt wird.
+| | |
+| ---: | --- |
+| **405** | Aktien |
+| **109** | Kryptowährungen |
+| **107** | Fonds und ETFs |
+| **20** | Indizes und Devisen |
 
-**Fachliteratur.** Bücher und Arbeiten werden in überlappende Abschnitte zerlegt
-und mit Fundstelle abgelegt: **42.219 Abschnitte**. Jeder Treffer trägt Quelle,
-Seite und Textanker — ein Treffer ohne Fundstelle wäre eine Behauptung.
+Xetra, Paris, London, Zürich, Tokio, Amsterdam, Wien, Mailand, Madrid,
+Stockholm, Hongkong und die US-Börsen. **3.941.331 Bars**, Tages- und
+Stundenauflösung, bis 2001 zurück. Stündlich kommen neue dazu.
 
-**Prognosen.** **978.837 Live-Prognosen** über sieben Horizonte von 24 Stunden
-bis einem Jahr, davon **303.465 bereits gegen den eingetroffenen Kurs
-ausgewertet**. Aus jeder Auswertung werden die Gewichte der Teilmodelle
-nachgezogen.
+Dass verschiedene Börsen verschiedene Handelskalender haben, ist dabei kein
+Detail, sondern die häufigste Falle: Wer über das rohe Zeitraster rechnet,
+misst den Kalender statt den Markt — und zwar überzeugend genug, um es zu
+glauben. Drei Auswertungen dieses Projekts sind genau daran gescheitert, bevor
+es behoben war.
 
-**Ein Reasoning-Modell als Erklärer, nicht als Orakel.** `nemotron3:33b`
-beantwortet Fragen zu Prognosen, Kurvenereignissen, Verknüpfungen und dem
-gesammelten Wissen — **und darf keine Zahl erfinden.** Jede Zahl stammt aus
-einem Werkzeugaufruf, und die Aufrufe stehen mit Name, Argumenten und Ergebnis
-unter jeder Antwort. Es antwortet in der Sprache der Frage.
+### 2 · Mathematische Auswertung
 
-**Und die unbequeme Zahl.** Über **9.035 entdoppelte Live-Prognosen** auf 24
-Stunden liegt die Richtungstrefferquote bei **0,5109**. Nötig wären bei 1,55 %
-Tagesbewegung und 0,3 % Rundlauf **0,598**, damit ein Geschäft die Kosten deckt.
+- **397.011 Wertpaare** auf Korrelation, besten Lag und Richtung ausgewertet
+- **Kreuzungen** — wann zwei normalisierte Kurven die Plätze getauscht haben,
+  mit Rangliste nach Paargewinn und Bewährung aus **getrennten Zeiträumen**
+- **Kurvendiskussion** über den gesamten Bestand: Hoch-, Tief-, Wende- und
+  Sattelpunkte über lokale Polynomanpassung, dazu Steigungs- und
+  Krümmungsausbrüche
+- **Frühindikatoren** und **Zeitzonen-Vorlauf** — Tokio, Europa, New York, mit
+  sauberer Trennung von echtem Vorlauf und blosser Überlappung
+- **Spektralanalyse**: Periodenlängen, Zyklenstabilität, Momentanzyklus, SSA
+- **Kapitalfluss**: Umverteilung gegen Zu- und Abfluss, Rotationsverdacht
+- **Bot-Herde** — was die öffentlich bekannten Auslöser tatsächlich
+  hinterlassen, über tausende Ereignisse gemessen
+
+### 3 · Nachrichten — stündlich, in jeder Sprache
+
+**35 Quellen aus elf Regionen**: Reuters, WSJ, FT, CNBC, MarketWatch,
+Handelsblatt, NZZ, Der Standard, Nikkei, South China Morning Post, Economic
+Times, CoinDesk, Cointelegraph — dazu Fed, EZB, Bank of England, BIZ und SEC,
+und UN News für Weltereignisse. **11.644 Artikel** eingelesen.
+
+**Sprachunabhängig.** Das Einbettungsmodell `bge-m3` ist mehrsprachig: Eine
+deutsche Frage findet eine japanische Meldung, ohne dass irgendwo übersetzt
+wird. Es gibt keinen Übersetzungsschritt, weil keiner nötig ist — die Vektoren
+liegen im selben Raum.
+
+*Noch nicht dabei:* soziale Kanäle. Die Feed-Schicht nimmt jede RSS- oder
+Atom-Quelle, die Erweiterung ist also klein — sie steht unter *Was geplant ist*.
+
+### 4 · Fachliteratur im selben Vektorraum
+
+**55 Quellen, 42.219 Abschnitte**, jeder mit Quelle, Seite und Textanker:
+
+| | |
+| ---: | --- |
+| **41** | arXiv-Arbeiten zu Limit Order Books, statistischer Arbitrage, Marktwirkung, Ausführungsstrategien, Deep Learning im Handel |
+| **12** | gemeinfreie Klassiker — Lefèvre, Selden, Harper, Clews, Crump, Gibson, Lawson, Rice, Brandenburg, Butler, Francis |
+| **1** | Dissertation zu Marktmikrostruktur und algorithmischem Handel |
+| **1** | BIZ-Arbeitspapier zum Hochfrequenzhandel |
+
+**Nachrichten und Literatur liegen im selben Raum.** Eine Frage nach
+Verlustaversion findet die Stelle im Lehrbuch *und* die Meldung von heute
+Morgen — ohne dass jemand die Verbindung von Hand angelegt hätte.
+
+### 5 · KI-Reasoning über NVIDIA Nemotron
+
+`nemotron3:33b` beantwortet Fragen zu Prognosen, Kurvenereignissen,
+Verknüpfungen und dem gesammelten Wissen — **und darf dabei keine Zahl
+erfinden.** Jede Zahl stammt aus einem Werkzeugaufruf, und die Aufrufe stehen
+mit Name, Argumenten und Ergebnis unter jeder Antwort. Wer misstraut, sieht
+nach.
+
+Er antwortet in der Sprache der Frage. Und er ist ausdrücklich **Erklärer, nicht
+Orakel**: Er liest die vorhandenen Prognosen ab, er erzeugt keine. Deshalb hat
+diese Säule kein Gewicht am Ergebnis.
+
+### 6 · Täglich: Journal, Trends, Prognosen
+
+- **978.837 Live-Prognosen** über sieben Horizonte von 24 Stunden bis einem
+  Jahr, davon **303.465 bereits gegen den eingetroffenen Kurs ausgewertet**
+- **Marktjournal** — was sich bewegt hat, was darüber berichtet wurde, was die
+  Messung dazu hergibt, als Markdown zum Weiterverwenden
+- **Tagesübersicht** mit den auffälligen Stellen, gewichtet nach Auffälligkeit
+  **mal** gemessenem Verdienst ihrer Säule
+
+**Das Journal wird ohne Sprachmodell geschrieben.** Jede Zahl darin stammt aus
+einer Abfrage; der Satz drumherum ist Vorlage, nicht Erzeugnis. Der Grund steht
+in der Messung: Ein kleineres Modell las hier ein Fehlerverhältnis von 1,0034
+als „nahezu perfekt" und behauptete das Gegenteil der Werkzeugausgabe. Was in
+ein Blog geht, muss nachrechenbar bleiben.
+
+---
+
+## Und die unbequeme Zahl
+
+Über **9.035 entdoppelte Live-Prognosen** auf 24 Stunden liegt die
+Richtungstrefferquote bei **0,5109**. Nötig wären bei 1,55 % Tagesbewegung und
+0,3 % Rundlauf **0,598**, damit ein Geschäft die Kosten deckt.
+
 Das steht so in der Anwendung, und es ist der Grund, warum es hier keine
 Kaufempfehlungen gibt.
 
@@ -128,6 +219,10 @@ nicht aus der Einstellung.
   bewertbare Prognosen blockieren die bewertbaren dahinter
 - **Werte ohne Kursdaten aussortieren**, statt sie mitzuführen
 - **Zugangsdaten in User Secrets** statt in `appsettings.json`
+- **Soziale Kanäle als Quelle** — die Feed-Schicht nimmt jede RSS- oder
+  Atom-Quelle; heute sind es 35 Nachrichten-, Notenbank- und Aufsichtsquellen
+  und **kein** sozialer Kanal. Die Erweiterung ist klein, die Frage nach der
+  Signalqualität die eigentliche Arbeit
 - **SEC EDGAR anbinden** — Registrierungen liefern Wochen früher Signal als der
   IPO-Kalender
 - **Leerverkäufe im virtuellen Depot** — erst damit wäre `invers` ein echtes
