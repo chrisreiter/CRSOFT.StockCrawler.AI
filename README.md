@@ -67,11 +67,14 @@ claude "/startup"
 ```
 
 Claude Code works through [`startUp.md`](startUp.md): check prerequisites,
-.NET, SQL Server, schema, Ollama with `bge-m3`, Qdrant, first administrator,
+.NET, database, schema, Ollama with `bge-m3`, Qdrant, first administrator,
 price data. Without Claude Code, every step is also written out as a command.
 
-Runs entirely locally — no cloud required. Prerequisites: .NET 8 SDK, SQL
-Server, and for the knowledge and semantics pillars Ollama plus Qdrant.
+Runs entirely locally — no cloud required. Prerequisites: .NET 8 SDK, a
+database — **PostgreSQL or SQL Server**, both supported, Postgres is the
+easier start — and for the knowledge and semantics pillars Ollama plus Qdrant.
+The rules for writing SQL that runs on both are in
+[`docs/DATENBANK.md`](CRS.StockCrawler/docs/DATENBANK.md) *(German)*.
 
 ### Signing in the first time
 
