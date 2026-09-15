@@ -35,12 +35,13 @@ Am Ende gibst du eine Übersicht: was läuft, was fehlt, was davon optional ist.
 | | mindestens | wofür |
 | --- | --- | --- |
 | Plattenplatz | **10 GB**, mit Reasoning-Modell **45 GB** | Datenbank, Vektoren, Modelle |
+| Datenbank | PostgreSQL **oder** SQL Server | beides wird unterstützt; Postgres ist der einfachere Einstieg |
 | Arbeitsspeicher | 8 GB, für `nemotron3:33b` **32 GB** | das Modell liegt im RAM, wenn keine GPU da ist |
 | Betriebssystem | Windows, Linux oder macOS | die Anwendung selbst ist plattformunabhängig |
 
-**Windows ist der bequemere Weg**, weil die Hilfsskripte PowerShell sind und
-SQL Server dort nativ läuft. Unter Linux und macOS gehen SQL Server und Qdrant
-über Docker; das steht bei den jeweiligen Schritten.
+**Windows ist der bequemere Weg**, weil die Hilfsskripte PowerShell sind.
+Unter Linux und macOS gehen PostgreSQL, SQL Server und Qdrant über Docker; das
+steht bei den jeweiligen Schritten.
 
 Prüfen:
 
@@ -70,7 +71,50 @@ Fehlt es: <https://dotnet.microsoft.com/download> — oder
 
 ---
 
-## 2 · SQL Server
+## 2 · Datenbank
+
+Die Anwendung läuft auf **PostgreSQL oder SQL Server** — umschaltbar über die
+Konfiguration, beides geprüft (Einzelheiten und die Regeln für zweisprachiges
+SQL in [`CRS.StockCrawler/docs/DATENBANK.md`](CRS.StockCrawler/docs/DATENBANK.md)).
+
+> **Claude: wenn schon eines von beiden auf dem Rechner läuft, nimm das.
+> Läuft keines, nimm PostgreSQL** — kostenlos, ohne Grössengrenze, auf jedem
+> System in fünf Minuten da. Frage den Nutzer nur, wenn beide laufen.
+
+### 2a · PostgreSQL (empfohlen)
+
+Geprüft mit **PostgreSQL 18**; ab 15 sollte alles gehen (`MERGE` kam mit 15).
+
+```bash
+psql --version
+```
+
+Fehlt es:
+
+- **Windows:** Installer von postgresql.org; `psql` liegt danach unter
+  `C:\Program Files\PostgreSQL\<Version>in`, aber nicht im PATH —
+  `apply-pgsql.ps1` findet es dort trotzdem.
+- **Linux / macOS / überall:**
+  ```bash
+  docker run -e POSTGRES_PASSWORD=<superuser-kennwort> -p 5432:5432              --name crs-pg -d postgres:18
+  ```
+
+Dann einmalig als Superuser Rolle und Datenbank anlegen:
+
+```sql
+CREATE ROLE stockcrawler LOGIN PASSWORD 'StockCrawler!';
+CREATE DATABASE stockcrawler OWNER stockcrawler;
+```
+
+Mehr braucht es nicht: Das Schema `dbo`, die Tabellen und Funktionen legt
+Schritt 3 als `stockcrawler` selbst an.
+
+**Nachweis:**
+`psql -h localhost -U stockcrawler -d stockcrawler -c "SELECT version()"`
+
+Weiter mit Schritt 3. Der Rest dieses Abschnitts betrifft nur SQL Server.
+
+### 2b · SQL Server
 
 Geprüft mit **SQL Server 2025**; ab 2019 sollte alles gehen. Express reicht
 nicht immer — die Datenbank wächst über die 10-GB-Grenze von Express hinaus,
@@ -145,19 +189,28 @@ Das `IF DB_ID(...) IS NULL` in der Migration sieht die vorhandene Datenbank und
 
 ## 3 · Schema einspielen
 
+**PostgreSQL:**
+
+```powershell
+cd CRS.StockCrawler
+powershell -File infra/apply-pgsql.ps1 -Server localhost -User stockcrawler -Password <kennwort>
+```
+
+Spielt `infra/pgsql/*.sql` ein: Schema (43 Tabellen), Routinen, Stammdaten.
+**Nachweis:** Die Ausgabe endet mit `Fertig. 43 Tabellen im Schema dbo.`
+
+**SQL Server:**
+
 ```powershell
 cd CRS.StockCrawler
 powershell -File infra/apply-sql.ps1 -Server <server> -User stockcrawler -Password <kennwort>
 ```
 
-Das Skript spielt `infra/sql/*.sql` in Reihenfolge ein und ist **idempotent** —
-ein zweiter Lauf schadet nicht.
+Spielt `infra/sql/*.sql` in Reihenfolge ein. **Nachweis:** Die Ausgabe endet
+bei `043_invers.sql`, und `SELECT COUNT(*) FROM sys.tables` liegt deutlich
+über 40.
 
-**Nachweis:** Die Ausgabe endet bei `043_invers.sql`, und
-
-```sql
-SELECT COUNT(*) FROM sys.tables;     -- deutlich über 40
-```
+Beide Skripte sind **idempotent** — ein zweiter Lauf schadet nicht.
 
 ---
 
@@ -168,12 +221,14 @@ Migrationen selbst an — sie sind nicht nur Schema:
 
 | | |
 | --- | --- |
-| `012` | die gespeicherten Prozeduren |
+| `012` | die gespeicherten Prozeduren (Postgres: `011_routinen.sql`) |
 | `026` · `027` | Kreuzungsumkehr und die sieben Bot-Auslöser mit ihren Definitionen |
 | `028` | die Vorgabegewichte der acht Säulen |
 | `029` | die Zeitzonenzuordnung der Börsenplätze |
 | `037` | die Verrechnungskonten je Depot und Währung |
 | `038` · `039` · `043` | die vier Autopilot-Strategien samt Budget und Takt |
+
+Unter Postgres stehen dieselben Zeilen in `infra/pgsql/012_stammdaten.sql`.
 
 **Nicht** in den Migrationen stehen die eigentlichen Daten: Werte, Kurse,
 Nachrichten, Fachliteratur. Die holt die Anwendung selbst — siehe Schritt 9.
@@ -188,12 +243,24 @@ den Quellen, und zwar in dem Umfang, den der Betreiber wählt.
 
 ## 4 · Zugangsdaten eintragen
 
-`src/Ingest.Api/appsettings.json`, Feld `ConnectionStrings:Sql`. Die
-API-Schlüssel für TwelveData und CoinGecko sind **optional**: Ohne sie holt die
-Anwendung ihre Kurse von Yahoo, was für die Entwicklung genügt.
+`src/Ingest.Api/appsettings.json`, Block `ConnectionStrings`: **eine** der
+beiden Zeilen freigeben, die andere auskommentiert lassen —
 
-> **Claude: trage die Verbindungszeichenfolge mit dem in Schritt 2 vergebenen
-> Kennwort ein.** Weise den Nutzer darauf hin, dass diese Datei in der
+```jsonc
+"ConnectionStrings": {
+  // "Sql": "Server=.\SQLSERVER;Database=stockcrawler;User Id=stockcrawler;Password=…;TrustServerCertificate=true",
+  "Postgres": "Host=localhost;Port=5432;Database=stockcrawler;Username=stockcrawler;Password=…"
+}
+```
+
+Ist nur `Postgres` gesetzt, läuft Postgres; nur `Sql`, läuft SQL Server; sind
+beide gesetzt, entscheidet `Datenbank:System`. Die API-Schlüssel für
+TwelveData und CoinGecko sind **optional**: Ohne sie holt die Anwendung ihre
+Kurse von Yahoo, was für die Entwicklung genügt.
+
+> **Claude: trage die Verbindungszeichenfolge des in Schritt 2 gewählten
+> Systems mit dem dort vergebenen Kennwort ein und lass die andere
+> auskommentiert stehen.** Weise den Nutzer darauf hin, dass diese Datei in der
 > Versionsverwaltung liegt — sein Kennwort landet also in seinem nächsten
 > Commit, wenn er nicht aufpasst.
 
@@ -460,6 +527,9 @@ der häufigste Fall und sieht nicht nach einem Fehler aus, weil nichts abstürzt
 naheliegenden Ursachen und verschweigt eine dritte: Ein früher gewählter, jetzt
 toter Endpunkt bleibt ausgewählt. Nachsehen unter *Säulen → Reasoning → Wo
 Ollama läuft*.
+
+**`apply-pgsql.ps1` meldet „password authentication failed".** Rolle und
+Datenbank aus Schritt 2a fehlen noch — die legt nur ein Superuser an.
 
 **`apply-sql.ps1` bricht bei einer Datei ab.** Die Skripte bauen aufeinander
 auf; die Reihenfolge ist die Dateinummer. Ein einzelnes Skript nachzuziehen
