@@ -133,8 +133,8 @@ public sealed class LearningRepository : ILearningRepository
                    mape AS Mape, hit_rate AS HitRate, pair_refreshes AS PairRefreshes,
                    note AS Note
               FROM dbo.learning_epoch
-             WHERE (@runLabel IS NULL OR run_label = @runLabel)
-             ORDER BY epoch_id DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
+             WHERE (run_label = @runLabel OR @runLabel IS NULL)
+             ORDER BY epoch_id DESC OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY
             """, new { runLabel, limit }, cancellationToken: ct));
 
         return rows.ToList();

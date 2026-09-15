@@ -80,7 +80,7 @@ public sealed class CrossingOpportunityService(ISqlConnectionFactory factory)
             in Postgres nicht, und ein Parameter ist ohnehin klarer.           */
         p.Add("@seit", DateTime.UtcNow.AddDays(-tage));
         p.Add("@limit", rohlimit);
-        p.Add("@nur_wechsel", nurKlassenwechsel);
+        p.Add("@nur_wechsel", nurKlassenwechsel ? 1 : 0);   // als Zahl: Postgres vergleicht boolean nicht mit 0
         p.Add("@sprung_aktie", SprungAktie);
         p.Add("@sprung_krypto", SprungKrypto);
 
@@ -309,11 +309,11 @@ public sealed class CrossingOpportunityService(ISqlConnectionFactory factory)
           LEFT JOIN {d.Temp("sprung")} sa ON sa.asset_id = p.asset_id_a
           LEFT JOIN {d.Temp("sprung")} sb ON sb.asset_id = p.asset_id_b;
 
-        SELECT * FROM {d.Temp("alle")} WHERE Verdacht = 0 ORDER BY Paargewinn DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY;
+        SELECT * FROM {d.Temp("alle")} WHERE Verdacht = 0 ORDER BY Paargewinn DESC OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY;
 
         SELECT * FROM {d.Temp("alle")} WHERE Verdacht = 1 ORDER BY MaxSprung DESC OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;
 
-        SELECT COUNT(*) FROM {d.Temp("alle")};
+        SELECT CAST(COUNT(*) AS INT) FROM {d.Temp("alle")};
         """;
 
     // ------------------------------------------------------------ Rohzeilen --

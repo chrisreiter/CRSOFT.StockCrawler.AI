@@ -8,7 +8,7 @@
     Braucht psql. Der Windows-Installer legt es unter
     C:\Program Files\PostgreSQL\<Version>\bin ab, aber nicht in den PATH.    #>
 param(
-  [string]$Host     = "localhost",
+  [string]$Server   = "localhost",
   [int]   $Port     = 5432,
   [string]$Database = "stockcrawler",
   [string]$User     = "stockcrawler",
@@ -25,21 +25,22 @@ if (-not $psql) { throw "psql nicht gefunden. PostgreSQL installieren oder psql 
 
 $env:PGPASSWORD       = $Password
 $env:PGCLIENTENCODING = "UTF8"
+$env:PGOPTIONS         = "-c client_min_messages=warning"   # IF NOT EXISTS-Hinweise sind kein Befund
 
 $files = Get-ChildItem -Path (Join-Path $PSScriptRoot "pgsql") -Filter "*.sql" | Sort-Object Name
 foreach ($f in $files) {
   Write-Host "==> $($f.Name)"
   # ON_ERROR_STOP: ein Fehler bricht ab, statt dass die Haelfte still durchlaeuft.
-  & $psql -h $Host -p $Port -U $User -d $Database -v ON_ERROR_STOP=1 -q -f $f.FullName
+  & $psql -h $Server -p $Port -U $User -d $Database -v ON_ERROR_STOP=1 -q -f $f.FullName
   if ($LASTEXITCODE -ne 0) { throw "$($f.Name) fehlgeschlagen (psql exit $LASTEXITCODE)" }
 }
 
 # Suchpfad als Vorgabe der Datenbank, damit auch unqualifizierte Namen (und
 # psql-Sitzungen) im Schema dbo landen. Die Anwendung setzt ihn zusaetzlich
 # selbst auf der Verbindung.
-& $psql -h $Host -p $Port -U $User -d $Database -v ON_ERROR_STOP=1 -q `
+& $psql -h $Server -p $Port -U $User -d $Database -v ON_ERROR_STOP=1 -q `
   -c "ALTER DATABASE $Database SET search_path = dbo, public;"
 
-$n = & $psql -h $Host -p $Port -U $User -d $Database -t -A `
+$n = & $psql -h $Server -p $Port -U $User -d $Database -t -A `
   -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'dbo';"
 Write-Host "Fertig. $($n.Trim()) Tabellen im Schema dbo." -ForegroundColor Green

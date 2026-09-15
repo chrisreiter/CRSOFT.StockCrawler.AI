@@ -126,7 +126,7 @@ public sealed class ReasoningLogService : IReasoningLogService
                      OR l.antwort LIKE CONCAT('%', @suche, '%')
                      OR l.notiz   LIKE CONCAT('%', @suche, '%'))
              ORDER  BY l.asked_utc DESC, l.log_id DESC
-            OFFSET  @versatz ROWS FETCH NEXT @limit ROWS ONLY
+            OFFSET  @versatz ROWS FETCH NEXT (@limit) ROWS ONLY
             """,
             new
             {

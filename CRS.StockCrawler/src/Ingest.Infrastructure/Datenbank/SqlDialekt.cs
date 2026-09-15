@@ -77,6 +77,15 @@ public abstract class SqlDialekt
     public abstract string Stdabw(string x);
 
     /// <summary>
+    /// Mitgliedschaft in einer Parameterliste. SQL Server: <c>x IN @ids</c>,
+    /// das Dapper zu <c>IN (@ids1, @ids2, …)</c> aufzaehlt. Bei Npgsql tut Dapper
+    /// das NICHT — es reicht das Array als einen Parameter durch und erwartet
+    /// <c>x = ANY(@ids)</c>; ein <c>IN @ids</c> kommt dort als <c>IN $1</c> an
+    /// und ist ein Syntaxfehler. <paramref name="parameter"/> ohne <c>@</c>.
+    /// </summary>
+    public abstract string In(string ausdruck, string parameter);
+
+    /// <summary>
     /// Median je Gruppe. In SQL Server ist <c>PERCENTILE_CONT</c> eine
     /// Fensterfunktion (<c>DISTINCT … OVER (PARTITION BY)</c>), in Postgres ein
     /// geordnetes Aggregat (<c>GROUP BY</c>) — die Abfrage hat also eine andere
@@ -178,6 +187,17 @@ public abstract class SqlDialekt
     /// </summary>
     public abstract string Aufruf(string routine, params string[] parameter);
 
+    /// <summary>
+    /// <c>UPDATE</c> mit Verknüpfung. T-SQL: <c>UPDATE a SET … FROM dbo.t a, q WHERE …</c>;
+    /// Postgres: <c>UPDATE dbo.t a SET … FROM q WHERE …</c>. Die Zielspalten im
+    /// <c>SET</c> bleiben unqualifiziert, das nehmen beide:
+    /// <code>
+    /// {d.UpdateZiel("dbo.t", "a")} SET x = q.x {d.UpdateQuelle("dbo.t", "a")} q WHERE q.id = a.id
+    /// </code>
+    /// </summary>
+    public abstract string UpdateZiel(string tabelle, string alias);
+    public abstract string UpdateQuelle(string tabelle, string alias);
+
     /// <summary>Ob die Ausnahme eine Verletzung eines eindeutigen Schlüssels
     /// meldet (SQL Server 2601/2627, Postgres 23505).</summary>
     public abstract bool IstDoppelterSchluessel(DbException ex);
@@ -200,6 +220,9 @@ public sealed class SqlServerDialekt : SqlDialekt
     public override string Ln(string x) => $"LOG({x})";
     public override string Runden(string x, string stellen) => $"ROUND({x}, {stellen})";
     public override string Stdabw(string x) => $"STDEV({x})";
+    public override string In(string ausdruck, string parameter) => $"{ausdruck} IN @{parameter}";
+    public override string UpdateZiel(string tabelle, string alias)   => $"UPDATE {alias}";
+    public override string UpdateQuelle(string tabelle, string alias) => $"FROM {tabelle} {alias},";
     public override string MedianSelect(string gruppe, string spalte, string alias)
         => $"SELECT DISTINCT {gruppe}, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {spalte}) OVER (PARTITION BY {gruppe}) AS {alias}";
     public override string MedianGroupBy(string gruppe) => "";
@@ -250,13 +273,21 @@ public sealed class PostgresDialekt : SqlDialekt
     public override string TageZwischen(string von, string bis) => $"(CAST({bis} AS DATE) - CAST({von} AS DATE))";
     public override string SekundenZwischen(string von, string bis) => $"EXTRACT(EPOCH FROM ({bis} - {von}))";
 
-    public override string Ln(string x) => $"LN({x})";
-    public override string Runden(string x, string stellen) => $"ROUND(CAST({x} AS NUMERIC), {stellen})";
-    public override string Stdabw(string x) => $"STDDEV_SAMP({x})";
+    /*  Immer ueber double: In SQL Server liefert LOG() stets float, in Postgres
+        liefert ln(numeric) numeric -- und ein Datensatz, der double erwartet,
+        bekaeme decimal. Gefunden an AVG(ABS(ln(close/lag))) der Rangfolge.   */
+    public override string Ln(string x) => $"LN(CAST({x} AS DOUBLE PRECISION))";
+    /*  Zurueck nach double: In SQL Server gibt ROUND(float, n) float, und die
+        Datensaetze erwarten double. Alle zehn Aufrufer runden Gleitkommawerte. */
+    public override string Runden(string x, string stellen) => $"CAST(ROUND(CAST({x} AS NUMERIC), {stellen}) AS DOUBLE PRECISION)";
+    public override string Stdabw(string x) => $"STDDEV_SAMP(CAST({x} AS DOUBLE PRECISION))";
+    public override string In(string ausdruck, string parameter) => $"{ausdruck} = ANY(@{parameter})";
+    public override string UpdateZiel(string tabelle, string alias)   => $"UPDATE {tabelle} {alias}";
+    public override string UpdateQuelle(string tabelle, string alias) => "FROM";
     public override string MedianSelect(string gruppe, string spalte, string alias)
         => $"SELECT {gruppe}, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {spalte}) AS {alias}";
     public override string MedianGroupBy(string gruppe) => "GROUP BY " + gruppe;
-    public override string Sha256Text(string x) => $"sha256(convert_to({x}, 'UTF8'))";
+    public override string Sha256Text(string x) => $"sha256(dbo.utf8({x}))";
 
     public override string RueckgabeVor(string spalten)  => "";
     public override string RueckgabeNach(string spalten) => "RETURNING " + spalten;

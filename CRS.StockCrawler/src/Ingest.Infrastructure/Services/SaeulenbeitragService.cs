@@ -343,7 +343,7 @@ public sealed class SaeulenbeitragService : ISaeulenbeitragService
 
             var werte = (await conn.QueryAsync<Wertname>(new CommandDefinition(
                 "SELECT asset_id AS AssetId, symbol AS Symbol, name AS Name "
-                + "FROM dbo.asset WHERE is_tracked = 1", cancellationToken: ct))).ToList();
+                + $"FROM dbo.asset WHERE is_tracked = {d.Wahr}", cancellationToken: ct))).ToList();
 
             /* Die Artikel der letzten drei Tage. Länger zurück lohnt nicht: Die
                Halbwertszeit von einem Tag drückt alles Ältere ohnehin unter ein Achtel. */

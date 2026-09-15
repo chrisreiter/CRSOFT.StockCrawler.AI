@@ -220,13 +220,13 @@ public static class AnalysisEndpoints
                   JOIN dbo.asset a ON a.asset_id = p.asset_id_a AND a.is_tracked = {d.Wahr}
                   JOIN dbo.asset b ON b.asset_id = p.asset_id_b AND b.is_tracked = {d.Wahr}
                   LEFT JOIN (
-                        SELECT asset_id_a, asset_id_b, COUNT(*) AS n
+                        SELECT asset_id_a, asset_id_b, CAST(COUNT(*) AS INT) AS n
                           FROM dbo.crossing
                          WHERE interval_code = @interval
                          GROUP BY asset_id_a, asset_id_b
                   ) cx ON cx.asset_id_a = p.asset_id_a AND cx.asset_id_b = p.asset_id_b
                  WHERE p.interval_code = @interval AND p.n_obs >= @minObs {extra}
-                 ORDER BY {order} OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
+                 ORDER BY {order} OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY
                 """;
 
             var rows = (await conn.QueryAsync<ExtremePair>(new CommandDefinition(

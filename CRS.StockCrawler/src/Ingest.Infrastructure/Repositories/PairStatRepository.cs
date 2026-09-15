@@ -47,7 +47,7 @@ public sealed class PairStatRepository : IPairStatRepository
             table.Rows.Add(s.AssetIdA, s.AssetIdB, s.IntervalCode, s.WindowBars,
                            s.Corr0, s.BestLagBars, s.BestLagCorr, s.NObs);
 
-        await BulkCopyAsync(conn, table, "#pair_stage", ct);
+        await BulkCopyAsync(conn, table, d.Temp("pair_stage"), ct);
 
         await ExecAsync(conn, $"""
             MERGE INTO dbo.pair_stat {d.MergeSperre} AS t
@@ -96,7 +96,7 @@ public sealed class PairStatRepository : IPairStatRepository
             table.Rows.Add(c.AssetIdA, c.AssetIdB, c.IntervalCode, c.TsUtc,
                            (byte)(c.Upward ? 1 : 0), c.SpreadBefore, c.SpreadAfter);
 
-        await BulkCopyAsync(conn, table, "#cross_stage", ct);
+        await BulkCopyAsync(conn, table, d.Temp("cross_stage"), ct);
 
         // Nur neue Kreuzungen einfügen; der eindeutige Index verträgt keine Dubletten.
         await ExecAsync(conn, $"""
@@ -163,7 +163,7 @@ public sealed class PairStatRepository : IPairStatRepository
                WHERE asset_id_a = @assetId AND interval_code = @intervalCode
                  AND best_lag_bars < 0
             ) x
-            ORDER BY ABS(x.BestLagCorr) DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
+            ORDER BY ABS(x.BestLagCorr) DESC OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY
             """, new { assetId = assetIdB, intervalCode, limit },
             commandTimeout: 120, cancellationToken: ct));
 
@@ -178,11 +178,11 @@ public sealed class PairStatRepository : IPairStatRepository
         var rows = await conn.QueryAsync<Crossing>(new CommandDefinition($"""
             SELECT crossing_id AS CrossingId, asset_id_a AS AssetIdA, asset_id_b AS AssetIdB,
                    interval_code AS IntervalCode, ts_utc AS TsUtc,
-                   CAST(direction AS {d.TypBool}) AS Upward,
+                   CASE WHEN direction <> 0 THEN {d.Wahr} ELSE {d.Falsch} END AS Upward,
                    spread_before AS SpreadBefore, spread_after AS SpreadAfter
               FROM dbo.crossing
              WHERE interval_code = @intervalCode AND ts_utc >= @fromUtc
-             ORDER BY ts_utc DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
+             ORDER BY ts_utc DESC OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY
             """, new { fromUtc, intervalCode, limit }, commandTimeout: 120, cancellationToken: ct));
 
         return rows.ToList();

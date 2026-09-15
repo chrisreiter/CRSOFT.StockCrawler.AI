@@ -42,7 +42,7 @@ public sealed class AssetRepository : IAssetRepository
 
     private const string SelectColumns = """
         asset_id AS AssetId, asset_class AS AssetClass, symbol AS Symbol,
-        [name] AS Name, currency AS Currency, exchange AS Exchange,
+        "name" AS Name, currency AS Currency, exchange AS Exchange,
         provider AS Provider, provider_symbol AS ProviderSymbol,
         market_cap AS MarketCap, market_cap_rank AS MarketCapRank,
         reference_price AS ReferencePrice, reference_price_utc AS ReferencePriceUtc,
@@ -76,13 +76,13 @@ public sealed class AssetRepository : IAssetRepository
         var sql = $"""
             SELECT {SelectColumns}
               FROM dbo.asset
-             WHERE (@cls IS NULL OR asset_class = @cls)
-               AND (@tracked IS NULL OR is_tracked = @tracked)
-               AND (@search IS NULL OR symbol LIKE @like OR "name" LIKE @like)
-               AND (@sector IS NULL OR sector = @sector)
-               AND (@country IS NULL OR country = @country)
+             WHERE (asset_class = @cls OR @cls IS NULL)
+               AND (is_tracked = @tracked OR @tracked IS NULL)
+               AND (symbol LIKE @like OR "name" LIKE @like OR @search IS NULL)
+               AND (sector = @sector OR @sector IS NULL)
+               AND (country = @country OR @country IS NULL)
              ORDER BY CASE WHEN market_cap_rank IS NULL THEN 1 ELSE 0 END,
-                      market_cap_rank, symbol OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
+                      market_cap_rank, symbol OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY
             """;
 
         var rows = await conn.QueryAsync<Asset>(new CommandDefinition(sql, new
@@ -128,7 +128,7 @@ public sealed class AssetRepository : IAssetRepository
         {
             affected += await conn.ExecuteAsync(new CommandDefinition(
                 $"UPDATE dbo.asset SET is_tracked = @tracked, updated_utc = {d.Jetzt} "
-                + "WHERE asset_id IN @ids",
+                + $"WHERE {d.In("asset_id", "ids")}",
                 new { tracked, ids = chunk }, cancellationToken: ct));
         }
 
@@ -151,10 +151,9 @@ public sealed class AssetRepository : IAssetRepository
                 FROM dbo.asset
                WHERE asset_class = @cls
             )
-            UPDATE a SET is_tracked = {d.Wahr}, updated_utc = {d.Jetzt}
-              FROM dbo.asset a
-              JOIN ranked r ON r.asset_id = a.asset_id
-             WHERE r.rn <= @limit AND a.is_tracked = {d.Falsch}
+            {d.UpdateZiel("dbo.asset", "a")} SET is_tracked = {d.Wahr}, updated_utc = {d.Jetzt}
+              {d.UpdateQuelle("dbo.asset", "a")} ranked r
+             WHERE r.asset_id = a.asset_id AND r.rn <= @limit AND a.is_tracked = {d.Falsch}
             """, new { cls = (byte)cls, limit }, cancellationToken: ct));
     }
 }

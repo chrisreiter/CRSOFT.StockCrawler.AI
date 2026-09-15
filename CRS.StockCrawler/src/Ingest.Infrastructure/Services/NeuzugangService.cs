@@ -71,7 +71,7 @@ public sealed class NeuzugangService(
         await using var conn = await factory.OpenAsync(ct);
 
         var vorher = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-            "SELECT COUNT(*) FROM dbo.neuzugang WHERE quelle = @q",
+            "SELECT CAST(COUNT(*) AS INT) FROM dbo.neuzugang WHERE quelle = @q",
             new { q = quelle }, cancellationToken: ct));
 
         int gefunden;
@@ -91,7 +91,7 @@ public sealed class NeuzugangService(
         }
 
         var nachher = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-            "SELECT COUNT(*) FROM dbo.neuzugang WHERE quelle = @q",
+            "SELECT CAST(COUNT(*) AS INT) FROM dbo.neuzugang WHERE quelle = @q",
             new { q = quelle }, cancellationToken: ct));
 
         var laufId = await conn.ExecuteScalarAsync<int>(new CommandDefinition($"""
@@ -343,13 +343,14 @@ public sealed class NeuzugangService(
                              ORDER BY p.ts_utc OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY) k
                WHERE nz.asset_id IS NULL
             )
-            UPDATE nz
-               SET nz.asset_id = t.asset_id,
-                   nz.erster_kurs = t.erster,
-                   nz.erster_kurs_utc = t.erster_utc,
-                   nz.status = 'gehandelt',
-                   nz.aktualisiert_utc = {d.Jetzt}
-              FROM dbo.neuzugang nz JOIN treffer t ON t.neuzugang_id = nz.neuzugang_id
+            {d.UpdateZiel("dbo.neuzugang", "nz")}
+               SET asset_id = t.asset_id,
+                   erster_kurs = t.erster,
+                   erster_kurs_utc = t.erster_utc,
+                   status = 'gehandelt',
+                   aktualisiert_utc = {d.Jetzt}
+              {d.UpdateQuelle("dbo.neuzugang", "nz")} treffer t
+             WHERE t.neuzugang_id = nz.neuzugang_id
             """, cancellationToken: ct));
 
         if (n > 0) log.LogInformation("Neuzugänge: {N} mit Erstkurs verknüpft", n);
@@ -361,10 +362,10 @@ public sealed class NeuzugangService(
     {
         await using var conn = await factory.OpenAsync(ct);
 
-        var alle = (await conn.QueryAsync<Neuzugang>(new CommandDefinition("""
+        var alle = (await conn.QueryAsync<Neuzugang>(new CommandDefinition($"""
             SELECT neuzugang_id AS NeuzugangId, quelle AS Quelle, art AS Art,
                    symbol AS Symbol, name AS Name, markt AS Markt,
-                   entdeckt_utc AS EntdecktUtc, erwartet_am AS ErwartetAm,
+                   entdeckt_utc AS EntdecktUtc, CAST(erwartet_am AS {d.TypZeit}) AS ErwartetAm,
                    preis_von AS PreisVon, preis_bis AS PreisBis, volumen AS Volumen,
                    status AS Status, asset_id AS AssetId,
                    erster_kurs AS ErsterKurs, erster_kurs_utc AS ErsterKursUtc,

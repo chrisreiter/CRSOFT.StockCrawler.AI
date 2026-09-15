@@ -130,7 +130,7 @@ public static class HerdeEndpoints
                   JOIN dbo.asset aa ON aa.asset_id = p.asset_id_a
                   JOIN dbo.asset ab ON ab.asset_id = p.asset_id_b
                  WHERE p.run_id = @id
-                 ORDER BY p.z OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
+                 ORDER BY p.z OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY
                 """, new { id = lauf.RunId, limit = Math.Clamp(limit, 1, 200) },
                 cancellationToken: ct))).ToList();
 

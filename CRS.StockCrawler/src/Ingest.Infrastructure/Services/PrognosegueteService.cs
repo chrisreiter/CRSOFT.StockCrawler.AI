@@ -151,7 +151,7 @@ public sealed class PrognosegueteService : IPrognosegueteService
            meisten Informationen, und sie ist dieselbe, die die Oberfläche als jüngste
            anzeigt. */
         var zeilen = await conn.QueryAsync<Prognoseguete>(new CommandDefinition(
-            """
+            $"""
             WITH je_bar AS (
                 SELECT  f.asset_id, f.base_close, f.target_ts_utc,
                         s.actual_close, s.abs_pct_error, s.direction_correct,
@@ -163,36 +163,32 @@ public sealed class PrognosegueteService : IPrognosegueteService
                   JOIN  dbo.forecast_score s ON s.forecast_id = f.forecast_id
                  WHERE  f.target_ts_utc >= @von
                    AND  f.base_close > 0
-                   AND  (@h IS NULL OR f.horizon_hours = @h)
+                   AND  (f.horizon_hours = @h OR @h IS NULL)
             )
             SELECT  a.asset_id                                   AS AssetId,
                     a.symbol                                     AS Symbol,
                     a.name                                       AS Name,
                     a.asset_class                                AS Klasse,
-                    COUNT(*)                                     AS Bewertet,
-                    CAST(ROUND(AVG(f.abs_pct_error) * 100, 4) AS float) AS MittlererFehlerPct,
-                    ROUND(AVG(CAST(COALESCE(f.direction_correct, 0) AS float)) * 100, 2)
+                    CAST(COUNT(*) AS INT)                                     AS Bewertet,
+                    CAST({d.Runden("AVG(f.abs_pct_error) * 100", "4")} AS float) AS MittlererFehlerPct,
+                    {d.Runden("AVG(CAST(COALESCE(CAST(f.direction_correct AS INT), 0) AS float)) * 100", "2")}
                                                                  AS TrefferquotePct,
-                    CAST(ROUND(AVG(ABS((f.actual_close - f.base_close) / f.base_close)) * 100, 4)
+                    CAST({d.Runden("AVG(ABS((f.actual_close - f.base_close) / f.base_close)) * 100", "4")}
                          AS float)                               AS StillstandFehlerPct,
 
                     /* CAST auf float, nicht nur ROUND: SQL liefert den Quotienten zweier
                        decimal-Werte als decimal zurueck, und Dapper ordnet das keinem
                        double zu -- die Abfrage scheitert dann erst zur Laufzeit. */
-                    CAST(ROUND(
-                        CASE WHEN AVG(ABS((f.actual_close - f.base_close) / f.base_close)) > 0
-                             THEN AVG(f.abs_pct_error)
-                                  / AVG(ABS((f.actual_close - f.base_close) / f.base_close))
-                             ELSE 999 END, 4) AS float)          AS Fehlerverhaeltnis,
+                    CAST({d.Runden("CASE WHEN AVG(ABS((f.actual_close - f.base_close) / f.base_close)) > 0 THEN AVG(f.abs_pct_error) / AVG(ABS((f.actual_close - f.base_close) / f.base_close)) ELSE 999 END", "4")} AS float)          AS Fehlerverhaeltnis,
                     MIN(f.target_ts_utc)                         AS ErsteBewertung,
                     MAX(f.target_ts_utc)                         AS LetzteBewertung
               FROM  je_bar f
               JOIN  dbo.asset a ON a.asset_id = f.asset_id
              WHERE  f.rn = 1
              GROUP  BY a.asset_id, a.symbol, a.name, a.asset_class
-            HAVING  COUNT(*) >= @mindestens
+            HAVING  CAST(COUNT(*) AS INT) >= @mindestens
              ORDER  BY Fehlerverhaeltnis ASC
-            OFFSET  0 ROWS FETCH NEXT @limit ROWS ONLY
+            OFFSET  0 ROWS FETCH NEXT (@limit) ROWS ONLY
             """,
             new { von, h = horizonHours, mindestens = Math.Max(1, mindestens),
                   limit = Math.Clamp(limit, 1, 500) },
@@ -286,7 +282,7 @@ public sealed class PrognosegueteService : IPrognosegueteService
                 SELECT  tag, asset_id,
                         CASE WHEN stillstand > 0 THEN abs_pct_error / stillstand ELSE NULL END
                             AS verhaeltnis,
-                        CAST(COALESCE(direction_correct, 0) AS float) AS richtig
+                        CAST(COALESCE(CAST(direction_correct AS INT), 0) AS float) AS richtig
                   FROM  je_bar WHERE rn = 1
             ),
             /* Der Median ist in SQL Server eine FENSTERfunktion (DISTINCT + OVER), in
@@ -302,18 +298,18 @@ public sealed class PrognosegueteService : IPrognosegueteService
             ),
             summe AS (
                 SELECT tag,
-                       COUNT(*) AS werte,
-                       SUM(CASE WHEN verhaeltnis < 1 THEN 1 ELSE 0 END) AS traegt,
+                       CAST(COUNT(*) AS INT) AS werte,
+                       CAST(SUM(CASE WHEN verhaeltnis < 1 THEN 1 ELSE 0 END) AS INT) AS traegt,
                        AVG(richtig) * 100 AS quote
                   FROM je_wert
                  WHERE verhaeltnis IS NOT NULL
                  GROUP BY tag
             )
-            SELECT  CAST(s.tag AS datetime)                  AS Tag,
+            SELECT  CAST(s.tag AS {d.TypZeit})              AS Tag,
                     s.werte                                  AS Werte,
                     CAST(m.wert AS float)                    AS MedianVerhaeltnis,
                     s.traegt                                 AS Traegt,
-                    CAST(ROUND(s.quote, 2) AS float)         AS MittlereTrefferquotePct
+                    CAST({d.Runden("s.quote", "2")} AS float)         AS MittlereTrefferquotePct
               FROM  summe s
               JOIN  median m ON m.tag = s.tag
              ORDER  BY s.tag
@@ -339,13 +335,13 @@ public sealed class PrognosegueteService : IPrognosegueteService
         await using var conn = await _factory.OpenAsync(ct);
 
         var zeilen = await conn.QueryAsync<Mischvergleich>(new CommandDefinition(
-            """
+            $"""
             WITH je_bar AS (
                 SELECT f.horizon_hours,
                        s.abs_pct_error       AS f1,
                        m.abs_pct_error       AS fm,
-                       CAST(COALESCE(s.direction_correct, 0) AS float) AS r1,
-                       CAST(COALESCE(m.direction_correct, 0) AS float) AS rm,
+                       CAST(COALESCE(CAST(s.direction_correct AS INT), 0) AS float) AS r1,
+                       CAST(COALESCE(CAST(m.direction_correct AS INT), 0) AS float) AS rm,
                        ROW_NUMBER() OVER (
                            PARTITION BY f.asset_id, f.horizon_hours,
                                         CAST(f.target_ts_utc AS DATE)
@@ -356,12 +352,12 @@ public sealed class PrognosegueteService : IPrognosegueteService
                  WHERE f.target_ts_utc >= @von
             )
             SELECT horizon_hours                                        AS HorizonHours,
-                   COUNT(*)                                             AS Verglichen,
-                   CAST(ROUND(AVG(f1) * 100, 4) AS float)               AS FehlerSaeule1Pct,
-                   CAST(ROUND(AVG(fm) * 100, 4) AS float)               AS FehlerMischungPct,
-                   CAST(ROUND(AVG(r1) * 100, 2) AS float)               AS RichtungSaeule1Pct,
-                   CAST(ROUND(AVG(rm) * 100, 2) AS float)               AS RichtungMischungPct,
-                   SUM(CASE WHEN fm < f1 THEN 1 ELSE 0 END)             AS MischungBesser
+                   CAST(COUNT(*) AS INT)                                             AS Verglichen,
+                   CAST({d.Runden("AVG(f1) * 100", "4")} AS float)               AS FehlerSaeule1Pct,
+                   CAST({d.Runden("AVG(fm) * 100", "4")} AS float)               AS FehlerMischungPct,
+                   CAST({d.Runden("AVG(r1) * 100", "2")} AS float)               AS RichtungSaeule1Pct,
+                   CAST({d.Runden("AVG(rm) * 100", "2")} AS float)               AS RichtungMischungPct,
+                   CAST(SUM(CASE WHEN fm < f1 THEN 1 ELSE 0 END) AS INT)             AS MischungBesser
               FROM je_bar
              WHERE rn = 1
              GROUP BY horizon_hours
@@ -390,7 +386,7 @@ public sealed class PrognosegueteService : IPrognosegueteService
         await using var conn = await _factory.OpenAsync(ct);
 
         var zeilen = await conn.QueryAsync<Prognosevergleich>(new CommandDefinition(
-            """
+            $"""
             SELECT  f.made_at_utc      AS GestelltUtc,
                     f.target_ts_utc    AS ZielUtc,
                     s.scored_at_utc    AS BewertetUtc,
@@ -398,16 +394,16 @@ public sealed class PrognosegueteService : IPrognosegueteService
                     f.base_close       AS Basis,
                     f.predicted_close  AS Prognose,
                     s.actual_close     AS Ist,
-                    ROUND(s.abs_pct_error * 100, 4) AS AbsFehlerPct,
+                    {d.Runden("s.abs_pct_error * 100", "4")} AS AbsFehlerPct,
                     s.direction_correct AS RichtungKorrekt
               FROM  dbo.forecast f
               JOIN  dbo.forecast_score s ON s.forecast_id = f.forecast_id
               JOIN  dbo.asset a          ON a.asset_id    = f.asset_id
              WHERE  UPPER(a.symbol) = UPPER(@symbol)
                AND  f.target_ts_utc >= @von
-               AND  (@h IS NULL OR f.horizon_hours = @h)
+               AND  (f.horizon_hours = @h OR @h IS NULL)
              ORDER  BY f.target_ts_utc DESC
-            OFFSET  0 ROWS FETCH NEXT @limit ROWS ONLY
+            OFFSET  0 ROWS FETCH NEXT (@limit) ROWS ONLY
             """,
             new { symbol, von, h = horizonHours, limit = Math.Clamp(limit, 1, 500) },
             cancellationToken: ct));

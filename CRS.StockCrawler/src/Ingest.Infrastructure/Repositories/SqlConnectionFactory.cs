@@ -44,6 +44,8 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             _ => throw new ArgumentOutOfRangeException(nameof(system), system, "Unbekanntes Datenbanksystem."),
         };
 
+        EnumHandler.Registrieren();
+
         if (system == Datenbanksystem.Postgres)
         {
             /*  Npgsql ab Version 6 verlangt fuer jeden DateTime, dass sein Kind
@@ -58,6 +60,19 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
                 Der Schalter muss vor dem ersten Npgsql-Aufruf gesetzt sein;
                 die Fabrik ist ein Singleton und entsteht davor.              */
             AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
+            /*  Und eine Falle, die KEIN Schalter loest, sondern nur die Schreibweise
+                der Abfragen: Dapper setzt fuer DateTime-Parameter absichtlich
+                keinen DbType (damit SqlClient aus dem Wert datetime2 statt
+                datetime ableitet). Ist der Wert null, kommt der Parameter bei
+                Npgsql ohne Typ an, und Postgres bestimmt den Typ an der ERSTEN
+                Verwendung. "(@von IS NULL OR ts >= @von)" scheitert deshalb mit
+                42P08 "could not determine data type of parameter"; "(ts >= @von
+                OR @von IS NULL)" geht, weil der Vergleich den Typ liefert.
+                Gemessen: DateTime? null scheitert, int? null und string null
+                gehen, ein Dapper-TypeHandler hilft nicht (er wird fuer null
+                nicht gerufen). Alle zwanzig Stellen stehen seither in der
+                zweiten Reihenfolge.                                           */
         }
     }
 

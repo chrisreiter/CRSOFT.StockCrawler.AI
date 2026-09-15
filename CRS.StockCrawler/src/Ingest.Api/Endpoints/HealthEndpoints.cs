@@ -53,8 +53,8 @@ public static class HealthEndpoints
             var byClass = await conn.QueryAsync<(byte AssetClass, int Total, int Tracked)>(
                 new CommandDefinition($"""
                     SELECT asset_class,
-                           COUNT(*) AS total,
-                           SUM(CASE WHEN is_tracked = {d.Wahr} THEN 1 ELSE 0 END) AS tracked
+                           CAST(COUNT(*) AS INT) AS total,
+                           CAST(SUM(CASE WHEN is_tracked = {d.Wahr} THEN 1 ELSE 0 END) AS INT) AS tracked
                       FROM dbo.asset
                      GROUP BY asset_class
                     """, cancellationToken: ct));
@@ -63,8 +63,8 @@ public static class HealthEndpoints
                                                    DateTime? Oldest, DateTime? Newest)>(
                 new CommandDefinition("""
                     SELECT interval_code,
-                           COUNT_BIG(*)            AS bars,
-                           COUNT(DISTINCT asset_id) AS assets,
+                           CAST(COUNT(*) AS BIGINT)            AS bars,
+                           CAST(COUNT(DISTINCT asset_id) AS INT) AS assets,
                            MIN(ts_utc)             AS oldest,
                            MAX(ts_utc)             AS newest
                       FROM dbo.price_bar
@@ -73,19 +73,19 @@ public static class HealthEndpoints
 
             var forecasts = await conn.QuerySingleAsync<(int Total, int Scored, int Pending)>(
                 new CommandDefinition("""
-                    SELECT COUNT(*) AS total,
-                           (SELECT COUNT(*) FROM dbo.forecast_score) AS scored,
-                           (SELECT COUNT(*) FROM dbo.forecast f
+                    SELECT CAST(COUNT(*) AS INT) AS total,
+                           (SELECT CAST(COUNT(*) AS INT) FROM dbo.forecast_score) AS scored,
+                           (SELECT CAST(COUNT(*) AS INT) FROM dbo.forecast f
                              LEFT JOIN dbo.forecast_score s ON s.forecast_id = f.forecast_id
                             WHERE s.forecast_id IS NULL) AS pending
                       FROM dbo.forecast
                     """, cancellationToken: ct));
 
             var pairs = await conn.ExecuteScalarAsync<int>(
-                new CommandDefinition("SELECT COUNT(*) FROM dbo.pair_stat", cancellationToken: ct));
+                new CommandDefinition("SELECT CAST(COUNT(*) AS INT) FROM dbo.pair_stat", cancellationToken: ct));
 
             var crossings = await conn.ExecuteScalarAsync<int>(
-                new CommandDefinition("SELECT COUNT(*) FROM dbo.crossing", cancellationToken: ct));
+                new CommandDefinition("SELECT CAST(COUNT(*) AS INT) FROM dbo.crossing", cancellationToken: ct));
 
             return Results.Ok(new
             {

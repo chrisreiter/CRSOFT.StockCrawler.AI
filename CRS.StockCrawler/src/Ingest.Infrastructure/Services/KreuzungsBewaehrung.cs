@@ -102,7 +102,7 @@ internal static class KreuzungsBewaehrung
             JOIN reihe r1 ON r1.a = c.asset_id_a AND r1.b = c.asset_id_b AND r1.rn = r0.rn + @halte
            WHERE c.interval_code = @interval AND c.ts_utc < @seit
         )
-        SELECT a AS A, b AS B, COUNT(*) AS N,
+        SELECT a AS A, b AS B, CAST(COUNT(*) AS INT) AS N,
                AVG(CASE WHEN gewinn > 0 THEN 1.0 ELSE 0.0 END) AS Trefferquote,
                AVG(gewinn) AS Mittelgewinn
           FROM mess

@@ -47,7 +47,7 @@ public static class ForecastEndpoints
                               JOIN dbo.asset a ON a.asset_id = b.asset_id
                              WHERE a.is_tracked = {d.Wahr}),
                            (SELECT MAX(made_at_utc) FROM dbo.forecast),
-                           (SELECT COUNT(*) FROM dbo.forecast
+                           (SELECT CAST(COUNT(*) AS INT) FROM dbo.forecast
                              WHERE made_at_utc = (SELECT MAX(made_at_utc) FROM dbo.forecast))
                     """, cancellationToken: ct));
 

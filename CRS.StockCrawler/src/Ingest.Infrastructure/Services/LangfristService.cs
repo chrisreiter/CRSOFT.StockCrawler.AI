@@ -541,7 +541,7 @@ public sealed class LangfristService(ISqlConnectionFactory factory) : ILangfrist
                AND p.asset_id IN (
                      SELECT asset_id FROM dbo.price_bar
                       WHERE interval_code = '1d' AND ts_utc >= @von AND "close" > 0
-                      GROUP BY asset_id HAVING COUNT(*) >= @minTage)
+                      GROUP BY asset_id HAVING CAST(COUNT(*) AS INT) >= @minTage)
              ORDER BY p.asset_id, p.ts_utc;
             """, new { von, minTage }, commandTimeout: 300, cancellationToken: ct));
 

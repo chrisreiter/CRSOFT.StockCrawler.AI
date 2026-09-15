@@ -109,6 +109,12 @@ public static class Massenkopie
                         '\t' => "\\t",
                         '\n' => "\\n",
                         '\r' => "\\r",
+                        /*  Postgres kann in text kein NUL ablegen (22021); SQL
+                            Server in NVARCHAR schon. Beim Kopieren eines
+                            SQL-Server-Bestands kommen sie deshalb vor -- aus
+                            PDF-Extraktion -- und werden hier gestrichen statt
+                            den ganzen Block scheitern zu lassen.             */
+                        '\0' => "",
                         _ => ch.ToString(),
                     });
                 break;
