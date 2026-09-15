@@ -1347,6 +1347,42 @@ pre.antwort.dim { color: var(--muted); font-family: ui-monospace, monospace; fon
 
 .u-tip-mehr { color: var(--muted); font-size: 11px; margin-top: 2px; }
 
+/* ======================================================= Grundschwingungen ===  */
+#gs-card { grid-column: 1 / -1; }
+
+.gs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 12px 0 18px;
+}
+
+.gs-karte {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--panel);
+  cursor: pointer;
+  min-width: 0;
+}
+.gs-karte:hover, .gs-karte.aktiv { border-color: var(--accent); }
+.gs-karte svg { width: 100%; height: 56px; display: block; }
+.gs-karte .gs-name { font-weight: 600; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.gs-karte .gs-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.gs-karte .gs-harmonik {
+  display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 10px;
+  border: 1px solid var(--line); color: var(--muted); margin-left: 6px; vertical-align: middle;
+}
+
+.gs-detail { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 6px; }
+.gs-detail h4 { margin: 12px 0 6px; font-size: 14px; }
+.gs-roll { overflow-x: auto; min-width: 0; }
+.gs-tab td, .gs-tab th { white-space: nowrap; }
+.gs-tab .num { text-align: right; font-variant-numeric: tabular-nums; }
+.gs-tab tr.bestaendig td:first-child { border-left: 3px solid var(--accent); }
+.gs-tab tr.dim td { color: var(--muted); }
+.gs-versatz { display: inline-block; min-width: 70px; }
+
 /* ============================================================ Neuzugänge ===  */
 #nz-card { grid-column: 1 / -1; }
 #nz-out table { width: 100%; }

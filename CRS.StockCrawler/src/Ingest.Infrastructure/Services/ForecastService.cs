@@ -154,6 +154,8 @@ public sealed class ForecastService : IForecastService
            Wert zu rechnen wäre siebenmal dasselbe. Fortgeschrieben wird bis zum längsten
            Horizont, die kürzeren werden unterwegs abgelesen. */
         Spektrallage? spektral = null;
+        Ingest.Core.Analysis.Spectral.Grundschwingungslage? grundschwingung = null;
+        var grundschwingungGeprueft = false;
 
         /* Die gemessene Trefferquote der ersten Säule -- je Horizont, aus den bereits
            bewerteten Prognosen dieses Wertes. Einmal je Wert geholt.
@@ -255,6 +257,54 @@ public sealed class ForecastService : IForecastService
                         "math", r.Value, spektral.Skill,
                         $"SSA über {spektral.Fenster} Bars, {spektral.ErklaerteStreuung:P0} "
                         + $"der Streuung erklärt — Rückhalt {spektral.Skill:P0} besser als Stillstand",
+                        Beitragsart.Grundlage));
+                }
+            }
+
+            /*  Die Grundschwingungen als zweiter Beitrag derselben Saeule: der
+                Akkord des juengsten 1024-Bar-Fensters, fortgeschrieben -- mit
+                demselben Rueckhalte-Riegel wie die SSA (40 Bars zurueckgehalten,
+                gegen den Stillstand gemessen, darueber hinaus kein Beitrag).
+
+                Gemessen ueber 496 auswertbare Werte am 15.09.2026: 124 hatten
+                ueberhaupt Rueckhalt, Median 0,041, Hoechstwert 0,364. Drei von
+                vier Werten tragen also nichts bei -- dasselbe Bild wie bei der
+                SSA, und genau das soll die Mischung zeigen, statt es zu
+                verstecken. Der Regler „math" bestimmt, wie viel von dem Rest
+                einfliesst; ob etwas einfliesst, entscheidet die Messung.      */
+            if (!grundschwingungGeprueft && interval == BarInterval.Daily)
+            {
+                grundschwingungGeprueft = true;
+
+                /*  Eigene, laengere Reihe: Der Zwischenspeicher haelt 400 Tagesbars,
+                    das Fenster braucht 1024 plus 40 fuer den Rueckhalt. Nur wenn
+                    der Regler „math" ueberhaupt offen ist -- sonst kostete die
+                    Fahrt zur Datenbank fuer 644 Werte ein Ergebnis, das mit
+                    Gewicht null verrechnet wuerde.                              */
+                var mathOffen = saeulengewichte is not null
+                    && saeulengewichte.TryGetValue("math", out var wm) && wm > 0;
+                if (mathOffen)
+                {
+                    var lang = await _bars.GetAsync(assetId, BarInterval.Daily, now.AddYears(-8), now, ct);
+                    if (lang.Count >= 1064)
+                        grundschwingung = Ingest.Core.Analysis.Spectral.GrundschwingungenPrognose.Rechne(
+                            lang.Select(b => (double)b.Close).ToList());
+                }
+            }
+
+            if (grundschwingung is { Skill: > 0 })
+            {
+                var barsH = Math.Max(1, horizonHours / 24);
+                var r = grundschwingung.RenditeNach(barsH);
+
+                if (r is not null)
+                {
+                    mitSpektral ??= new Saeulenlage();
+
+                    mitSpektral.Fuege(horizonHours, new Saeulenbeitrag(
+                        "math", r.Value, grundschwingung.Skill,
+                        $"Grundschwingung {string.Join(" + ", grundschwingung.Perioden.Select(p => p.ToString("0.#")))} Bars "
+                        + $"fortgeschrieben — Rückhalt {grundschwingung.Skill:P0} besser als Stillstand über 40 Bars",
                         Beitragsart.Grundlage));
                 }
             }

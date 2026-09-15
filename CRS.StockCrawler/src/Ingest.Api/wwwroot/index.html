@@ -56,6 +56,7 @@
     <button data-view="daytrading">Day Trading</button>
     <button data-view="swap">Tausch</button>
     <button data-view="neuzugang">Neuzugänge</button>
+    <button data-view="grundschwingung">Grundschwingungen</button>
     <button data-view="pillars">Säulen</button>
     <button data-view="system">System</button>
   </nav>
@@ -1810,6 +1811,43 @@
       </div>
 
       <div id="nz-out"></div>
+    </div>
+  </section>
+</main>
+
+<!-- ================================================== Grundschwingungen -->
+<main id="view-grundschwingung" class="view">
+  <section class="content">
+    <div class="card" id="gs-card">
+      <h3>Grundschwingungen — der Katalog der Zyklen</h3>
+
+      <p class="hint block">
+        Jeder Kursverlauf wird in Epochen von 1024 Tagesbars per Fourier-Zerlegung
+        (Welch-Spektrum gegen den örtlichen Untergrund) auf seine stabilen
+        Grundperioden untersucht. Die ein bis drei stärksten bilden den
+        <b>Akkord</b> der Epoche; gleiche Akkorde über alle Werte werden zu einer
+        <b>Klasse</b> des Katalogs. Innerhalb einer Klasse wird geprüft, welche
+        Werte das Muster in mehreren Epochen teilen — und mit welchem
+        <b>Phasenversatz</b>.
+      </p>
+
+      <p class="hint block">
+        <b>Was ein Fund ist und was nicht.</b> Dass zwei Werte in einer Epoche in
+        derselben Klasse stehen, ist bei hunderten Werten Zufall. Gezählt werden
+        Paare mit mindestens drei gemeinsamen Epochen, und <b>beständig</b> heisst:
+        Versatz über die Epochen derselbe <i>und</i> ungleich null. Nur das wäre ein
+        Vorlauf. Der zentrale Befund dieses Projekts — Kurse bewegen sich gemeinsam,
+        nicht nacheinander — gilt bis zum Beweis des Gegenteils auch hier; die
+        Fortschreibung der Schwingungen hat, gemessen über 496 Werte, nur bei jedem
+        vierten überhaupt Rückhalt gegenüber dem Stillstand.
+      </p>
+
+      <div class="toolbar">
+        <button id="gs-lauf" class="primary">Jetzt rechnen</button>
+        <span class="hint">Läuft sonst einmal täglich im Tageslauf; dauert rund zwei Minuten.</span>
+      </div>
+
+      <div id="gs-out"></div>
     </div>
   </section>
 </main>

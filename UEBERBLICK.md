@@ -177,6 +177,10 @@ nicht aus der Einstellung.
   geglättet, mit Verknüpfung gleichzeitiger Ereignisse
 - **Weltbestand und Zeitzonen** — Tokio, Europa, New York, mit sauberer
   Trennung von Vorlauf und blosser Überlappung
+- **Grundschwingungen** — Fourier-Zerlegung jedes Kursverlaufs in Jahres-Epochen,
+  Akkorde aus den stärksten Perioden, Katalog gleicher Muster mit Skizze, Paare
+  mit gemessenem Phasenversatz; fliesst mit Rückhalteprüfung in die Prognose
+  und als Werkzeug ins Reasoning ein
 - **Bot-Herde** — was die öffentlich bekannten Auslöser (Gleitende Mittel, RSI,
   Bollinger) tatsächlich hinterlassen, gemessen über tausende Ereignisse
 - **Umkehrschluss** — taugt ein Signal, wenn man es umdreht?
