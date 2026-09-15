@@ -3,6 +3,7 @@ using Dapper;
 using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -167,13 +168,14 @@ public sealed class EinbettungsLauf : IEinbettungsLauf
 
             await using (var conn = await fabrik.OpenAsync(ct))
             {
+                var d = conn.Dialekt();
                 /* Die Auswahl gehört in die Abfrage, nicht dahinter -- sonst holt der Lauf
                    2.320 Zeilen und verwirft 1.800 davon im Speicher. */
                 var wo = umfang switch
                 {
                     Einbettungsumfang.Fehlend =>
-                        "AND ISNULL(chunks, 0) = 0 AND ISNULL(status, '') <> 'kein Text gefunden'",
-                    Einbettungsumfang.AuchLeere => "AND ISNULL(chunks, 0) = 0",
+                        "AND COALESCE(chunks, 0) = 0 AND COALESCE(status, '') <> 'kein Text gefunden'",
+                    Einbettungsumfang.AuchLeere => "AND COALESCE(chunks, 0) = 0",
                     _ => ""
                 };
 
@@ -182,10 +184,10 @@ public sealed class EinbettungsLauf : IEinbettungsLauf
                    Lauf wuerde ueber lauter Quelle 0 gehen, ohne zu klagen. */
                 var zeilen = await conn.QueryAsync<Quellzeile>(new CommandDefinition(
                     $"""
-                     SELECT source_id AS Id, ISNULL(title, origin) AS Titel
+                     SELECT source_id AS Id, COALESCE(title, origin) AS Titel
                        FROM dbo.knowledge_source
                       WHERE pillar = @saeule
-                        AND active = 1
+                        AND active = {d.Wahr}
                         AND kind <> 'feed'
                         {wo}
                       ORDER BY source_id

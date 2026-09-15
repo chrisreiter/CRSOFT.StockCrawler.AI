@@ -81,13 +81,13 @@ public static class SaeulenmischungEndpoints
 
             var z = await conn.QuerySingleOrDefaultAsync(new CommandDefinition(
                 """
-                SELECT TOP 1 f.made_at_utc, f.target_ts_utc, f.base_close,
+                SELECT f.made_at_utc, f.target_ts_utc, f.base_close,
                        f.predicted_close, f.combined_close,
                        f.predicted_return, f.combined_return, f.pillar_mix
                   FROM dbo.forecast f
                   JOIN dbo.asset a ON a.asset_id = f.asset_id
                  WHERE a.symbol = @symbol AND f.horizon_hours = @h
-                 ORDER BY f.made_at_utc DESC
+                 ORDER BY f.made_at_utc DESC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
                 """, new { symbol, h = horizont }, cancellationToken: ct));
 
             if (z is null)

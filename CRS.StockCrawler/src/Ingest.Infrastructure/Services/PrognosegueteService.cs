@@ -1,4 +1,5 @@
 using Dapper;
+using Ingest.Infrastructure.Datenbank;
 using Ingest.Core.Enums;
 using Ingest.Infrastructure.Repositories;
 
@@ -121,6 +122,7 @@ public sealed record Horizontbilanz(
 public sealed class PrognosegueteService : IPrognosegueteService
 {
     private readonly ISqlConnectionFactory _factory;
+    private SqlDialekt d => _factory.Dialekt;
 
     public PrognosegueteService(ISqlConnectionFactory factory) => _factory = factory;
 
@@ -155,7 +157,7 @@ public sealed class PrognosegueteService : IPrognosegueteService
                         s.actual_close, s.abs_pct_error, s.direction_correct,
                         ROW_NUMBER() OVER (
                             PARTITION BY f.asset_id, f.horizon_hours,
-                                         CONVERT(date, f.target_ts_utc)
+                                         CAST(f.target_ts_utc AS DATE)
                             ORDER BY f.made_at_utc DESC) AS rn
                   FROM  dbo.forecast f
                   JOIN  dbo.forecast_score s ON s.forecast_id = f.forecast_id
@@ -169,7 +171,7 @@ public sealed class PrognosegueteService : IPrognosegueteService
                     a.asset_class                                AS Klasse,
                     COUNT(*)                                     AS Bewertet,
                     CAST(ROUND(AVG(f.abs_pct_error) * 100, 4) AS float) AS MittlererFehlerPct,
-                    ROUND(AVG(CAST(ISNULL(f.direction_correct, 0) AS float)) * 100, 2)
+                    ROUND(AVG(CAST(COALESCE(f.direction_correct, 0) AS float)) * 100, 2)
                                                                  AS TrefferquotePct,
                     CAST(ROUND(AVG(ABS((f.actual_close - f.base_close) / f.base_close)) * 100, 4)
                          AS float)                               AS StillstandFehlerPct,
@@ -264,15 +266,15 @@ public sealed class PrognosegueteService : IPrognosegueteService
         await using var conn = await _factory.OpenAsync(ct);
 
         var zeilen = await conn.QueryAsync<Lerntag>(new CommandDefinition(
-            """
+            $"""
             WITH je_bar AS (
                 SELECT  f.asset_id,
-                        CONVERT(date, f.target_ts_utc) AS tag,
+                        CAST(f.target_ts_utc AS DATE) AS tag,
                         s.abs_pct_error,
                         s.direction_correct,
                         ABS((s.actual_close - f.base_close) / f.base_close) AS stillstand,
                         ROW_NUMBER() OVER (
-                            PARTITION BY f.asset_id, CONVERT(date, f.target_ts_utc)
+                            PARTITION BY f.asset_id, CAST(f.target_ts_utc AS DATE)
                             ORDER BY f.made_at_utc DESC) AS rn
                   FROM  dbo.forecast f
                   JOIN  dbo.forecast_score s ON s.forecast_id = f.forecast_id
@@ -284,20 +286,19 @@ public sealed class PrognosegueteService : IPrognosegueteService
                 SELECT  tag, asset_id,
                         CASE WHEN stillstand > 0 THEN abs_pct_error / stillstand ELSE NULL END
                             AS verhaeltnis,
-                        CAST(ISNULL(direction_correct, 0) AS float) AS richtig
+                        CAST(COALESCE(direction_correct, 0) AS float) AS richtig
                   FROM  je_bar WHERE rn = 1
             ),
-            /* PERCENTILE_CONT ist eine FENSTERfunktion, keine Aggregation: Sie liefert
-               je Zeile denselben Wert und lässt sich nicht in MIN() schachteln -- SQL
-               antwortet dann mit „Windowed functions cannot be used in the context of
-               another windowed function or aggregate". Median und Aggregat werden
-               deshalb getrennt gerechnet und danach verbunden. */
+            /* Der Median ist in SQL Server eine FENSTERfunktion (DISTINCT + OVER), in
+               Postgres ein geordnetes Aggregat (GROUP BY) -- und in SQL Server laesst
+               er sich nicht in MIN() schachteln: „Windowed functions cannot be used in
+               the context of another windowed function or aggregate". Deshalb ein
+               eigener Schritt, dessen Form der Dialekt liefert. */
             median AS (
-                SELECT DISTINCT tag,
-                       PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY verhaeltnis)
-                           OVER (PARTITION BY tag) AS wert
+                {d.MedianSelect("tag", "verhaeltnis", "wert")}
                   FROM je_wert
                  WHERE verhaeltnis IS NOT NULL
+                 {d.MedianGroupBy("tag")}
             ),
             summe AS (
                 SELECT tag,
@@ -343,11 +344,11 @@ public sealed class PrognosegueteService : IPrognosegueteService
                 SELECT f.horizon_hours,
                        s.abs_pct_error       AS f1,
                        m.abs_pct_error       AS fm,
-                       CAST(ISNULL(s.direction_correct, 0) AS float) AS r1,
-                       CAST(ISNULL(m.direction_correct, 0) AS float) AS rm,
+                       CAST(COALESCE(s.direction_correct, 0) AS float) AS r1,
+                       CAST(COALESCE(m.direction_correct, 0) AS float) AS rm,
                        ROW_NUMBER() OVER (
                            PARTITION BY f.asset_id, f.horizon_hours,
-                                        CONVERT(date, f.target_ts_utc)
+                                        CAST(f.target_ts_utc AS DATE)
                            ORDER BY f.made_at_utc DESC) AS rn
                   FROM dbo.forecast f
                   JOIN dbo.forecast_score s          ON s.forecast_id = f.forecast_id

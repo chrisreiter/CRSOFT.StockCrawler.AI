@@ -5,6 +5,7 @@ using Ingest.Core.Abstractions;
 using Ingest.Core.Models;
 using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.Logging;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -32,6 +33,7 @@ public sealed class NeuzugangService(
     IHttpClientFactory http,
     ILogger<NeuzugangService> log) : INeuzugangService
 {
+    private SqlDialekt d => factory.Dialekt;
     /*  Yahoo und CoinGecko brauchen einen Browser-Kopf, sonst 403 -- dasselbe
         gilt fuer die beiden Quellen hier. Zentral in DependencyInjection, hier
         noch einmal, weil dieser Dienst einen eigenen Klienten nimmt.         */
@@ -92,9 +94,9 @@ public sealed class NeuzugangService(
             "SELECT COUNT(*) FROM dbo.neuzugang WHERE quelle = @q",
             new { q = quelle }, cancellationToken: ct));
 
-        var laufId = await conn.ExecuteScalarAsync<int>(new CommandDefinition("""
+        var laufId = await conn.ExecuteScalarAsync<int>(new CommandDefinition($"""
             INSERT INTO dbo.neuzugang_lauf (quelle, gefunden, neu, erfolg, meldung)
-            OUTPUT INSERTED.lauf_id VALUES (@q, @gef, @neu, @ok, @msg)
+            {d.RueckgabeVor("lauf_id")} VALUES (@q, @gef, @neu, @ok, @msg) {d.RueckgabeNach("lauf_id")}
             """,
             new { q = quelle, gef = gefunden, neu = nachher - vorher, ok = erfolg, msg = meldung },
             cancellationToken: ct));
@@ -277,8 +279,8 @@ public sealed class NeuzugangService(
     {
         await using var conn = await factory.OpenAsync(ct);
 
-        await conn.ExecuteAsync(new CommandDefinition("""
-            MERGE dbo.neuzugang WITH (HOLDLOCK) AS t
+        await conn.ExecuteAsync(new CommandDefinition($"""
+            MERGE INTO dbo.neuzugang {d.MergeSperre} AS t
             USING (SELECT @quelle AS quelle, @symbol AS symbol) AS s
                ON t.quelle = s.quelle AND t.symbol = s.symbol
             WHEN MATCHED THEN UPDATE SET
@@ -292,7 +294,7 @@ public sealed class NeuzugangService(
                  status      = CASE WHEN t.status = 'gehandelt' THEN t.status ELSE @status END,
                  url         = COALESCE(@url, t.url),
                  titel       = COALESCE(@titel, t.titel),
-                 aktualisiert_utc = SYSUTCDATETIME()
+                 aktualisiert_utc = {d.Jetzt}
             WHEN NOT MATCHED THEN
                  INSERT (quelle, art, symbol, name, markt, erwartet_am,
                          preis_von, preis_bis, volumen, status, url, titel)
@@ -325,7 +327,7 @@ public sealed class NeuzugangService(
     {
         await using var conn = await factory.OpenAsync(ct);
 
-        var n = await conn.ExecuteAsync(new CommandDefinition("""
+        var n = await conn.ExecuteAsync(new CommandDefinition($"""
             /*  Verknuepfung ueber das Symbol. Bei Aktien passt es unmittelbar;
                 bei Krypto traegt der Bestand das Suffix -USD, deshalb beide
                 Schreibweisen.                                                */
@@ -334,11 +336,11 @@ public sealed class NeuzugangService(
                      k.erster, k.erster_utc
                 FROM dbo.neuzugang nz
                 JOIN dbo.asset a
-                  ON a.symbol = nz.symbol OR a.symbol = nz.symbol + '-USD'
-               CROSS APPLY (SELECT TOP 1 p.[close] AS erster, p.ts_utc AS erster_utc
+                  ON a.symbol = nz.symbol OR a.symbol = CONCAT(nz.symbol, '-USD')
+               {d.CrossApply} (SELECT p."close" AS erster, p.ts_utc AS erster_utc
                               FROM dbo.price_bar p
-                             WHERE p.asset_id = a.asset_id AND p.[close] > 0
-                             ORDER BY p.ts_utc) k
+                             WHERE p.asset_id = a.asset_id AND p."close" > 0
+                             ORDER BY p.ts_utc OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY) k
                WHERE nz.asset_id IS NULL
             )
             UPDATE nz
@@ -346,7 +348,7 @@ public sealed class NeuzugangService(
                    nz.erster_kurs = t.erster,
                    nz.erster_kurs_utc = t.erster_utc,
                    nz.status = 'gehandelt',
-                   nz.aktualisiert_utc = SYSUTCDATETIME()
+                   nz.aktualisiert_utc = {d.Jetzt}
               FROM dbo.neuzugang nz JOIN treffer t ON t.neuzugang_id = nz.neuzugang_id
             """, cancellationToken: ct));
 
@@ -368,14 +370,14 @@ public sealed class NeuzugangService(
                    erster_kurs AS ErsterKurs, erster_kurs_utc AS ErsterKursUtc,
                    url AS Url, titel AS Titel, aktualisiert_utc AS AktualisiertUtc
               FROM dbo.neuzugang
-             ORDER BY COALESCE(erwartet_am, CONVERT(date, entdeckt_utc)) DESC,
+             ORDER BY COALESCE(erwartet_am, CAST(entdeckt_utc AS DATE)) DESC,
                       entdeckt_utc DESC
             """, cancellationToken: ct))).ToList();
 
         var laeufe = (await conn.QueryAsync<NeuzugangLauf>(new CommandDefinition("""
-            SELECT TOP 12 lauf_id AS LaufId, gestartet_utc AS GestartetUtc, quelle AS Quelle,
+            SELECT lauf_id AS LaufId, gestartet_utc AS GestartetUtc, quelle AS Quelle,
                    gefunden AS Gefunden, neu AS Neu, erfolg AS Erfolg, meldung AS Meldung
-              FROM dbo.neuzugang_lauf ORDER BY lauf_id DESC
+              FROM dbo.neuzugang_lauf ORDER BY lauf_id DESC OFFSET 0 ROWS FETCH NEXT 12 ROWS ONLY
             """, cancellationToken: ct))).ToList();
 
         var seit = alle.Count > 0

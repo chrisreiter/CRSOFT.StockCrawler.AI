@@ -5,6 +5,7 @@ using Ingest.Infrastructure.Options;
 using Ingest.Infrastructure.Providers;
 using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.Options;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Api.Endpoints;
 
@@ -79,25 +80,26 @@ public static class AssetEndpoints
                                         bool apply = true, CancellationToken ct = default) =>
         {
             await using var conn = await factory.OpenAsync(ct);
+            var d = conn.Dialekt();
 
             var suspects = (await conn.QueryAsync<(int AssetId, string Symbol, string? Name,
                                                    int Jumps, double WorstFactor)>(
                 new CommandDefinition("""
                     WITH d AS (
-                      SELECT p.asset_id, p.[close],
-                             LAG(p.[close]) OVER (PARTITION BY p.asset_id ORDER BY p.ts_utc) AS prev
+                      SELECT p.asset_id, p."close",
+                             LAG(p."close") OVER (PARTITION BY p.asset_id ORDER BY p.ts_utc) AS prev
                         FROM dbo.price_bar p
                        WHERE p.interval_code = '1d'
                     )
-                    SELECT a.asset_id, a.symbol, a.[name],
+                    SELECT a.asset_id, a.symbol, a."name",
                            COUNT(*) AS jumps,
-                           MAX(CASE WHEN d.[close] > d.prev
-                                    THEN d.[close] / d.prev ELSE d.prev / d.[close] END) AS worst
+                           MAX(CASE WHEN d."close" > d.prev
+                                    THEN d."close" / d.prev ELSE d.prev / d."close" END) AS worst
                       FROM d
                       JOIN dbo.asset a ON a.asset_id = d.asset_id
-                     WHERE d.prev > 0 AND d.[close] > 0
-                       AND (d.[close] / d.prev > @maxFactor OR d.prev / d.[close] > @maxFactor)
-                     GROUP BY a.asset_id, a.symbol, a.[name]
+                     WHERE d.prev > 0 AND d."close" > 0
+                       AND (d."close" / d.prev > @maxFactor OR d.prev / d."close" > @maxFactor)
+                     GROUP BY a.asset_id, a.symbol, a."name"
                     HAVING COUNT(*) >= @minJumps
                      ORDER BY jumps DESC
                     """, new { maxFactor = (decimal)maxFactor, minJumps },
@@ -121,19 +123,19 @@ public static class AssetEndpoints
                auf null gerundete Reihen heraus — die sind schlicht defekt. */
             var flat = (await conn.QueryAsync<(int AssetId, string Symbol, string? Name,
                                                int Jumps, double WorstFactor)>(
-                new CommandDefinition("""
+                new CommandDefinition($"""
                     WITH s AS (
                       SELECT p.asset_id,
-                             AVG(p.[close])                              AS avg_close,
-                             STDEV(p.[close]) / NULLIF(AVG(p.[close]),0) AS rel_std
+                             AVG(p."close")                              AS avg_close,
+                             {d.Stdabw("p.\"close\"")} / NULLIF(AVG(p."close"),0) AS rel_std
                         FROM dbo.price_bar p
                        WHERE p.interval_code = '1d'
                        GROUP BY p.asset_id
                     )
-                    SELECT a.asset_id, a.symbol, a.[name], 0 AS jumps, 1.0 AS worst
+                    SELECT a.asset_id, a.symbol, a."name", 0 AS jumps, 1.0 AS worst
                       FROM dbo.asset a
                       JOIN s ON s.asset_id = a.asset_id
-                     WHERE a.is_tracked = 1
+                     WHERE a.is_tracked = {d.Wahr}
                        AND (
                              -- an 1 $ verankert und praktisch unbewegt: Stablecoin
                              (s.avg_close BETWEEN 0.9 AND 1.1 AND s.rel_std < 0.02)
@@ -154,23 +156,23 @@ public static class AssetEndpoints
                Referenzpreis deckt es dagegen sofort auf. */
             var mismatch = (await conn.QueryAsync<(int AssetId, string Symbol, string? Name,
                                                    int Jumps, double WorstFactor)>(
-                new CommandDefinition("""
+                new CommandDefinition($"""
                     WITH last_bar AS (
-                      SELECT p.asset_id, p.[close],
+                      SELECT p.asset_id, p."close",
                              ROW_NUMBER() OVER (PARTITION BY p.asset_id ORDER BY p.ts_utc DESC) AS rn
                         FROM dbo.price_bar p
                        WHERE p.interval_code = '1d'
                     )
-                    SELECT a.asset_id, a.symbol, a.[name], 0 AS jumps,
-                           CAST(CASE WHEN b.[close] > a.reference_price
-                                     THEN b.[close] / a.reference_price
-                                     ELSE a.reference_price / b.[close] END AS FLOAT) AS worst
+                    SELECT a.asset_id, a.symbol, a."name", 0 AS jumps,
+                           CAST(CASE WHEN b."close" > a.reference_price
+                                     THEN b."close" / a.reference_price
+                                     ELSE a.reference_price / b."close" END AS FLOAT) AS worst
                       FROM dbo.asset a
                       JOIN last_bar b ON b.asset_id = a.asset_id AND b.rn = 1
-                     WHERE a.is_tracked = 1
-                       AND a.reference_price > 0 AND b.[close] > 0
-                       AND (b.[close] / a.reference_price > @tol
-                         OR a.reference_price / b.[close] > @tol)
+                     WHERE a.is_tracked = {d.Wahr}
+                       AND a.reference_price > 0 AND b."close" > 0
+                       AND (b."close" / a.reference_price > @tol
+                         OR a.reference_price / b."close" > @tol)
                     """, new { tol = 3.0m }, commandTimeout: 300, cancellationToken: ct))).ToList();
 
             // Alle Befunde zusammenführen, ohne Dubletten.
@@ -191,7 +193,7 @@ public static class AssetEndpoints
             var ids = suspects.Select(s => s.AssetId).ToArray();
 
             // Abhängige Daten zuerst — Fremdschlüssel auf price_bar und forecast.
-            await conn.ExecuteAsync(new CommandDefinition("""
+            await conn.ExecuteAsync(new CommandDefinition($"""
                 DELETE FROM dbo.forecast_component
                  WHERE forecast_id IN (SELECT forecast_id FROM dbo.forecast WHERE asset_id IN @ids);
                 DELETE FROM dbo.forecast_score
@@ -201,7 +203,7 @@ public static class AssetEndpoints
                 DELETE FROM dbo.pair_stat     WHERE asset_id_a IN @ids OR asset_id_b IN @ids;
                 DELETE FROM dbo.crossing      WHERE asset_id_a IN @ids OR asset_id_b IN @ids;
                 DELETE FROM dbo.price_bar     WHERE asset_id IN @ids;
-                UPDATE dbo.asset SET is_tracked = 0, updated_utc = SYSUTCDATETIME()
+                UPDATE dbo.asset SET is_tracked = {d.Falsch}, updated_utc = {d.Jetzt}
                  WHERE asset_id IN @ids;
                 """, new { ids }, commandTimeout: 600, cancellationToken: ct));
 
@@ -226,14 +228,15 @@ public static class AssetEndpoints
                 return Results.Problem("Keine Branchendaten erhalten.");
 
             await using var conn = await factory.OpenAsync(ct);
+            var d = conn.Dialekt();
             var updated = 0;
 
             foreach (var (symbol, info) in map)
             {
-                updated += await conn.ExecuteAsync(new CommandDefinition("""
+                updated += await conn.ExecuteAsync(new CommandDefinition($"""
                     UPDATE dbo.asset
                        SET sector = @sector, country = COALESCE(@country, country),
-                           updated_utc = SYSUTCDATETIME()
+                           updated_utc = {d.Jetzt}
                      WHERE symbol = @symbol AND asset_class IN (0, 1)
                     """, new { symbol, sector = info.Sector, country = info.Country },
                     cancellationToken: ct));
@@ -256,6 +259,7 @@ public static class AssetEndpoints
         g.MapGet("/facets", async (ISqlConnectionFactory factory, CancellationToken ct) =>
         {
             await using var conn = await factory.OpenAsync(ct);
+            var d = conn.Dialekt();
 
             var sectors = await conn.QueryAsync<(string Sector, int N)>(new CommandDefinition("""
                 SELECT sector, COUNT(*) AS n FROM dbo.asset

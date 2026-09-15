@@ -1,5 +1,6 @@
 using Dapper;
 using Ingest.Infrastructure.Repositories;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Api.Endpoints;
 
@@ -34,6 +35,7 @@ public static class PillarWeightEndpoints
         try
         {
             await using var conn = await factory.OpenAsync(ct);
+            var d = conn.Dialekt();
 
             var rows = await conn.QueryAsync<(string Pillar, int Weight)>(new CommandDefinition(
                 "SELECT pillar, weight FROM dbo.pillar_weight", cancellationToken: ct));
@@ -82,6 +84,7 @@ public static class PillarWeightEndpoints
         g.MapGet("/gewichte", async (ISqlConnectionFactory factory, CancellationToken ct) =>
         {
             await using var conn = await factory.OpenAsync(ct);
+            var d = conn.Dialekt();
 
             var rows = (await conn.QueryAsync<Zeile>(new CommandDefinition(
                 """
@@ -126,13 +129,14 @@ public static class PillarWeightEndpoints
                 });
 
             await using var conn = await factory.OpenAsync(ct);
+            var d = conn.Dialekt();
 
             foreach (var (saeule, gewicht) in eingabe)
                 await conn.ExecuteAsync(new CommandDefinition(
-                    """
-                    MERGE dbo.pillar_weight WITH (HOLDLOCK) AS t
+                    $"""
+                    MERGE INTO dbo.pillar_weight {d.MergeSperre} AS t
                     USING (SELECT @p AS pillar) AS s ON t.pillar = s.pillar
-                    WHEN MATCHED THEN UPDATE SET weight = @g, updated_utc = SYSUTCDATETIME()
+                    WHEN MATCHED THEN UPDATE SET weight = @g, updated_utc = {d.Jetzt}
                     WHEN NOT MATCHED THEN INSERT (pillar, weight) VALUES (@p, @g);
                     """,
                     new { p = saeule, g = Math.Clamp(gewicht, 0, 100) }, cancellationToken: ct));

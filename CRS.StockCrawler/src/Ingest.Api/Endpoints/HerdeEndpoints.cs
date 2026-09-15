@@ -1,4 +1,5 @@
 using Dapper;
+using Ingest.Infrastructure.Datenbank;
 using Ingest.Core.Analysis;
 using Ingest.Infrastructure.Repositories;
 
@@ -25,10 +26,10 @@ public static class HerdeEndpoints
 
             var lauf = await conn.QuerySingleOrDefaultAsync<LaufZeile>(new CommandDefinition(
                 """
-                SELECT TOP 1 run_id AS RunId, started_utc AS StartedUtc,
+                SELECT run_id AS RunId, started_utc AS StartedUtc,
                        finished_utc AS FinishedUtc, von_utc AS VonUtc, note AS Note
                   FROM dbo.bot_trigger_run WHERE finished_utc IS NOT NULL
-                 ORDER BY run_id DESC
+                 ORDER BY run_id DESC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
                 """, cancellationToken: ct));
 
             if (lauf is null)
@@ -89,8 +90,7 @@ public static class HerdeEndpoints
             await using var conn = await factory.OpenAsync(ct);
 
             var id = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-                "dbo.run_bot_trigger_test", new { jahre },
-                commandType: System.Data.CommandType.StoredProcedure,
+                conn.Dialekt().Aufruf("dbo.run_bot_trigger_test", "jahre"), new { jahre },
                 commandTimeout: 3600, cancellationToken: ct));
 
             return Results.Ok(new { runId = id });
@@ -105,13 +105,13 @@ public static class HerdeEndpoints
 
             var lauf = await conn.QuerySingleOrDefaultAsync<UmkehrLauf>(new CommandDefinition(
                 """
-                SELECT TOP 1 run_id AS RunId, finished_utc AS FinishedUtc,
+                SELECT run_id AS RunId, finished_utc AS FinishedUtc,
                        horizon_days AS HorizonDays, min_crossings AS MinCrossings,
                        pairs_tested AS PairsTested, mean_hit_rate AS MeanHitRate,
                        sig_negative AS SigNegative, sig_positive AS SigPositive,
                        expected_bychance AS ExpectedByChance, note AS Note
                   FROM dbo.reversal_run WHERE finished_utc IS NOT NULL
-                 ORDER BY run_id DESC
+                 ORDER BY run_id DESC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
                 """, cancellationToken: ct));
 
             if (lauf is null)
@@ -123,15 +123,14 @@ public static class HerdeEndpoints
 
             var extreme = (await conn.QueryAsync<UmkehrZeile>(new CommandDefinition(
                 """
-                SELECT TOP (@limit)
-                       aa.symbol AS SymbolA, ab.symbol AS SymbolB,
+                SELECT aa.symbol AS SymbolA, ab.symbol AS SymbolB,
                        aa.asset_class AS KlasseA, ab.asset_class AS KlasseB,
                        p.n AS N, p.hit_rate AS HitRate, p.mean_gain AS MeanGain, p.z AS Z
                   FROM dbo.reversal_pair p
                   JOIN dbo.asset aa ON aa.asset_id = p.asset_id_a
                   JOIN dbo.asset ab ON ab.asset_id = p.asset_id_b
                  WHERE p.run_id = @id
-                 ORDER BY p.z
+                 ORDER BY p.z OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
                 """, new { id = lauf.RunId, limit = Math.Clamp(limit, 1, 200) },
                 cancellationToken: ct))).ToList();
 
@@ -180,10 +179,10 @@ public static class HerdeEndpoints
 
             var lauf = await conn.QuerySingleOrDefaultAsync<ZeitzoneLauf>(new CommandDefinition(
                 """
-                SELECT TOP 1 run_id AS RunId, finished_utc AS FinishedUtc,
+                SELECT run_id AS RunId, finished_utc AS FinishedUtc,
                        von_utc AS VonUtc, note AS Note
                   FROM dbo.timezone_lead_run WHERE finished_utc IS NOT NULL
-                 ORDER BY run_id DESC
+                 ORDER BY run_id DESC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
                 """, cancellationToken: ct));
 
             if (lauf is null)
@@ -239,8 +238,7 @@ public static class HerdeEndpoints
             await using var conn = await factory.OpenAsync(ct);
 
             var id = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-                "dbo.run_timezone_lead_test", new { jahre },
-                commandType: System.Data.CommandType.StoredProcedure,
+                conn.Dialekt().Aufruf("dbo.run_timezone_lead_test", "jahre"), new { jahre },
                 commandTimeout: 3600, cancellationToken: ct));
 
             return Results.Ok(new { runId = id });
@@ -253,9 +251,8 @@ public static class HerdeEndpoints
             await using var conn = await factory.OpenAsync(ct);
 
             var id = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-                "dbo.run_reversal_test",
+                conn.Dialekt().Aufruf("dbo.run_reversal_test", "horizon_days", "min_crossings", "interval"),
                 new { horizon_days = tage, min_crossings = minKreuzungen, @interval = "1d" },
-                commandType: System.Data.CommandType.StoredProcedure,
                 commandTimeout: 3600, cancellationToken: ct));
 
             return Results.Ok(new { runId = id });

@@ -3,6 +3,7 @@ using Dapper;
 using Ingest.Core.Analysis;
 using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.Logging;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -44,6 +45,7 @@ public interface ISemantikKalibrierung
 public sealed class SemantikKalibrierung : ISemantikKalibrierung
 {
     private readonly ISqlConnectionFactory _factory;
+    private SqlDialekt d => _factory.Dialekt;
     private readonly ILogger<SemantikKalibrierung> _log;
 
     public SemantikKalibrierung(ISqlConnectionFactory factory, ILogger<SemantikKalibrierung> log)
@@ -68,12 +70,12 @@ public sealed class SemantikKalibrierung : ISemantikKalibrierung
            daraus, nicht umgekehrt -- so kann keine Meldung in einen Tag geraten, an dem
            es sie noch nicht gab. */
         var meldungen = (await conn.QueryAsync<Meldung>(new CommandDefinition(
-            """
-            SELECT c.content AS Text, ISNULL(c.occurred_utc, s.published_utc) AS AlsUtc
+            $"""
+            SELECT c.content AS Text, COALESCE(c.occurred_utc, s.published_utc) AS AlsUtc
               FROM dbo.knowledge_chunk c
               JOIN dbo.knowledge_source s ON s.source_id = c.source_id
              WHERE s.pillar = 'semantic'
-               AND ISNULL(c.occurred_utc, s.published_utc) >= DATEADD(day, -@tage, SYSUTCDATETIME())
+               AND COALESCE(c.occurred_utc, s.published_utc) >= {d.PlusTage("-@tage", d.Jetzt)}
                AND c.content IS NOT NULL
             """, new { tage = tageZurueck }, commandTimeout: 300, cancellationToken: ct))).ToList();
 
@@ -117,20 +119,20 @@ public sealed class SemantikKalibrierung : ISemantikKalibrierung
                nicht über forecast_score: Hier wird die Säule gegen die WIRKLICHKEIT
                gemessen, nicht gegen eine andere Prognose. */
             var renditen = (await conn.QueryAsync<Rendite>(new CommandDefinition(
-                """
+                $"""
                 WITH b AS (
-                    SELECT asset_id, ts_utc, CAST([close] AS float) AS c,
+                    SELECT asset_id, ts_utc, CAST("close" AS float) AS c,
                            ROW_NUMBER() OVER (PARTITION BY asset_id ORDER BY ts_utc) AS rn
                       FROM dbo.price_bar
                      WHERE interval_code = '1d'
-                       AND ts_utc >= DATEADD(day, -@tage - 40, SYSUTCDATETIME())
-                       AND [close] > 0
+                       AND ts_utc >= {d.PlusTage("-@tage - 40", d.Jetzt)}
+                       AND "close" > 0
                 )
                 SELECT b.asset_id AS AssetId, CAST(b.ts_utc AS date) AS Tag,
-                       LOG(z.c / b.c) AS LogRendite
+                       {d.Ln("z.c / b.c")} AS LogRendite
                   FROM b
                   JOIN b z ON z.asset_id = b.asset_id AND z.rn = b.rn + @schritte
-                 WHERE b.ts_utc >= DATEADD(day, -@tage, SYSUTCDATETIME())
+                 WHERE b.ts_utc >= {d.PlusTage("-@tage", d.Jetzt)}
                 """,
                 new { tage = tageZurueck, schritte = Math.Max(1, h / 24) },
                 commandTimeout: 300, cancellationToken: ct))).ToList();
@@ -185,14 +187,14 @@ public sealed class SemantikKalibrierung : ISemantikKalibrierung
         foreach (var r in e)
         {
             await conn.ExecuteAsync(new CommandDefinition(
-                """
-                MERGE dbo.pillar_skill WITH (HOLDLOCK) AS t
+                $"""
+                MERGE INTO dbo.pillar_skill {d.MergeSperre} AS t
                 USING (SELECT 'semantic' AS pillar, @h AS horizon_hours, 0 AS asset_id) AS q
                    ON t.pillar = q.pillar AND t.horizon_hours = q.horizon_hours
                   AND t.asset_id = q.asset_id
                 WHEN MATCHED THEN UPDATE SET
                      skill = @skill, n_obs = @n, detail = @detail,
-                     measured_utc = SYSUTCDATETIME()
+                     measured_utc = {d.Jetzt}
                 WHEN NOT MATCHED THEN
                      INSERT (pillar, horizon_hours, asset_id, skill, n_obs, detail)
                      VALUES ('semantic', @h, 0, @skill, @n, @detail);

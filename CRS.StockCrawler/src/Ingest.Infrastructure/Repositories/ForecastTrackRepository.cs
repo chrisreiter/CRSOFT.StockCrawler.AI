@@ -42,6 +42,7 @@ public interface IForecastTrackRepository
 public sealed class ForecastTrackRepository : IForecastTrackRepository
 {
     private readonly ISqlConnectionFactory _factory;
+    private SqlDialekt d => _factory.Dialekt;
 
     public ForecastTrackRepository(ISqlConnectionFactory factory) => _factory = factory;
 
@@ -149,11 +150,11 @@ public sealed class ForecastTrackRepository : IForecastTrackRepository
         var from = asOfUtc - tolerance;
         var to = asOfUtc + tolerance;
 
-        var rows = await conn.QueryAsync<TrackRow>(new CommandDefinition("""
+        var rows = await conn.QueryAsync<TrackRow>(new CommandDefinition($"""
             WITH nearest AS (
               SELECT *,
                      ROW_NUMBER() OVER (PARTITION BY horizon_hours
-                                        ORDER BY ABS(DATEDIFF(SECOND, made_at_utc, @asOfUtc))) AS rn
+                                        ORDER BY ABS({d.SekundenZwischen("made_at_utc", "@asOfUtc")})) AS rn
                 FROM dbo.forecast_track
                WHERE asset_id = @assetId AND interval_code = @intervalCode
                  AND made_at_utc >= @from AND made_at_utc <= @to

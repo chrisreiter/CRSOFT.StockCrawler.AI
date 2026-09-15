@@ -1,8 +1,10 @@
+using System.Data.Common;
 using System.Data;
 using Dapper;
 using Ingest.Core.Abstractions;
 using Ingest.Core.Models;
 using Ingest.Infrastructure.Repositories;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -31,6 +33,7 @@ namespace Ingest.Infrastructure.Services;
 /// </summary>
 public sealed class InvestService(ISqlConnectionFactory factory) : IInvestService
 {
+    private SqlDialekt d => factory.Dialekt;
     /// <summary>
     /// Wie weit der Verlauf höchstens zurückreicht. Buchungen entstehen nur
     /// tagesaktuell, ein längerer Zeitraum kann also gar nicht auflaufen —
@@ -68,7 +71,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
             denn in eine Zeile, die es nicht gibt, trägt man nichts ein.       */
         var ids = assetIds is { Count: > 0 } ? assetIds.ToArray() : [];
 
-        var rows = await conn.QueryAsync<InvestPosition>(new CommandDefinition("""
+        var rows = await conn.QueryAsync<InvestPosition>(new CommandDefinition($"""
             WITH gebucht AS (
               SELECT b.asset_id, MIN(b.waehrung) AS waehrung,
                      SUM(b.anteile)                                        AS anteile,
@@ -82,9 +85,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
                GROUP BY b.asset_id
             ),
             gewaehlt AS (
-              SELECT TRY_CAST(value AS INT) AS asset_id
-                FROM STRING_SPLIT(@ids, ',')
-               WHERE value <> ''
+              SELECT asset_id FROM dbo.asset WHERE asset_id IN @ids
             ),
             beteiligt AS (
               SELECT asset_id FROM gebucht
@@ -95,18 +96,18 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
                    a.symbol                         AS Symbol,
                    a.name                           AS Name,
                    a.asset_class                    AS Klasse,
-                   ISNULL(g.waehrung, '')           AS Waehrung,
-                   ISNULL(g.anteile, 0)             AS Anteile,
-                   ISNULL(g.eingezahlt, 0)          AS Eingezahlt,
-                   ISNULL(g.entnommen, 0)           AS Entnommen,
-                   ISNULL(g.gebuehren, 0)           AS Gebuehren,
-                   ISNULL(g.buchungen, 0)           AS Buchungen,
+                   COALESCE(g.waehrung, '')           AS Waehrung,
+                   COALESCE(g.anteile, 0)             AS Anteile,
+                   COALESCE(g.eingezahlt, 0)          AS Eingezahlt,
+                   COALESCE(g.entnommen, 0)           AS Entnommen,
+                   COALESCE(g.gebuehren, 0)           AS Gebuehren,
+                   COALESCE(g.buchungen, 0)           AS Buchungen,
                    g.seit_utc                       AS SeitUtc,
                    k.schluss                        AS Kurs,
                    k.ts_utc                         AS KursUtc,
                    k.interval_code                  AS KursQuelle,
-                   CASE WHEN w.asset_id IS NULL THEN CAST(0 AS BIT)
-                        ELSE CAST(1 AS BIT) END     AS Gewaehlt
+                   CASE WHEN w.asset_id IS NULL THEN CAST(0 AS {d.TypBool})
+                        ELSE CAST(1 AS {d.TypBool}) END     AS Gewaehlt
               FROM beteiligt t
               JOIN dbo.asset a ON a.asset_id = t.asset_id
               LEFT JOIN gebucht g  ON g.asset_id = t.asset_id
@@ -116,11 +117,11 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
                   Stundenbars bis 26.08. 14:00 -- der angezeigte Depotwert war
                   38 Stunden alt und bewegte sich zwischen zwei Tageslaeufen
                   gar nicht, obwohl stuendlich frische Kurse hereinkamen.     */
-              OUTER APPLY dbo.letzter_kurs(t.asset_id) k
-             ORDER BY CASE WHEN ISNULL(g.buchungen, 0) > 0 THEN 0 ELSE 1 END,
+              {d.OuterApplyVor} dbo.letzter_kurs(t.asset_id) k {d.OuterApplyNach}
+             ORDER BY CASE WHEN COALESCE(g.buchungen, 0) > 0 THEN 0 ELSE 1 END,
                       a.symbol
             """,
-            new { ids = string.Join(',', ids), depot }, cancellationToken: ct));
+            new { ids, depot }, cancellationToken: ct));
 
         var liste = rows.ToList();
         var konten = await KontenAsync(conn, depot, ct);
@@ -182,7 +183,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
         return await KontenAsync(conn, depot, ct);
     }
 
-    private static async Task<List<InvestKonto>> KontenAsync(IDbConnection conn, string depot,
+    private static async Task<List<InvestKonto>> KontenAsync(DbConnection conn, string depot,
                                                              CancellationToken ct)
     {
         /*  Der Stand ist die SUMME der Bewegungen, keine gespeicherte Zahl.
@@ -190,12 +191,12 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
             derselbe Grundsatz wie bei den Anteilen einer Position.            */
         var rows = await conn.QueryAsync<InvestKonto>(new CommandDefinition("""
             SELECT k.waehrung              AS Waehrung,
-                   ISNULL(b.stand, 0)      AS Stand,
+                   COALESCE(b.stand, 0)      AS Stand,
                    k.gebuehr_pct           AS GebuehrPct,
-                   ISNULL(b.eingezahlt, 0) AS Eingezahlt,
-                   ISNULL(b.ausgezahlt, 0) AS Ausgezahlt,
-                   ISNULL(b.gebuehren, 0)  AS Gebuehren,
-                   ISNULL(b.bewegungen, 0) AS Bewegungen,
+                   COALESCE(b.eingezahlt, 0) AS Eingezahlt,
+                   COALESCE(b.ausgezahlt, 0) AS Ausgezahlt,
+                   COALESCE(b.gebuehren, 0)  AS Gebuehren,
+                   COALESCE(b.bewegungen, 0) AS Bewegungen,
                    b.seit_utc              AS SeitUtc
               FROM dbo.invest_konto k
               LEFT JOIN (
@@ -227,9 +228,9 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
 
         if (gebuehrPct is { } pct)
         {
-            await conn.ExecuteAsync(new CommandDefinition("""
+            await conn.ExecuteAsync(new CommandDefinition($"""
                 UPDATE dbo.invest_konto
-                   SET gebuehr_pct = @pct, updated_utc = SYSUTCDATETIME()
+                   SET gebuehr_pct = @pct, updated_utc = {d.Jetzt}
                  WHERE waehrung = @w AND depot = @depot
                 """, new { w, depot, pct = Math.Clamp(pct, 0m, 10m) }, cancellationToken: ct));
         }
@@ -237,7 +238,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
         if (sollStand is { } soll)
         {
             var jetzt = await conn.ExecuteScalarAsync<decimal>(new CommandDefinition(
-                "SELECT ISNULL(SUM(betrag), 0) FROM dbo.invest_kontobewegung "
+                "SELECT COALESCE(SUM(betrag), 0) FROM dbo.invest_kontobewegung "
               + "WHERE waehrung = @w AND depot = @depot",
                 new { w, depot }, cancellationToken: ct));
 
@@ -268,15 +269,14 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
         await using var conn = await factory.OpenAsync(ct);
 
         var rows = await conn.QueryAsync<InvestKontobewegung>(new CommandDefinition("""
-            SELECT TOP (@grenze)
-                   m.bewegung_id AS BewegungId, m.waehrung AS Waehrung, m.am_utc AS AmUtc,
+            SELECT m.bewegung_id AS BewegungId, m.waehrung AS Waehrung, m.am_utc AS AmUtc,
                    m.betrag AS Betrag, m.grund AS Grund, m.buchung_id AS BuchungId,
                    m.notiz AS Notiz, a.symbol AS Symbol
               FROM dbo.invest_kontobewegung m
               LEFT JOIN dbo.invest_buchung b ON b.buchung_id = m.buchung_id
               LEFT JOIN dbo.asset a ON a.asset_id = b.asset_id
              WHERE m.waehrung = @w AND m.depot = @depot
-             ORDER BY m.am_utc DESC, m.bewegung_id DESC
+             ORDER BY m.am_utc DESC, m.bewegung_id DESC OFFSET 0 ROWS FETCH NEXT @grenze ROWS ONLY
             """, new { w, depot, grenze = Math.Clamp(grenze, 1, 2000) },
             cancellationToken: ct));
 
@@ -325,7 +325,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
             sich nicht auf ein `decimal` legen.                                */
         var stand = await conn.QuerySingleOrDefaultAsync<Bestand>(
             new CommandDefinition("""
-                SELECT ISNULL(SUM(anteile), 0) AS Anteile, MIN(waehrung) AS Waehrung
+                SELECT COALESCE(SUM(anteile), 0) AS Anteile, MIN(waehrung) AS Waehrung
                   FROM dbo.invest_buchung
                  WHERE asset_id = @id AND depot = @depot
                 """, new { id = assetId.Value, depot }, cancellationToken: ct));
@@ -388,11 +388,10 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
         Oeffne(conn);
         using var tx = conn.BeginTransaction();
 
-        var buchungId = await conn.ExecuteScalarAsync<int>(new CommandDefinition("""
+        var buchungId = await conn.ExecuteScalarAsync<int>(new CommandDefinition($"""
             INSERT INTO dbo.invest_buchung
                    (depot, asset_id, kurs, kurs_utc, betrag, anteile, gebuehr, waehrung, notiz)
-            OUTPUT INSERTED.buchung_id
-            VALUES (@depot, @id, @kurs, @kursUtc, @betrag, @anteile, @gebuehr, @waehrung, @notiz)
+            {d.RueckgabeVor("buchung_id")} VALUES (@depot, @id, @kurs, @kursUtc, @betrag, @anteile, @gebuehr, @waehrung, @notiz) {d.RueckgabeNach("buchung_id")}
             """,
             new { depot, id = assetId.Value, kurs = close, kursUtc, betrag, anteile, gebuehr,
                   waehrung = w, notiz },
@@ -512,7 +511,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
     /// darauf zu bauen macht diesen Code von einer Zusicherung abhängig, die
     /// nirgends steht.
     /// </summary>
-    private static void Oeffne(IDbConnection conn)
+    private static void Oeffne(DbConnection conn)
     {
         if (conn.State != ConnectionState.Open) conn.Open();
     }
@@ -867,8 +866,9 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
     /// Vermögen von null aussähe.</para>
     /// </summary>
     private static async Task<Dictionary<int, List<(DateTime Zeit, decimal Schluss)>>> KurseAsync(
-        IDbConnection conn, int[] assetIds, DateTime von, CancellationToken ct)
+        DbConnection conn, int[] assetIds, DateTime von, CancellationToken ct)
     {
+        var d = conn.Dialekt();
         if (assetIds.Length == 0) return [];
 
         /*  BEIDE Aufloesungen. Die Tagesbars tragen den Verlauf ueber lange
@@ -880,10 +880,10 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
             Stundenaufloesung waeren rund 6.000 Punkte je Wert, und die
             Vermoegenskurve braucht sie nicht.                                 */
         var bars = (await conn.QueryAsync<Kurspunkt>(new CommandDefinition("""
-            SELECT asset_id AS AssetId, ts_utc AS TsUtc, [close] AS Schluss
+            SELECT asset_id AS AssetId, ts_utc AS TsUtc, "close" AS Schluss
               FROM dbo.price_bar
              WHERE asset_id IN @ids
-               AND [close] > 0
+               AND "close" > 0
                AND (   (interval_code = '1d' AND ts_utc >= @von)
                     OR (interval_code = '1h' AND ts_utc >= @fein))
              ORDER BY asset_id, ts_utc
@@ -905,10 +905,10 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
             diesen Zusatz endete die Kurve auf dem Stand von vorgestern,
             waehrend die Tabelle daneben den frischen Stundenkurs zeigt. Zwei
             Zahlen fuer dasselbe, und man sucht den Fehler in der falschen.   */
-        var frisch = await conn.QueryAsync<Kurspunkt>(new CommandDefinition("""
+        var frisch = await conn.QueryAsync<Kurspunkt>(new CommandDefinition($"""
             SELECT a.asset_id AS AssetId, k.ts_utc AS TsUtc, k.schluss AS Schluss
               FROM dbo.asset a
-              OUTER APPLY dbo.letzter_kurs(a.asset_id) k
+              {d.OuterApplyVor} dbo.letzter_kurs(a.asset_id) k {d.OuterApplyNach}
              WHERE a.asset_id IN @ids AND k.schluss IS NOT NULL
             """, new { ids = assetIds }, cancellationToken: ct));
 
@@ -964,15 +964,15 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
             cancellationToken: ct))).ToHashSet();
 
         var fx = await conn.QuerySingleOrDefaultAsync<Tagesschluss>(new CommandDefinition("""
-            SELECT TOP 1 p.[close] AS Schluss, p.ts_utc AS TsUtc
+            SELECT p."close" AS Schluss, p.ts_utc AS TsUtc
               FROM dbo.price_bar p
               JOIN dbo.asset a ON a.asset_id = p.asset_id
              WHERE a.symbol = 'EURUSD=X' AND p.interval_code = '1d'
-             ORDER BY p.ts_utc DESC
+             ORDER BY p.ts_utc DESC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
             """, cancellationToken: ct));
 
         var fxReihe = await conn.QueryAsync<Kurspunkt>(new CommandDefinition("""
-            SELECT p.asset_id AS AssetId, p.ts_utc AS TsUtc, p.[close] AS Schluss
+            SELECT p.asset_id AS AssetId, p.ts_utc AS TsUtc, p."close" AS Schluss
               FROM dbo.price_bar p
               JOIN dbo.asset a ON a.asset_id = p.asset_id
              WHERE a.symbol = 'EURUSD=X' AND p.interval_code = '1d'
@@ -1129,7 +1129,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
         await using var conn = await factory.OpenAsync(ct);
 
         var fxTage = (await conn.QueryAsync<Kurspunkt>(new CommandDefinition("""
-            SELECT p.asset_id AS AssetId, p.ts_utc AS TsUtc, p.[close] AS Schluss
+            SELECT p.asset_id AS AssetId, p.ts_utc AS TsUtc, p."close" AS Schluss
               FROM dbo.price_bar p
               JOIN dbo.asset a ON a.asset_id = p.asset_id
              WHERE a.symbol = 'EURUSD=X' AND p.interval_code = '1d'

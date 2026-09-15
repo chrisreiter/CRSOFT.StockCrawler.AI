@@ -2,12 +2,14 @@ using System.Data;
 using Dapper;
 using Ingest.Core.Abstractions;
 using Ingest.Core.Models;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Repositories;
 
 public sealed class ForecastRepository : IForecastRepository
 {
     private readonly ISqlConnectionFactory _factory;
+    private SqlDialekt d => _factory.Dialekt;
 
     public ForecastRepository(ISqlConnectionFactory factory) => _factory = factory;
 
@@ -50,16 +52,15 @@ public sealed class ForecastRepository : IForecastRepository
             }
             else
             {
-                id = await conn.ExecuteScalarAsync<long>(new CommandDefinition("""
+                id = await conn.ExecuteScalarAsync<long>(new CommandDefinition($"""
                     INSERT INTO dbo.forecast
                       (asset_id, horizon_hours, made_at_utc, target_ts_utc, base_close,
                        predicted_close, predicted_return, confidence, model_version,
                        combined_close, combined_return, pillar_mix)
-                    OUTPUT INSERTED.forecast_id
-                    VALUES
+                    {d.RueckgabeVor("forecast_id")} VALUES
                       (@AssetId, @HorizonHours, @MadeAtUtc, @TargetTsUtc, @BaseClose,
                        @PredictedClose, @PredictedReturn, @Confidence, @ModelVersion,
-                       @CombinedClose, @CombinedReturn, @PillarMix)
+                       @CombinedClose, @CombinedReturn, @PillarMix) {d.RueckgabeNach("forecast_id")}
                     """, f, tx, cancellationToken: ct));
             }
 
@@ -86,9 +87,8 @@ public sealed class ForecastRepository : IForecastRepository
         await using var conn = await _factory.OpenAsync(ct);
 
         var rows = await conn.QueryAsync<Forecast>(new CommandDefinition(
-            "dbo.get_due_forecasts",
+            d.Aufruf("dbo.get_due_forecasts", "now_utc", "max_rows"),
             new { now_utc = nowUtc, max_rows = maxRows },
-            commandType: CommandType.StoredProcedure,
             cancellationToken: ct));
 
         return rows.ToList();
@@ -106,8 +106,7 @@ public sealed class ForecastRepository : IForecastRepository
         await using var conn = await _factory.OpenAsync(ct);
 
         return await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-            "dbo.mark_unscoreable_forecasts",
-            commandType: CommandType.StoredProcedure,
+            d.Aufruf("dbo.mark_unscoreable_forecasts"),
             commandTimeout: 300, cancellationToken: ct));
     }
 
@@ -161,13 +160,13 @@ public sealed class ForecastRepository : IForecastRepository
 
         foreach (var s in list)
         {
-            await conn.ExecuteAsync(new CommandDefinition("""
-                MERGE dbo.forecast_score_combined WITH (HOLDLOCK) AS t
+            await conn.ExecuteAsync(new CommandDefinition($"""
+                MERGE INTO dbo.forecast_score_combined {d.MergeSperre} AS t
                 USING (SELECT @Id AS forecast_id) AS q ON t.forecast_id = q.forecast_id
                 WHEN MATCHED THEN UPDATE SET
                      actual_close = @Ist, actual_return = @IstRendite,
                      abs_pct_error = @Fehler, direction_correct = @Richtung,
-                     scored_at_utc = SYSUTCDATETIME()
+                     scored_at_utc = {d.Jetzt}
                 WHEN NOT MATCHED THEN
                      INSERT (forecast_id, actual_close, actual_return, abs_pct_error,
                              direction_correct)
@@ -290,15 +289,15 @@ public sealed class ForecastRepository : IForecastRepository
 
         await using var conn = await _factory.OpenAsync(ct);
 
-        await conn.ExecuteAsync(new CommandDefinition("""
-            MERGE dbo.model_weight WITH (HOLDLOCK) AS t
+        await conn.ExecuteAsync(new CommandDefinition($"""
+            MERGE INTO dbo.model_weight {d.MergeSperre} AS t
             USING (SELECT @AssetId AS asset_id, @HorizonHours AS horizon_hours,
                           @ModelName AS model_name) AS s
                ON t.asset_id = s.asset_id AND t.horizon_hours = s.horizon_hours
               AND t.model_name = s.model_name
             WHEN MATCHED THEN UPDATE SET
                   weight = @Weight, n_obs = @NObs, mean_abs_pct_err = @MeanAbsPctErr,
-                  hit_rate = @HitRate, updated_utc = SYSUTCDATETIME()
+                  hit_rate = @HitRate, updated_utc = {d.Jetzt}
             WHEN NOT MATCHED THEN
               INSERT (asset_id, horizon_hours, model_name, weight, n_obs, mean_abs_pct_err, hit_rate)
               VALUES (@AssetId, @HorizonHours, @ModelName, @Weight, @NObs, @MeanAbsPctErr, @HitRate);
@@ -310,11 +309,11 @@ public sealed class ForecastRepository : IForecastRepository
     {
         await using var conn = await _factory.OpenAsync(ct);
 
-        var rows = await conn.QueryAsync<(int, int, double, double)>(new CommandDefinition("""
+        var rows = await conn.QueryAsync<(int, int, double, double)>(new CommandDefinition($"""
             SELECT f.horizon_hours,
                    COUNT(*)                                              AS n,
                    AVG(s.abs_pct_error)                                  AS mape,
-                   AVG(CASE WHEN s.direction_correct = 1 THEN 1.0 ELSE 0.0 END) AS hit_rate
+                   AVG(CASE WHEN s.direction_correct = {d.Wahr} THEN 1.0 ELSE 0.0 END) AS hit_rate
               FROM dbo.forecast_score s
               JOIN dbo.forecast f ON f.forecast_id = s.forecast_id
              WHERE (@assetId IS NULL OR f.asset_id = @assetId)

@@ -7,6 +7,7 @@ using Ingest.Core.Analysis;
 using Ingest.Core.Models;
 using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.Logging;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -37,6 +38,7 @@ public sealed class AutopilotService(
     IReasoningService reasoning,
     ILogger<AutopilotService> log) : IAutopilotService
 {
+    private SqlDialekt d => factory.Dialekt;
     private static readonly Handelskosten Kosten = Handelskosten.Standard;
 
     /// <summary>
@@ -72,7 +74,7 @@ public sealed class AutopilotService(
     {
         await using var conn = await factory.OpenAsync(ct);
 
-        var roh = (await conn.QueryAsync<Rohwert>(new CommandDefinition("""
+        var roh = (await conn.QueryAsync<Rohwert>(new CommandDefinition($"""
             WITH prognose AS (
               SELECT f.asset_id, f.horizon_hours,
                      COALESCE(f.combined_return, f.predicted_return) AS rendite,
@@ -80,7 +82,7 @@ public sealed class AutopilotService(
                                         ORDER BY f.made_at_utc DESC) rn
                 FROM dbo.forecast f
                WHERE f.horizon_hours IN (24, 168)
-                 AND f.made_at_utc >= DATEADD(day, -4, SYSUTCDATETIME())
+                 AND f.made_at_utc >= {d.PlusTage("-4", d.Jetzt)}
             ),
             /*  Je Wert und Zieltag nur die JÜNGSTE Prognose. Prognosen entstehen
                 stündlich, der Zielbar nicht -- ungefiltert zählte dieselbe
@@ -93,7 +95,7 @@ public sealed class AutopilotService(
                      COUNT(*)                                AS n
                 FROM (SELECT f.asset_id, s.direction_correct,
                              ROW_NUMBER() OVER (PARTITION BY f.asset_id,
-                                                             CONVERT(date, f.target_ts_utc)
+                                                             CAST(f.target_ts_utc AS DATE)
                                                 ORDER BY f.made_at_utc DESC) rn
                         FROM dbo.forecast f
                         JOIN dbo.forecast_score s ON s.forecast_id = f.forecast_id
@@ -114,12 +116,11 @@ public sealed class AutopilotService(
             beweg AS (
               SELECT asset_id, AVG(ABS(r)) AS bewegung, COUNT(*) AS tage
                 FROM (SELECT p.asset_id,
-                             LOG(p.[close] / NULLIF(LAG(p.[close])
-                                 OVER (PARTITION BY p.asset_id ORDER BY p.ts_utc), 0)) AS r
+                             {d.Ln("p.\"close\" / NULLIF(LAG(p.\"close\") OVER (PARTITION BY p.asset_id ORDER BY p.ts_utc), 0)")} AS r
                         FROM dbo.price_bar p
                        WHERE p.interval_code = '1d'
-                         AND p.ts_utc >= DATEADD(day, -90, SYSUTCDATETIME())
-                         AND p.[close] > 0) x
+                         AND p.ts_utc >= {d.PlusTage("-90", d.Jetzt)}
+                         AND p."close" > 0) x
                WHERE r IS NOT NULL AND ABS(r) < 0.5
                GROUP BY asset_id
             )
@@ -132,25 +133,25 @@ public sealed class AutopilotService(
                    p24.rendite               AS Tag,
                    p168.rendite              AS Woche,
                    g.p                       AS Trefferquote,
-                   ISNULL(g.treffer, 0)      AS Treffer,
-                   ISNULL(g.n, 0)            AS Bewertet,
-                   ISNULL(b.bewegung, 0)     AS Bewegung,
-                   ISNULL(b.tage, 0)         AS Tage
+                   COALESCE(g.treffer, 0)      AS Treffer,
+                   COALESCE(g.n, 0)            AS Bewertet,
+                   COALESCE(b.bewegung, 0)     AS Bewegung,
+                   COALESCE(b.tage, 0)         AS Tage
               FROM dbo.asset a
               /*  Derselbe letzte Kurs wie in der Anzeige und beim Buchen --
                   eine Rangfolge auf Kursen von vorgestern waehlte nach
                   Zahlen aus, zu denen niemand mehr handeln kann.             */
-              OUTER APPLY dbo.letzter_kurs(a.asset_id) k
+              {d.OuterApplyVor} dbo.letzter_kurs(a.asset_id) k {d.OuterApplyNach}
               LEFT JOIN prognose p24  ON p24.asset_id  = a.asset_id
                                      AND p24.horizon_hours = 24  AND p24.rn = 1
               LEFT JOIN prognose p168 ON p168.asset_id = a.asset_id
                                      AND p168.horizon_hours = 168 AND p168.rn = 1
               LEFT JOIN guete g ON g.asset_id = a.asset_id
               LEFT JOIN beweg b ON b.asset_id = a.asset_id
-             WHERE a.is_tracked = 1
+             WHERE a.is_tracked = {d.Wahr}
                /*  Ohne frische Bar ist ein Wert nicht handelbar. Fünf Tage
                    decken ein langes Wochenende samt Feiertag ab.             */
-               AND k.ts_utc >= DATEADD(day, -5, SYSUTCDATETIME())
+               AND k.ts_utc >= {d.PlusTage("-5", d.Jetzt)}
             """, cancellationToken: ct))).ToList();
 
         var muster = await MusterAsync(conn, ct);
@@ -370,21 +371,21 @@ public sealed class AutopilotService(
     {
         try
         {
-            var aktiv = (await conn.QueryAsync<Ausloeser>(new CommandDefinition("""
-                CREATE TABLE #a (ausloeser NVARCHAR(100), richtung INT, asset_id INT,
-                                 asset_class TINYINT, ts_utc DATETIME2(0));
-                INSERT INTO #a EXEC dbo.get_active_triggers @tage = 3;
+            var aktiv = (await conn.QueryAsync<Ausloeser>(new CommandDefinition($"""
+                {d.CreateTemp("a")} (ausloeser {d.TypText(100)}, richtung INT, asset_id INT,
+                                 asset_class SMALLINT, ts_utc {d.TypZeit});
+                INSERT INTO {d.Temp("a")} {d.Aufruf("dbo.get_active_triggers", "tage")};
 
                 SELECT a.asset_id AS AssetId, a.ausloeser AS Name, a.richtung AS Richtung,
                        s.r20 - s.b20 AS Ueber20, s.richtung20 AS Treffer20,
                        s.ereignisse AS Ereignisse
-                  FROM #a a
+                  FROM {d.Temp("a")} a
                   JOIN dbo.bot_trigger_stat s
                     ON s.ausloeser = a.ausloeser AND s.klasse = a.asset_class
                    AND s.run_id = (SELECT MAX(run_id) FROM dbo.bot_trigger_stat);
 
-                DROP TABLE #a;
-                """, cancellationToken: ct))).ToList();
+                DROP TABLE {d.Temp("a")};
+                """, new { tage = 3 }, cancellationToken: ct))).ToList();
 
             var ergebnis = new Dictionary<int, AutopilotBeitrag>();
 
@@ -474,7 +475,7 @@ public sealed class AutopilotService(
     }
 
     private static async Task<List<AutopilotEinstellung>> EinstellungenAsync(
-        IDbConnection conn, CancellationToken ct)
+        DbConnection conn, CancellationToken ct)
     {
         var rows = await conn.QueryAsync<AutopilotEinstellung>(new CommandDefinition("""
             SELECT depot AS Depot, aktiv AS Aktiv, werte AS Werte, max_anteil AS MaxAnteil,
@@ -493,8 +494,8 @@ public sealed class AutopilotService(
         string? takt, string? waehrung, bool? nemotron, decimal? startkapital,
         bool? zaehlt, CancellationToken ct = default)
     {
-        var d = (depot ?? "").Trim().ToLowerInvariant();
-        if (d is not ("streng" or "aktiv" or "halten" or "invers")) return null;
+        var dep = (depot ?? "").Trim().ToLowerInvariant();
+        if (dep is not ("streng" or "aktiv" or "halten" or "invers")) return null;
 
         var t = (takt ?? "").Trim().ToUpperInvariant();
         if (t.Length > 0 && t is not ("1T" or "1W" or "1M" or "3M" or "6M" or "1J")) return null;
@@ -504,7 +505,7 @@ public sealed class AutopilotService(
         /*  COALESCE statt einzelner UPDATE-Zweige: Wer nur den Takt umstellt,
             soll die uebrigen Felder nicht mitschicken muessen -- und ein
             zurueckgeschicktes Feld ist eines, das veraltet sein kann.         */
-        await conn.ExecuteAsync(new CommandDefinition("""
+        await conn.ExecuteAsync(new CommandDefinition($"""
             UPDATE dbo.autopilot_einstellung
                SET aktiv       = COALESCE(@aktiv, aktiv),
                    werte       = COALESCE(@werte, werte),
@@ -514,12 +515,12 @@ public sealed class AutopilotService(
                    waehrung    = COALESCE(NULLIF(@waehrung, ''), waehrung),
                    nemotron    = COALESCE(@nemotron, nemotron),
                    startkapital = COALESCE(@startkapital, startkapital),
-                   updated_utc = SYSUTCDATETIME()
-             WHERE depot = @d
+                   updated_utc = {d.Jetzt}
+             WHERE depot = @dep
             """,
             new
             {
-                d, aktiv, nemotron, takt = t,
+                dep, aktiv, nemotron, takt = t,
                 werte = werte is { } w ? Math.Clamp(w, 1, 30) : (int?)null,
                 maxAnteil = maxAnteil is { } m ? Math.Clamp(m, 0.02m, 1m) : (decimal?)null,
                 hysterese = hysterese is { } h ? Math.Clamp(h, 0m, 0.2m) : (decimal?)null,
@@ -544,11 +545,11 @@ public sealed class AutopilotService(
         if (zaehlt is true)
         {
             await conn.ExecuteAsync(new CommandDefinition(
-                "EXEC dbo.set_leitstrategie @depot = @d",
-                new { d }, cancellationToken: ct));
+                d.Aufruf("dbo.set_leitstrategie", "depot"),
+                new { depot = dep }, cancellationToken: ct));
         }
 
-        return (await EinstellungenAsync(conn, ct)).FirstOrDefault(x => x.Depot == d);
+        return (await EinstellungenAsync(conn, ct)).FirstOrDefault(x => x.Depot == dep);
     }
 
     /// <summary>
@@ -569,18 +570,18 @@ public sealed class AutopilotService(
     public async Task<AutopilotEinstellung?> ZuruecksetzenAsync(
         string depot, CancellationToken ct = default)
     {
-        var d = (depot ?? "").Trim().ToLowerInvariant();
-        if (d is not ("streng" or "aktiv" or "halten" or "invers")) return null;
+        var dep = (depot ?? "").Trim().ToLowerInvariant();
+        if (dep is not ("streng" or "aktiv" or "halten" or "invers")) return null;
 
         await using var conn = await factory.OpenAsync(ct);
 
         await conn.ExecuteAsync(new CommandDefinition(
-            "EXEC dbo.reset_autopilot_depot @depot = @d",
-            new { d }, cancellationToken: ct));
+            d.Aufruf("dbo.reset_autopilot_depot", "depot"),
+            new { depot = dep }, cancellationToken: ct));
 
-        log.LogInformation("Autopilot {Depot} zurückgesetzt", d);
+        log.LogInformation("Autopilot {Depot} zurückgesetzt", dep);
 
-        return (await EinstellungenAsync(conn, ct)).FirstOrDefault(x => x.Depot == d);
+        return (await EinstellungenAsync(conn, ct)).FirstOrDefault(x => x.Depot == dep);
     }
 
     // --------------------------------------------------------------- Laeufe --
@@ -624,22 +625,22 @@ public sealed class AutopilotService(
     public async Task<AutopilotLauf> LaufeAsync(string depot, bool erzwingen = false,
                                                 CancellationToken ct = default)
     {
-        var d = (depot ?? "").Trim().ToLowerInvariant();
+        var dep = (depot ?? "").Trim().ToLowerInvariant();
 
-        var einst = (await EinstellungenAsync(ct)).FirstOrDefault(x => x.Depot == d)
-            ?? throw new InvalidOperationException($"Keine Einstellungen für Depot {d}.");
+        var einst = (await EinstellungenAsync(ct)).FirstOrDefault(x => x.Depot == dep)
+            ?? throw new InvalidOperationException($"Keine Einstellungen für Depot {dep}.");
 
         await using var conn = await factory.OpenAsync(ct);
 
-        var handelstag = erzwingen || await HandelstagAsync(conn, d, einst.TaktTage, ct);
+        var handelstag = erzwingen || await HandelstagAsync(conn, dep, einst.TaktTage, ct);
 
-        var laufId = await conn.ExecuteScalarAsync<int>(new CommandDefinition("""
+        var laufId = await conn.ExecuteScalarAsync<int>(new CommandDefinition($"""
             INSERT INTO dbo.autopilot_lauf (depot, handelstag)
-            OUTPUT INSERTED.lauf_id VALUES (@d, @ht)
-            """, new { d, ht = handelstag }, cancellationToken: ct));
+            {d.RueckgabeVor("lauf_id")} VALUES (@dep, @ht) {d.RueckgabeNach("lauf_id")}
+            """, new { dep, ht = handelstag }, cancellationToken: ct));
 
-        var anwaerter = await RangfolgeAsync(d, 600, ct);
-        var uebersicht = await invest.UebersichtAsync(d, null, ct);
+        var anwaerter = await RangfolgeAsync(dep, 600, ct);
+        var uebersicht = await invest.UebersichtAsync(dep, null, ct);
 
         var block = uebersicht.Waehrungen.FirstOrDefault(b => b.Waehrung == einst.Waehrung);
         var vermoegen = block?.Vermoegen ?? 0;
@@ -685,7 +686,7 @@ public sealed class AutopilotService(
                       wieder — die Grundlinie.                                 */
         var handelbar = anwaerter.Where(a => a.Kurs > 0).ToList();
 
-        var ziel = d switch
+        var ziel = dep switch
         {
             "streng" => handelbar.Where(a => a.Bewertet >= MindestFaelle
                                           && a.Verdienst > 0
@@ -744,7 +745,7 @@ public sealed class AutopilotService(
                 ziel.Where(z => !gehalten.ContainsKey(z.AssetId)));
 
             // ---- Verkaufen: was nicht mehr im Zielkorb ist ------------------
-            if (d != "halten")
+            if (dep != "halten")
             {
                 foreach (var (assetId, pos) in gehalten)
                 {
@@ -788,7 +789,7 @@ public sealed class AutopilotService(
                         continue;
                     }
 
-                    var r = await invest.SetzeAsync(d, pos.Symbol, 0, einst.Waehrung,
+                    var r = await invest.SetzeAsync(dep, pos.Symbol, 0, einst.Waehrung,
                         "Autopilot: nicht mehr im Zielkorb", ct);
 
                     if (r is { Gebucht: true })
@@ -841,7 +842,7 @@ public sealed class AutopilotService(
                     plausibel ist -- und wuerde damit genau das ablehnen, was
                     dieses Depot absichtlich tut. Eine Gegenkontrolle, die man
                     vor sich selbst schuetzt, ist keine mehr.                 */
-                if (einst.Nemotron && d != "halten" && d != "invers"
+                if (einst.Nemotron && dep != "halten" && dep != "invers"
                     && urteile < MaxUrteile)
                 {
                     urteile++;
@@ -856,7 +857,7 @@ public sealed class AutopilotService(
                     }
                 }
 
-                var r = await invest.SetzeAsync(d, z.Symbol, jePosition, einst.Waehrung,
+                var r = await invest.SetzeAsync(dep, z.Symbol, jePosition, einst.Waehrung,
                     "Autopilot", ct);
 
                 var gebucht = r is { Gebucht: true };
@@ -887,13 +888,13 @@ public sealed class AutopilotService(
                 gekauft" ohne sie ist keine Begründung, sondern eine Behauptung
                 — und beim strengen Korb ist genau das das Ergebnis des Laufs. */
             var grund =
-                d == "streng" && a.Bewertet < MindestFaelle
+                dep == "streng" && a.Bewertet < MindestFaelle
                     ? $"nur {a.Bewertet} bewertete Live-Prognosen, nötig {MindestFaelle} "
                     + "— ohne Nachweis wird hier nicht gehandelt"
-                : d == "streng" && a.Verdienst <= 0
+                : dep == "streng" && a.Verdienst <= 0
                     ? $"geschrumpfte Trefferquote {a.Trefferquote:0.000} unter dem Nullpunkt "
                     + "0,523 — kein nachgewiesener Vorsprung"
-                : d == "streng" && a.Erwartungswert <= 0
+                : dep == "streng" && a.Erwartungswert <= 0
                     ? $"Trefferquote {a.Trefferquote:0.000}, nötig {a.NoetigeTrefferquote:0.000}"
                     + $" — Erwartungswert {a.Erwartungswert * 100:0.000} % je Geschäft"
                 /*  Bei `invers` ist die Bedingung umgedreht, also muss es
@@ -901,9 +902,9 @@ public sealed class AutopilotService(
                     einem Depot, das Rueckgaenge sucht, waere schlicht falsch
                     aufgeschrieben -- und ein Protokoll, das sich selbst
                     widerspricht, entwertet auch die richtigen Zeilen.        */
-                : d == "invers" && a.Punktzahl >= 0
+                : dep == "invers" && a.Punktzahl >= 0
                     ? $"Erwartung {a.Punktzahl * 100:0.000} % — kein erwarteter Rückgang"
-                : d == "invers"
+                : dep == "invers"
                     ? "nicht unter den " + einst.Werte + " schwächsten"
                 : a.Punktzahl <= 0
                     ? $"Erwartung {a.Punktzahl * 100:0.000} % — kein Anstieg"
@@ -921,13 +922,13 @@ public sealed class AutopilotService(
 
         await SchreibeAsync(conn, laufId, sortiert, ct);
 
-        var nachher = await invest.UebersichtAsync(d, null, ct);
+        var nachher = await invest.UebersichtAsync(dep, null, ct);
         var endstand = nachher.Waehrungen
             .FirstOrDefault(b => b.Waehrung == einst.Waehrung)?.Vermoegen ?? 0;
 
-        await conn.ExecuteAsync(new CommandDefinition("""
+        await conn.ExecuteAsync(new CommandDefinition($"""
             UPDATE dbo.autopilot_lauf
-               SET beendet_utc = SYSUTCDATETIME(), geprueft = @gepr, geschaefte = @gesch,
+               SET beendet_utc = {d.Jetzt}, geprueft = @gepr, geschaefte = @gesch,
                    gebuehren = @geb, vermoegen = @verm, notiz = @notiz
              WHERE lauf_id = @id
             """,
@@ -938,10 +939,10 @@ public sealed class AutopilotService(
 
         log.LogInformation(
             "Autopilot {Depot}: {Gepr} geprüft, {Gesch} Geschäfte, {Geb} Gebühren, "
-          + "Vermögen {Verm} {W}", d, anwaerter.Count, geschaefte, gebuehren, endstand,
+          + "Vermögen {Verm} {W}", dep, anwaerter.Count, geschaefte, gebuehren, endstand,
             einst.Waehrung);
 
-        return new AutopilotLauf(laufId, d, DateTime.UtcNow, DateTime.UtcNow,
+        return new AutopilotLauf(laufId, dep, DateTime.UtcNow, DateTime.UtcNow,
             anwaerter.Count, geschaefte, gebuehren, endstand, handelstag,
             notiz.Length > 0 ? notiz : null);
     }
@@ -950,7 +951,7 @@ public sealed class AutopilotService(
     /// Darf heute gehandelt werden? Gemessen am Abstand zur letzten Buchung
     /// dieses Depots.
     /// </summary>
-    private static async Task<bool> HandelstagAsync(IDbConnection conn, string depot,
+    private static async Task<bool> HandelstagAsync(DbConnection conn, string depot,
                                                     int taktTage, CancellationToken ct)
     {
         if (taktTage <= 1) return true;
@@ -975,7 +976,7 @@ public sealed class AutopilotService(
     /// gibt es nicht.</para>
     /// </summary>
     private static async Task<List<AutopilotAnwaerter>> EntflechteAsync(
-        IDbConnection conn, List<AutopilotAnwaerter> ziel, CancellationToken ct)
+        DbConnection conn, List<AutopilotAnwaerter> ziel, CancellationToken ct)
     {
         if (ziel.Count < 2) return ziel;
 
@@ -1086,7 +1087,7 @@ public sealed class AutopilotService(
                                     decimal? Betrag, bool? Urteil, string? UrteilText,
                                     bool Ausgefuehrt);
 
-    private static async Task SchreibeAsync(IDbConnection conn, int laufId,
+    private static async Task SchreibeAsync(DbConnection conn, int laufId,
                                             List<Beschluss> beschluesse, CancellationToken ct)
     {
         foreach (var b in beschluesse)
@@ -1123,14 +1124,13 @@ public sealed class AutopilotService(
         await using var conn = await factory.OpenAsync(ct);
 
         var laeufe = (await conn.QueryAsync<AutopilotLauf>(new CommandDefinition("""
-            SELECT TOP (@grenze)
-                   lauf_id AS LaufId, depot AS Depot, gestartet_utc AS GestartetUtc,
+            SELECT lauf_id AS LaufId, depot AS Depot, gestartet_utc AS GestartetUtc,
                    beendet_utc AS BeendetUtc, geprueft AS Geprueft, geschaefte AS Geschaefte,
                    gebuehren AS Gebuehren, vermoegen AS Vermoegen, handelstag AS Handelstag,
                    notiz AS Notiz
               FROM dbo.autopilot_lauf
              WHERE (@depot IS NULL OR depot = @depot)
-             ORDER BY lauf_id DESC
+             ORDER BY lauf_id DESC OFFSET 0 ROWS FETCH NEXT @grenze ROWS ONLY
             """, new { depot, grenze = Math.Clamp(grenze, 1, 200) },
             cancellationToken: ct))).ToList();
 
@@ -1143,8 +1143,7 @@ public sealed class AutopilotService(
         await using var conn = await factory.OpenAsync(ct);
 
         var rows = await conn.QueryAsync<AutopilotEntscheidung>(new CommandDefinition("""
-            SELECT TOP (@grenze)
-                   e.entscheidung_id AS EntscheidungId, e.lauf_id AS LaufId,
+            SELECT e.entscheidung_id AS EntscheidungId, e.lauf_id AS LaufId,
                    l.depot AS Depot, e.asset_id AS AssetId, a.symbol AS Symbol,
                    e.rang AS Rang, e.punktzahl AS Punktzahl,
                    e.trefferquote AS Trefferquote, e.bewegung AS Bewegung,
@@ -1156,7 +1155,7 @@ public sealed class AutopilotService(
               JOIN dbo.autopilot_lauf l ON l.lauf_id = e.lauf_id
               JOIN dbo.asset a ON a.asset_id = e.asset_id
              WHERE e.lauf_id = @lauf
-             ORDER BY e.rang
+             ORDER BY e.rang OFFSET 0 ROWS FETCH NEXT @grenze ROWS ONLY
             """, new { lauf = laufId, grenze = Math.Clamp(grenze, 1, 1000) },
             cancellationToken: ct));
 

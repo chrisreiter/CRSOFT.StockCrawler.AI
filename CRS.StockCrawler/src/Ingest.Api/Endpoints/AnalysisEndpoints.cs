@@ -3,6 +3,7 @@ using Ingest.Core.Abstractions;
 using Ingest.Core.Analysis;
 using Ingest.Core.Enums;
 using Ingest.Infrastructure.Repositories;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Api.Endpoints;
 
@@ -199,6 +200,7 @@ public static class AnalysisEndpoints
 
             limit = Math.Clamp(limit, 2, 40);
             await using var conn = await factory.OpenAsync(ct);
+            var d = conn.Dialekt();
 
             // Reihenfolge und Filter hängen davon ab, wonach gesucht wird.
             var (order, extra) = mode.ToLowerInvariant() switch
@@ -210,14 +212,13 @@ public static class AnalysisEndpoints
             };
 
             var sql = $"""
-                SELECT TOP (@limit)
-                       p.asset_id_a AS AssetIdA, p.asset_id_b AS AssetIdB,
+                SELECT p.asset_id_a AS AssetIdA, p.asset_id_b AS AssetIdB,
                        p.corr0 AS Corr0, p.best_lag_bars AS BestLagBars,
                        p.best_lag_corr AS BestLagCorr, p.n_obs AS NObs,
-                       ISNULL(cx.n, 0) AS Crossings
+                       COALESCE(cx.n, 0) AS Crossings
                   FROM dbo.pair_stat p
-                  JOIN dbo.asset a ON a.asset_id = p.asset_id_a AND a.is_tracked = 1
-                  JOIN dbo.asset b ON b.asset_id = p.asset_id_b AND b.is_tracked = 1
+                  JOIN dbo.asset a ON a.asset_id = p.asset_id_a AND a.is_tracked = {d.Wahr}
+                  JOIN dbo.asset b ON b.asset_id = p.asset_id_b AND b.is_tracked = {d.Wahr}
                   LEFT JOIN (
                         SELECT asset_id_a, asset_id_b, COUNT(*) AS n
                           FROM dbo.crossing
@@ -225,7 +226,7 @@ public static class AnalysisEndpoints
                          GROUP BY asset_id_a, asset_id_b
                   ) cx ON cx.asset_id_a = p.asset_id_a AND cx.asset_id_b = p.asset_id_b
                  WHERE p.interval_code = @interval AND p.n_obs >= @minObs {extra}
-                 ORDER BY {order}
+                 ORDER BY {order} OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
                 """;
 
             var rows = (await conn.QueryAsync<ExtremePair>(new CommandDefinition(

@@ -4,6 +4,7 @@ using Ingest.Core.Analysis;
 using Ingest.Core.Enums;
 using Ingest.Core.Models;
 using Ingest.Infrastructure.Repositories;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -25,6 +26,7 @@ namespace Ingest.Infrastructure.Services;
 /// </summary>
 public sealed class PortfolioService(ISqlConnectionFactory factory) : IPortfolioService
 {
+    private SqlDialekt d => factory.Dialekt;
     /// <inheritdoc cref="CrossingOpportunityService"/>
     private const double SprungAktie = 0.40;
     private const double SprungKrypto = 0.90;
@@ -35,19 +37,19 @@ public sealed class PortfolioService(ISqlConnectionFactory factory) : IPortfolio
     {
         await using var conn = await factory.OpenAsync(ct);
 
-        var rows = await conn.QueryAsync<Holding>(new CommandDefinition("""
+        var rows = await conn.QueryAsync<Holding>(new CommandDefinition($"""
             SELECT h.holding_id AS HoldingId, h.asset_id AS AssetId,
                    a.symbol AS Symbol, a.name AS Name, a.asset_class AS Klasse,
                    h.kapital AS Kapital, h.waehrung AS Waehrung,
                    h.einstand AS Einstand, h.gekauft_utc AS GekauftUtc,
                    h.notiz AS Notiz, h.updated_utc AS UpdatedUtc,
-                   k.[close] AS Kurs, k.ts_utc AS KursUtc
+                   k."close" AS Kurs, k.ts_utc AS KursUtc
               FROM dbo.holding h
               JOIN dbo.asset a ON a.asset_id = h.asset_id
-              OUTER APPLY (SELECT TOP 1 p.[close], p.ts_utc
+              {d.OuterApplyVor} (SELECT p."close", p.ts_utc
                              FROM dbo.price_bar p
                             WHERE p.asset_id = h.asset_id AND p.interval_code = '1d'
-                            ORDER BY p.ts_utc DESC) k
+                            ORDER BY p.ts_utc DESC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY) k {d.OuterApplyNach}
              ORDER BY h.kapital DESC
             """, cancellationToken: ct));
 
@@ -68,12 +70,12 @@ public sealed class PortfolioService(ISqlConnectionFactory factory) : IPortfolio
 
         if (id is null) return null;
 
-        await conn.ExecuteAsync(new CommandDefinition("""
-            MERGE dbo.holding WITH (HOLDLOCK) AS t
+        await conn.ExecuteAsync(new CommandDefinition($"""
+            MERGE INTO dbo.holding {d.MergeSperre} AS t
             USING (SELECT @id AS asset_id) AS s ON t.asset_id = s.asset_id
             WHEN MATCHED THEN UPDATE SET
                  kapital = @kapital, waehrung = @waehrung, einstand = @einstand,
-                 gekauft_utc = @gekauft, notiz = @notiz, updated_utc = SYSUTCDATETIME()
+                 gekauft_utc = @gekauft, notiz = @notiz, updated_utc = {d.Jetzt}
             WHEN NOT MATCHED THEN
                  INSERT (asset_id, kapital, waehrung, einstand, gekauft_utc, notiz)
                  VALUES (@id, @kapital, @waehrung, @einstand, @gekauft, @notiz);
@@ -117,6 +119,9 @@ public sealed class PortfolioService(ISqlConnectionFactory factory) : IPortfolio
         var p = new DynamicParameters();
         p.Add("@interval", intervalCode);
         p.Add("@tage", tage);
+        /*  Der Stichtag wird hier gerechnet, nicht in SQL: Ein DECLARE gibt es
+            in Postgres nicht, und ein Parameter ist ohnehin klarer.           */
+        p.Add("@seit", DateTime.UtcNow.AddDays(-tage));
         p.Add("@sprung_aktie", SprungAktie);
         p.Add("@sprung_krypto", SprungKrypto);
 
@@ -223,53 +228,50 @@ public sealed class PortfolioService(ISqlConnectionFactory factory) : IPortfolio
     /// Verkaufssignal, das eine spätere Gegenkreuzung längst aufgehoben
     /// hat.</para>
     /// </summary>
-    private const string TauschSql = """
-        SET NOCOUNT ON;
-        DECLARE @seit DATETIME2(0) = DATEADD(DAY, -@tage, SYSUTCDATETIME());
+    private string TauschSql => $"""
+        {d.SelectIntoVor("bestand")}SELECT asset_id {d.SelectIntoNach("bestand")} FROM dbo.holding;
 
-        SELECT asset_id INTO #bestand FROM dbo.holding;
-
-        SELECT x.asset_id_a, x.asset_id_b, x.ts_utc, x.direction
-          INTO #letzte
+        {d.SelectIntoVor("letzte")}SELECT x.asset_id_a, x.asset_id_b, x.ts_utc, x.direction
+          {d.SelectIntoNach("letzte")}
           FROM (SELECT c.asset_id_a, c.asset_id_b, c.ts_utc, c.direction,
                        ROW_NUMBER() OVER (PARTITION BY c.asset_id_a, c.asset_id_b
                                           ORDER BY c.ts_utc DESC) AS rn
                   FROM dbo.crossing c
                  WHERE c.interval_code = @interval AND c.ts_utc >= @seit
-                   AND (EXISTS (SELECT 1 FROM #bestand b WHERE b.asset_id = c.asset_id_a)
-                     OR EXISTS (SELECT 1 FROM #bestand b WHERE b.asset_id = c.asset_id_b))) x
+                   AND (EXISTS (SELECT 1 FROM {d.Temp("bestand")} b WHERE b.asset_id = c.asset_id_a)
+                     OR EXISTS (SELECT 1 FROM {d.Temp("bestand")} b WHERE b.asset_id = c.asset_id_b))) x
          WHERE x.rn = 1;
 
         /* Die untere Seite ist die gehaltene — sonst gibt es nichts zu tauschen. */
-        SELECT l.asset_id_a, l.asset_id_b, l.ts_utc,
+        {d.SelectIntoVor("kandidat")}SELECT l.asset_id_a, l.asset_id_b, l.ts_utc,
                CASE WHEN l.direction = 1 THEN l.asset_id_b ELSE l.asset_id_a END AS bestand_id,
                CASE WHEN l.direction = 1 THEN l.asset_id_a ELSE l.asset_id_b END AS ziel_id
-          INTO #kandidat
-          FROM #letzte l
-         WHERE EXISTS (SELECT 1 FROM #bestand b
+          {d.SelectIntoNach("kandidat")}
+          FROM {d.Temp("letzte")} l
+         WHERE EXISTS (SELECT 1 FROM {d.Temp("bestand")} b
                         WHERE b.asset_id = CASE WHEN l.direction = 1
                                                 THEN l.asset_id_b ELSE l.asset_id_a END);
 
         /* Der jüngste Zeitpunkt, zu dem BEIDE gehandelt haben. */
-        SELECT k.bestand_id, k.ziel_id, MAX(pa.ts_utc) AS ts_jetzt
-          INTO #jetzt
-          FROM #kandidat k
+        {d.SelectIntoVor("jetzt")}SELECT k.bestand_id, k.ziel_id, MAX(pa.ts_utc) AS ts_jetzt
+          {d.SelectIntoNach("jetzt")}
+          FROM {d.Temp("kandidat")} k
           JOIN dbo.price_bar pa ON pa.asset_id = k.bestand_id AND pa.interval_code = @interval
-                                AND pa.ts_utc >= DATEADD(DAY, -15, SYSUTCDATETIME())
+                                AND pa.ts_utc >= {d.PlusTage("-15", d.Jetzt)}
           JOIN dbo.price_bar pb ON pb.asset_id = k.ziel_id AND pb.interval_code = @interval
                                 AND pb.ts_utc = pa.ts_utc
          GROUP BY k.bestand_id, k.ziel_id;
 
-        SELECT s.asset_id, MAX(ABS(LOG(s.c / s.vor))) AS max_sprung
-          INTO #sprung
-          FROM (SELECT p.asset_id, p.[close] AS c,
-                       LAG(p.[close]) OVER (PARTITION BY p.asset_id ORDER BY p.ts_utc) AS vor
+        {d.SelectIntoVor("sprung")}SELECT s.asset_id, MAX(ABS({d.Ln("s.c / s.vor")})) AS max_sprung
+          {d.SelectIntoNach("sprung")}
+          FROM (SELECT p.asset_id, p."close" AS c,
+                       LAG(p."close") OVER (PARTITION BY p.asset_id ORDER BY p.ts_utc) AS vor
                   FROM dbo.price_bar p
-                  JOIN (SELECT bestand_id AS id FROM #kandidat
-                        UNION SELECT ziel_id FROM #kandidat) w ON w.id = p.asset_id
+                  JOIN (SELECT bestand_id AS id FROM {d.Temp("kandidat")}
+                        UNION SELECT ziel_id FROM {d.Temp("kandidat")}) w ON w.id = p.asset_id
                  WHERE p.interval_code = @interval
-                   AND p.ts_utc >= DATEADD(DAY, -(@tage + 5), SYSUTCDATETIME())
-                   AND p.[close] > 0) s
+                   AND p.ts_utc >= {d.PlusTage("-(@tage + 5)", d.Jetzt)}
+                   AND p."close" > 0) s
          WHERE s.vor > 0
          GROUP BY s.asset_id;
 
@@ -277,27 +279,27 @@ public sealed class PortfolioService(ISqlConnectionFactory factory) : IPortfolio
                k.bestand_id AS BestandId, k.ziel_id AS ZielId,
                az.symbol AS SymbolZiel, az.name AS NameZiel, az.asset_class AS KlasseZiel,
                k.ts_utc AS TsUtc,
-               CAST(nb.[close] AS FLOAT) / kb.[close] - 1 AS RenditeBestand,
-               CAST(nz.[close] AS FLOAT) / kz.[close] - 1 AS RenditeZiel,
-               CAST(nz.[close] AS FLOAT) / kz.[close] - CAST(nb.[close] AS FLOAT) / kb.[close]
+               CAST(nb."close" AS FLOAT) / kb."close" - 1 AS RenditeBestand,
+               CAST(nz."close" AS FLOAT) / kz."close" - 1 AS RenditeZiel,
+               CAST(nz."close" AS FLOAT) / kz."close" - CAST(nb."close" AS FLOAT) / kb."close"
                  AS Paargewinn
-          FROM #kandidat k
-          JOIN #jetzt j ON j.bestand_id = k.bestand_id AND j.ziel_id = k.ziel_id
+          FROM {d.Temp("kandidat")} k
+          JOIN {d.Temp("jetzt")} j ON j.bestand_id = k.bestand_id AND j.ziel_id = k.ziel_id
           JOIN dbo.asset ab ON ab.asset_id = k.bestand_id
           JOIN dbo.asset az ON az.asset_id = k.ziel_id
           JOIN dbo.price_bar kb ON kb.asset_id = k.bestand_id AND kb.interval_code = @interval
-                                AND kb.ts_utc = k.ts_utc AND kb.[close] > 0
+                                AND kb.ts_utc = k.ts_utc AND kb."close" > 0
           JOIN dbo.price_bar kz ON kz.asset_id = k.ziel_id AND kz.interval_code = @interval
-                                AND kz.ts_utc = k.ts_utc AND kz.[close] > 0
+                                AND kz.ts_utc = k.ts_utc AND kz."close" > 0
           JOIN dbo.price_bar nb ON nb.asset_id = k.bestand_id AND nb.interval_code = @interval
-                                AND nb.ts_utc = j.ts_jetzt AND nb.[close] > 0
+                                AND nb.ts_utc = j.ts_jetzt AND nb."close" > 0
           JOIN dbo.price_bar nz ON nz.asset_id = k.ziel_id AND nz.interval_code = @interval
-                                AND nz.ts_utc = j.ts_jetzt AND nz.[close] > 0
-          LEFT JOIN #sprung sb ON sb.asset_id = k.bestand_id
-          LEFT JOIN #sprung sz ON sz.asset_id = k.ziel_id
-         WHERE ISNULL(sb.max_sprung, 0)
+                                AND nz.ts_utc = j.ts_jetzt AND nz."close" > 0
+          LEFT JOIN {d.Temp("sprung")} sb ON sb.asset_id = k.bestand_id
+          LEFT JOIN {d.Temp("sprung")} sz ON sz.asset_id = k.ziel_id
+         WHERE COALESCE(sb.max_sprung, 0)
                  < CASE WHEN ab.asset_class = 2 THEN @sprung_krypto ELSE @sprung_aktie END
-           AND ISNULL(sz.max_sprung, 0)
+           AND COALESCE(sz.max_sprung, 0)
                  < CASE WHEN az.asset_class = 2 THEN @sprung_krypto ELSE @sprung_aktie END;
         """;
 

@@ -40,6 +40,7 @@ public sealed record ModelCurveRow(
 public sealed class LearningRepository : ILearningRepository
 {
     private readonly ISqlConnectionFactory _factory;
+    private SqlDialekt d => _factory.Dialekt;
 
     public LearningRepository(ISqlConnectionFactory factory) => _factory = factory;
 
@@ -48,10 +49,9 @@ public sealed class LearningRepository : ILearningRepository
     {
         await using var conn = await _factory.OpenAsync(ct);
 
-        return await conn.ExecuteScalarAsync<int>(new CommandDefinition("""
+        return await conn.ExecuteScalarAsync<int>(new CommandDefinition($"""
             INSERT INTO dbo.learning_epoch (run_label, pass_no, interval_code, horizons)
-            OUTPUT INSERTED.epoch_id
-            VALUES (@runLabel, @passNo, @intervalCode, @horizons)
+            {d.RueckgabeVor("epoch_id")} VALUES (@runLabel, @passNo, @intervalCode, @horizons) {d.RueckgabeNach("epoch_id")}
             """, new { runLabel, passNo, intervalCode, horizons }, cancellationToken: ct));
     }
 
@@ -61,9 +61,9 @@ public sealed class LearningRepository : ILearningRepository
     {
         await using var conn = await _factory.OpenAsync(ct);
 
-        await conn.ExecuteAsync(new CommandDefinition("""
+        await conn.ExecuteAsync(new CommandDefinition($"""
             UPDATE dbo.learning_epoch
-               SET finished_utc = SYSUTCDATETIME(), assets = @assets, steps = @steps,
+               SET finished_utc = {d.Jetzt}, assets = @assets, steps = @steps,
                    forecasts = @forecasts, scored = @scored, mape = @mape,
                    hit_rate = @hitRate, pair_refreshes = @pairRefreshes, note = @note
              WHERE epoch_id = @epochId
@@ -126,8 +126,7 @@ public sealed class LearningRepository : ILearningRepository
         await using var conn = await _factory.OpenAsync(ct);
 
         var rows = await conn.QueryAsync<EpochSummary>(new CommandDefinition("""
-            SELECT TOP (@limit)
-                   epoch_id AS EpochId, run_label AS RunLabel, pass_no AS PassNo,
+            SELECT epoch_id AS EpochId, run_label AS RunLabel, pass_no AS PassNo,
                    interval_code AS IntervalCode, horizons AS Horizons,
                    started_utc AS StartedUtc, finished_utc AS FinishedUtc,
                    assets AS Assets, steps AS Steps, forecasts AS Forecasts, scored AS Scored,
@@ -135,7 +134,7 @@ public sealed class LearningRepository : ILearningRepository
                    note AS Note
               FROM dbo.learning_epoch
              WHERE (@runLabel IS NULL OR run_label = @runLabel)
-             ORDER BY epoch_id DESC
+             ORDER BY epoch_id DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
             """, new { runLabel, limit }, cancellationToken: ct));
 
         return rows.ToList();

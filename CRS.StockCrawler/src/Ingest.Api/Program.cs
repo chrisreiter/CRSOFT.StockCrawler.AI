@@ -240,8 +240,8 @@ try
             await using var conn = await fabrik.OpenAsync();
 
             var n = await Dapper.SqlMapper.ExecuteScalarAsync<int>(conn,
-                "dbo.close_orphaned_runs", new { stunden = 2 },
-                commandType: System.Data.CommandType.StoredProcedure);
+                Ingest.Infrastructure.Datenbank.DialektErweiterungen.Dialekt(conn)
+                    .Aufruf("dbo.close_orphaned_runs", "stunden"), new { stunden = 2 });
 
             if (n > 0)
                 Log.Information("{Anzahl} abgebrochene Läufe nachträglich geschlossen", n);

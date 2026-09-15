@@ -1,6 +1,7 @@
 using Dapper;
 using Ingest.Core.Abstractions;
 using Ingest.Infrastructure.Repositories;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Api.Endpoints;
 
@@ -105,30 +106,31 @@ public static class HygieneEndpoints
         double kollapsAnteil, CancellationToken ct)
     {
         await using var conn = await factory.OpenAsync(ct);
+        var d = conn.Dialekt();
 
         var rows = (await conn.QueryAsync<(int AssetId, string Symbol, string? Name,
                                            byte AssetClass, int Bars, DateTime? LetzteBar,
                                            decimal? Kurs, decimal? Hoch)>(
             new CommandDefinition(
-                """
+                $"""
                 WITH letzte AS (
-                    SELECT b.asset_id, b.ts_utc, b.[close],
+                    SELECT b.asset_id, b.ts_utc, b."close",
                            ROW_NUMBER() OVER (PARTITION BY b.asset_id
                                               ORDER BY b.ts_utc DESC) AS rn
                       FROM dbo.price_bar b
                      WHERE b.interval_code = '1d'
                 ),
                 zahlen AS (
-                    SELECT asset_id, COUNT(*) AS bars, MAX([close]) AS hoch
+                    SELECT asset_id, COUNT(*) AS bars, MAX("close") AS hoch
                       FROM dbo.price_bar WHERE interval_code = '1d'
                      GROUP BY asset_id
                 )
                 SELECT a.asset_id, a.symbol, a.name, a.asset_class,
-                       ISNULL(z.bars, 0) AS bars, l.ts_utc, l.[close], z.hoch
+                       COALESCE(z.bars, 0) AS bars, l.ts_utc, l."close", z.hoch
                   FROM dbo.asset a
                   LEFT JOIN letzte l ON l.asset_id = a.asset_id AND l.rn = 1
                   LEFT JOIN zahlen z ON z.asset_id = a.asset_id
-                 WHERE a.is_tracked = 1;
+                 WHERE a.is_tracked = {d.Wahr};
                 """, cancellationToken: ct))).ToList();
 
         var grenze = DateTime.UtcNow.AddDays(-maxAlterTage);

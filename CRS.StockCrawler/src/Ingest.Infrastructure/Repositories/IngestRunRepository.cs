@@ -2,12 +2,14 @@ using Dapper;
 using Ingest.Core.Abstractions;
 using Ingest.Core.Enums;
 using Ingest.Core.Models;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Repositories;
 
 public sealed class IngestRunRepository : IIngestRunRepository
 {
     private readonly ISqlConnectionFactory _factory;
+    private SqlDialekt d => _factory.Dialekt;
 
     public IngestRunRepository(ISqlConnectionFactory factory) => _factory = factory;
 
@@ -15,10 +17,9 @@ public sealed class IngestRunRepository : IIngestRunRepository
     {
         await using var conn = await _factory.OpenAsync(ct);
 
-        return await conn.ExecuteScalarAsync<long>(new CommandDefinition("""
+        return await conn.ExecuteScalarAsync<long>(new CommandDefinition($"""
             INSERT INTO dbo.ingest_run (job_name, provider)
-            OUTPUT INSERTED.run_id
-            VALUES (@jobName, @provider)
+            {d.RueckgabeVor("run_id")} VALUES (@jobName, @provider) {d.RueckgabeNach("run_id")}
             """, new { jobName, provider = provider.HasValue ? (byte?)provider.Value : null },
             cancellationToken: ct));
     }
@@ -27,9 +28,9 @@ public sealed class IngestRunRepository : IIngestRunRepository
     {
         await using var conn = await _factory.OpenAsync(ct);
 
-        await conn.ExecuteAsync(new CommandDefinition("""
+        await conn.ExecuteAsync(new CommandDefinition($"""
             UPDATE dbo.ingest_run
-               SET finished_utc = SYSUTCDATETIME(),
+               SET finished_utc = {d.Jetzt},
                    ok_count = @ok, err_count = @err,
                    rows_written = @rows, note = @note
              WHERE run_id = @runId
@@ -44,13 +45,12 @@ public sealed class IngestRunRepository : IIngestRunRepository
         await using var conn = await _factory.OpenAsync(ct);
 
         var rows = await conn.QueryAsync<IngestRun>(new CommandDefinition("""
-            SELECT TOP (@last)
-                   run_id AS RunId, job_name AS JobName, provider AS Provider,
+            SELECT run_id AS RunId, job_name AS JobName, provider AS Provider,
                    started_utc AS StartedUtc, finished_utc AS FinishedUtc,
                    ok_count AS OkCount, err_count AS ErrCount,
                    rows_written AS RowsWritten, note AS Note
               FROM dbo.ingest_run
-             ORDER BY run_id DESC
+             ORDER BY run_id DESC OFFSET 0 ROWS FETCH NEXT @last ROWS ONLY
             """, new { last }, cancellationToken: ct));
 
         return rows.ToList();

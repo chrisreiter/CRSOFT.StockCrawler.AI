@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 
 using Dapper;
 using Ingest.Infrastructure.Repositories;
+using Ingest.Infrastructure.Datenbank;
 namespace Ingest.Api.Endpoints;
 
 public static class SchedulerEndpoints
@@ -32,15 +33,16 @@ public static class SchedulerEndpoints
                Zwei Stunden Frist: Der längste echte Schritt (update:1h über 600 Werte)
                dauerte gemessen sieben Minuten; alles jenseits von zwei Stunden ist mit
                Sicherheit eine Leiche. */
+            var d = factory.Dialekt;
             var schritt = state.Busy
                 ? await (await factory.OpenAsync(ct)).QuerySingleOrDefaultAsync<Schritt>(
                     new CommandDefinition(
-                        """
-                        SELECT TOP 1 job_name AS Name, started_utc AS SeitUtc
+                        $"""
+                        SELECT job_name AS Name, started_utc AS SeitUtc
                           FROM dbo.ingest_run
                          WHERE finished_utc IS NULL
-                           AND started_utc >= DATEADD(hour, -2, SYSUTCDATETIME())
-                         ORDER BY started_utc DESC
+                           AND started_utc >= {d.PlusStunden("-2", d.Jetzt)}
+                         ORDER BY started_utc DESC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
                         """, cancellationToken: ct))
                 : null;
 
