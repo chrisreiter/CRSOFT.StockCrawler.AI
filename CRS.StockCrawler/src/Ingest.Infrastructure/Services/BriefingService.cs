@@ -337,7 +337,7 @@ public sealed class BriefingService(
     {
         var stumm = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
             $"""
-            SELECT COUNT(*) FROM dbo.asset a
+            SELECT CAST(COUNT(*) AS INT) FROM dbo.asset a
              WHERE a.is_tracked = {d.Wahr}
                AND (SELECT MAX(b.ts_utc) FROM dbo.price_bar b
                      WHERE b.asset_id = a.asset_id AND b.interval_code = '1d')

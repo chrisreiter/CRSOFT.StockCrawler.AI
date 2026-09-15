@@ -103,8 +103,8 @@ public sealed class PriceBarRepository : IPriceBarRepository
     }
 
     private const string BarColumns = """
-        ts_utc AS TsUtc, [open] AS [Open], [high] AS [High], [low] AS [Low],
-        [close] AS [Close], adj_close AS AdjClose, volume AS Volume
+        ts_utc AS TsUtc, "open" AS "Open", "high" AS "High", "low" AS "Low",
+        "close" AS "Close", adj_close AS AdjClose, volume AS Volume
         """;
 
     public async Task<IReadOnlyList<PriceBar>> GetAsync(
@@ -152,10 +152,10 @@ public sealed class PriceBarRepository : IPriceBarRepository
         {
             var part = await conn.QueryAsync<(int AssetId, DateTime TsUtc, decimal? Open, decimal? High,
                                               decimal? Low, decimal Close, decimal? AdjClose, decimal? Volume)>(
-                new CommandDefinition("""
+                new CommandDefinition($"""
                     SELECT asset_id, ts_utc, "open", "high", "low", "close", adj_close, volume
                       FROM dbo.price_bar
-                     WHERE asset_id IN @ids AND interval_code = @intervalCode
+                     WHERE {d.In("asset_id", "ids")} AND interval_code = @intervalCode
                        AND ts_utc >= @fromUtc AND ts_utc <= @toUtc
                      ORDER BY asset_id, ts_utc
                     """, new { ids = chunk, intervalCode, fromUtc, toUtc },

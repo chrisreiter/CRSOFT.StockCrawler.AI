@@ -140,7 +140,7 @@ public sealed class AuthService : IAuthService
         await using var conn = await _factory.OpenAsync(ct);
 
         return await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-            "SELECT COUNT(*) FROM dbo.app_user WHERE password_hash IS NOT NULL",
+            "SELECT CAST(COUNT(*) AS INT) FROM dbo.app_user WHERE password_hash IS NOT NULL",
             cancellationToken: ct)) > 0;
     }
 
@@ -408,7 +408,7 @@ public sealed class AuthService : IAuthService
         {
             var verbleibend = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
                 $"""
-                SELECT COUNT(*) FROM dbo.app_user
+                SELECT CAST(COUNT(*) AS INT) FROM dbo.app_user
                  WHERE role = 'admin' AND is_active = {d.Wahr} AND user_id <> @id
                 """, new { id = userId }, cancellationToken: ct));
 
@@ -455,7 +455,7 @@ public sealed class AuthService : IAuthService
                 UPDATE dbo.app_session
                    SET user_id = NULL, expires_utc = NULL
                  WHERE user_id = @id
-                   AND (@behalten IS NULL OR session_key <> @behalten)
+                   AND (session_key <> @behalten OR @behalten IS NULL)
                 """, new { id = userId, behalten = behalteSitzung },
                 cancellationToken: ct));
 
@@ -478,7 +478,7 @@ public sealed class AuthService : IAuthService
 
         var verbleibend = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
             $"""
-            SELECT COUNT(*) FROM dbo.app_user
+            SELECT CAST(COUNT(*) AS INT) FROM dbo.app_user
              WHERE role = 'admin' AND is_active = {d.Wahr} AND user_id <> @id
             """, new { id = userId }, cancellationToken: ct));
 

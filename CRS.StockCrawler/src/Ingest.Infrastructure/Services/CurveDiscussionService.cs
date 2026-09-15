@@ -245,11 +245,11 @@ public sealed class CurveDiscussionService(
         var where = """
             WHERE e.run_id = @id
               AND e.severity >= @minSev
-              AND (@assetId IS NULL OR e.asset_id = @assetId)
-              AND (@type IS NULL OR e.event_type = @type)
-              AND (@sign IS NULL OR e.sign = @sign)
-              AND (@from IS NULL OR e.ts_utc >= @from)
-              AND (@to IS NULL OR e.ts_utc <= @to)
+              AND (e.asset_id = @assetId OR @assetId IS NULL)
+              AND (e.event_type = @type OR @type IS NULL)
+              AND (e.sign = @sign OR @sign IS NULL)
+              AND (e.ts_utc >= @from OR @from IS NULL)
+              AND (e.ts_utc <= @to OR @to IS NULL)
             """;
 
         var p = new
@@ -266,7 +266,7 @@ public sealed class CurveDiscussionService(
         };
 
         var total = await conn.ExecuteScalarAsync<long>(new CommandDefinition(
-            $"SELECT COUNT_BIG(*) FROM dbo.curve_event e {where};", p, cancellationToken: ct));
+            $"SELECT CAST(COUNT(*) AS BIGINT) FROM dbo.curve_event e {where};", p, cancellationToken: ct));
 
         var rows = (await conn.QueryAsync<CurveEventRow>(new CommandDefinition(
             $"""
@@ -279,7 +279,7 @@ public sealed class CurveDiscussionService(
                JOIN dbo.asset a ON a.asset_id = e.asset_id
              {where}
               ORDER BY {order}
-             OFFSET @skip ROWS FETCH NEXT @take ROWS ONLY;
+             OFFSET @skip ROWS FETCH NEXT (@take) ROWS ONLY;
              """, p, cancellationToken: ct))).ToList();
 
         return new CurveEventPage(id, page, size, total, rows);
@@ -346,8 +346,8 @@ public sealed class CurveDiscussionService(
               JOIN dbo.asset a ON a.asset_id = l.asset_a
               JOIN dbo.asset b ON b.asset_id = l.asset_b
              WHERE l.run_id = @id
-               AND (@assetId IS NULL OR l.asset_a = @assetId OR l.asset_b = @assetId)
-             ORDER BY l.lift DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY;
+               AND (l.asset_a = @assetId OR l.asset_b = @assetId OR @assetId IS NULL)
+             ORDER BY l.lift DESC OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY;
             """, new { id, limit = Math.Clamp(limit, 10, 500), assetId },
             cancellationToken: ct))).ToList();
     }
@@ -363,10 +363,10 @@ public sealed class CurveDiscussionService(
 
         return (await conn.QueryAsync(new CommandDefinition(
             """
-            SELECT event_type, COUNT(*) AS anzahl,
+            SELECT event_type, CAST(COUNT(*) AS INT) AS anzahl,
                    AVG(severity) AS mittlere_stufe,
                    MAX(severity) AS hoechste_stufe,
-                   COUNT(DISTINCT asset_id) AS werte
+                   CAST(COUNT(DISTINCT asset_id) AS INT) AS werte
               FROM dbo.curve_event
              WHERE run_id = @id
              GROUP BY event_type

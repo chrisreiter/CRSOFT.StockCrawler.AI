@@ -50,7 +50,7 @@ public sealed class IngestRunRepository : IIngestRunRepository
                    ok_count AS OkCount, err_count AS ErrCount,
                    rows_written AS RowsWritten, note AS Note
               FROM dbo.ingest_run
-             ORDER BY run_id DESC OFFSET 0 ROWS FETCH NEXT @last ROWS ONLY
+             ORDER BY run_id DESC OFFSET 0 ROWS FETCH NEXT (@last) ROWS ONLY
             """, new { last }, cancellationToken: ct));
 
         return rows.ToList();

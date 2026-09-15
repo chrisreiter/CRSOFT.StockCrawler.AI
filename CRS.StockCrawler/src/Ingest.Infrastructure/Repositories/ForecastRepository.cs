@@ -129,11 +129,11 @@ public sealed class ForecastRepository : IForecastRepository
 
         foreach (var chunk in SqlBatching.Chunks(ids))
         {
-            var rows = await conn.QueryAsync<ForecastComponent>(new CommandDefinition("""
+            var rows = await conn.QueryAsync<ForecastComponent>(new CommandDefinition($"""
                 SELECT forecast_id AS ForecastId, model_name AS ModelName,
                        predicted_return AS PredictedReturn, weight AS Weight
                   FROM dbo.forecast_component
-                 WHERE forecast_id IN @ids
+                 WHERE {d.In("forecast_id", "ids")}
                 """, new { ids = chunk }, cancellationToken: ct));
 
             all.AddRange(rows);
@@ -311,12 +311,12 @@ public sealed class ForecastRepository : IForecastRepository
 
         var rows = await conn.QueryAsync<(int, int, double, double)>(new CommandDefinition($"""
             SELECT f.horizon_hours,
-                   COUNT(*)                                              AS n,
+                   CAST(COUNT(*) AS INT)                                              AS n,
                    AVG(s.abs_pct_error)                                  AS mape,
                    AVG(CASE WHEN s.direction_correct = {d.Wahr} THEN 1.0 ELSE 0.0 END) AS hit_rate
               FROM dbo.forecast_score s
               JOIN dbo.forecast f ON f.forecast_id = s.forecast_id
-             WHERE (@assetId IS NULL OR f.asset_id = @assetId)
+             WHERE (f.asset_id = @assetId OR @assetId IS NULL)
              GROUP BY f.horizon_hours
              ORDER BY f.horizon_hours
             """, new { assetId }, cancellationToken: ct));

@@ -196,8 +196,8 @@ public sealed class DayTradingService(
               {d.MedianGroupBy("asset_class")}
             )
             SELECT g.asset_class AS Klasse,
-                   COUNT(*) AS Bars,
-                   COUNT(DISTINCT g.asset_id) AS Werte,
+                   CAST(COUNT(*) AS INT) AS Bars,
+                   CAST(COUNT(DISTINCT g.asset_id) AS INT) AS Werte,
                    AVG(g.bew) AS MittlereBewegung,
                    MAX(med.median) AS MedianBewegung,
                    AVG(CASE WHEN g.bew > @kosten THEN 1.0 ELSE 0.0 END) AS AnteilUeberKosten,
@@ -325,7 +325,7 @@ public sealed class DayTradingService(
         var d = conn.Dialekt();
         var rows = await conn.QueryAsync<GueteZeile>(new CommandDefinition($"""
             SELECT f.horizon_hours AS Horizont,
-                   COUNT(*) AS N,
+                   CAST(COUNT(*) AS INT) AS N,
                    AVG(CASE WHEN s.direction_correct = {d.Wahr} THEN 1.0 ELSE 0.0 END) AS Trefferquote,
                    AVG(s.abs_pct_error) AS MittlererFehler,
                    AVG(ABS(s.actual_return)) AS MittlereBewegung

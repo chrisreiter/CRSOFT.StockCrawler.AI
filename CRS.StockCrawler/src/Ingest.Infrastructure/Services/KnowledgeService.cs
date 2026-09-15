@@ -133,7 +133,7 @@ public sealed class KnowledgeService(
                    s.region AS Region,
                    COALESCE(a.n, 0) AS Articles
               FROM dbo.knowledge_source s
-              {d.OuterApplyVor} (SELECT COUNT(*) n FROM dbo.knowledge_source k
+              {d.OuterApplyVor} (SELECT CAST(COUNT(*) AS INT) n FROM dbo.knowledge_source k
                             WHERE k.parent_source_id = s.source_id) a {d.OuterApplyNach}
              WHERE s.pillar = @pillar AND s.parent_source_id IS NULL
              ORDER BY s.added_utc DESC;
@@ -899,7 +899,7 @@ public sealed class KnowledgeService(
            Zuordnung Vektor zu Abschnitt -- waren der erste Entwurf und ein
            unnoetiger Umweg: Die Zuordnung steht in derselben Zeile. */
         var rows = (await conn.QueryAsync<ChunkRow>(new CommandDefinition(
-            """
+            $"""
             SELECT c.vector_id AS VectorId, c.chunk_id AS ChunkId, c.source_id AS SourceId,
                    s.title AS Title, s.origin AS Origin, s.kind AS Kind,
                    c.ordinal AS Ordinal,
@@ -909,7 +909,7 @@ public sealed class KnowledgeService(
                    c.content AS Content
               FROM dbo.knowledge_chunk c
               JOIN dbo.knowledge_source s ON s.source_id = c.source_id
-             WHERE c.vector_id IN @ids;
+             WHERE {d.In("c.vector_id", "ids")};
             """, new { ids }, cancellationToken: ct))).ToDictionary(r => r.VectorId);
 
         // In der Reihenfolge der Aehnlichkeit ausgeben, nicht in der der
@@ -1408,6 +1408,14 @@ public sealed class KnowledgeService(
         int ziel = 1400, int ueberlappung = 200)
     {
         var result = new List<Abschnitt>();
+
+        /*  NUL-Zeichen raus, bevor irgendetwas gehasht oder gespeichert wird.
+            PDF-Extraktion liefert sie gelegentlich; SQL Server nimmt sie in
+            NVARCHAR klaglos, Postgres lehnt sie in text ab (22021, "invalid
+            byte sequence for encoding UTF8: 0x00") -- und zwar erst beim
+            Schreiben, nachdem die Einbettung bereits bezahlt ist. Gefunden
+            beim Kopieren des Bestands: 42.219 Abschnitte, Zeile 6.937.      */
+        text = text.Replace("\0", "");
 
         /* Die Absätze werden MIT ihrer Position im Ausgangstext geführt.
 

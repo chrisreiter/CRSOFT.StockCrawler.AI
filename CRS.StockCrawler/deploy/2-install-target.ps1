@@ -237,7 +237,14 @@ Copy-Item (Join-Path $BundleDir "config\appsettings.Production.json") $InstallRo
 # Connection-String auf die tatsaechliche Ziel-Instanz + App-Login stockcrawler setzen
 $appcfg = Join-Path $InstallRoot "appsettings.Production.json"
 try {
-  $j = Get-Content $appcfg -Raw | ConvertFrom-Json
+  # Die appsettings tragen //-Kommentare (der .NET-Konfigurationsleser erlaubt
+  # das, ConvertFrom-Json in PowerShell 5.1 nicht). Zeilenkommentare vorher weg;
+  # "//" innerhalb einer Zeichenfolge (https://...) bleibt, weil nur ganze
+  # Kommentarzeilen und Kommentare nach einem Komma oder einer Klammer greifen.
+  $roh = Get-Content $appcfg -Raw
+  $roh = [regex]::Replace($roh, '(?m)^\s*//.*$', '')
+  $roh = [regex]::Replace($roh, '(?m)(?<=[,{\[]\s*)//.*$', '')
+  $j = $roh | ConvertFrom-Json
   $conn = "Server=$SqlServer;Database=$Database;User Id=stockcrawler;Password=StockCrawler!;TrustServerCertificate=true"
   if (-not $j.ConnectionStrings) { $j | Add-Member -NotePropertyName ConnectionStrings -NotePropertyValue ([pscustomobject]@{}) }
   if ($j.ConnectionStrings.PSObject.Properties['Sql']) { $j.ConnectionStrings.Sql = $conn }

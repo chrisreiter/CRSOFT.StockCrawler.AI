@@ -78,14 +78,14 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
                      SUM(CASE WHEN b.betrag > 0 THEN  b.betrag ELSE 0 END) AS eingezahlt,
                      SUM(CASE WHEN b.betrag < 0 THEN -b.betrag ELSE 0 END) AS entnommen,
                      SUM(b.gebuehr)                                        AS gebuehren,
-                     COUNT(*)                                              AS buchungen,
+                     CAST(COUNT(*) AS INT)                                              AS buchungen,
                      MIN(b.am_utc)                                         AS seit_utc
                 FROM dbo.invest_buchung b
                WHERE b.depot = @depot
                GROUP BY b.asset_id
             ),
             gewaehlt AS (
-              SELECT asset_id FROM dbo.asset WHERE asset_id IN @ids
+              SELECT asset_id FROM dbo.asset WHERE {d.In("asset_id", "ids")}
             ),
             beteiligt AS (
               SELECT asset_id FROM gebucht
@@ -205,7 +205,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
                        SUM(CASE WHEN grund = 'einzahlung' THEN betrag  ELSE 0 END) AS eingezahlt,
                        SUM(CASE WHEN grund = 'auszahlung' THEN -betrag ELSE 0 END) AS ausgezahlt,
                        SUM(CASE WHEN grund = 'gebuehr'    THEN -betrag ELSE 0 END) AS gebuehren,
-                       COUNT(*)                                                    AS bewegungen,
+                       CAST(COUNT(*) AS INT)                                                    AS bewegungen,
                        MIN(am_utc)                                                 AS seit_utc
                   FROM dbo.invest_kontobewegung
                  WHERE depot = @depot
@@ -276,7 +276,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
               LEFT JOIN dbo.invest_buchung b ON b.buchung_id = m.buchung_id
               LEFT JOIN dbo.asset a ON a.asset_id = b.asset_id
              WHERE m.waehrung = @w AND m.depot = @depot
-             ORDER BY m.am_utc DESC, m.bewegung_id DESC OFFSET 0 ROWS FETCH NEXT @grenze ROWS ONLY
+             ORDER BY m.am_utc DESC, m.bewegung_id DESC OFFSET 0 ROWS FETCH NEXT (@grenze) ROWS ONLY
             """, new { w, depot, grenze = Math.Clamp(grenze, 1, 2000) },
             cancellationToken: ct));
 
@@ -551,7 +551,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
             dass sie nicht aus zwei Kassenbewegungen zusammengesucht werden
             muss. Ein- und Auszahlungen kommen aus der Kasse, denn zu ihnen
             gibt es keine Buchung.                                             */
-        var zeilen = (await conn.QueryAsync<Rohzeile>(new CommandDefinition("""
+        var zeilen = (await conn.QueryAsync<Rohzeile>(new CommandDefinition($"""
             SELECT b.am_utc                                    AS AmUtc,
                    b.depot                                     AS Depot,
                    CASE WHEN b.betrag >= 0 THEN 'kauf'
@@ -567,14 +567,14 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
                    b.notiz                                     AS Notiz
               FROM dbo.invest_buchung b
               JOIN dbo.asset a ON a.asset_id = b.asset_id
-             WHERE b.depot IN @depots
+             WHERE {d.In("b.depot", "depots")}
 
             UNION ALL
 
             SELECT m.am_utc, m.depot, m.grund, NULL, NULL, NULL, NULL, NULL,
                    m.betrag, 0, m.waehrung, m.notiz
               FROM dbo.invest_kontobewegung m
-             WHERE m.depot IN @depots
+             WHERE {d.In("m.depot", "depots")}
                AND m.grund IN ('einzahlung', 'auszahlung')
 
              ORDER BY AmUtc, Art
@@ -713,7 +713,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
                    b.gebuehr AS Gebuehr, b.waehrung AS Waehrung, b.kurs AS Kurs
               FROM dbo.invest_buchung b
               JOIN dbo.asset a ON a.asset_id = b.asset_id
-             WHERE (@depot IS NULL OR b.depot = @depot)
+             WHERE (b.depot = @depot OR @depot IS NULL)
              ORDER BY b.am_utc
             """, new { depot }, cancellationToken: ct))).ToList();
 
@@ -721,7 +721,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
             SELECT depot AS Depot, waehrung AS Waehrung, am_utc AS AmUtc,
                    betrag AS Betrag, grund AS Grund
               FROM dbo.invest_kontobewegung
-             WHERE (@depot IS NULL OR depot = @depot)
+             WHERE (depot = @depot OR @depot IS NULL)
              ORDER BY am_utc
             """, new { depot }, cancellationToken: ct))).ToList();
 
@@ -879,10 +879,10 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
             Die Stundenbars nur fuer das feine Fenster: Ein Jahr in
             Stundenaufloesung waeren rund 6.000 Punkte je Wert, und die
             Vermoegenskurve braucht sie nicht.                                 */
-        var bars = (await conn.QueryAsync<Kurspunkt>(new CommandDefinition("""
+        var bars = (await conn.QueryAsync<Kurspunkt>(new CommandDefinition($"""
             SELECT asset_id AS AssetId, ts_utc AS TsUtc, "close" AS Schluss
               FROM dbo.price_bar
-             WHERE asset_id IN @ids
+             WHERE {d.In("asset_id", "ids")}
                AND "close" > 0
                AND (   (interval_code = '1d' AND ts_utc >= @von)
                     OR (interval_code = '1h' AND ts_utc >= @fein))
@@ -909,7 +909,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
             SELECT a.asset_id AS AssetId, k.ts_utc AS TsUtc, k.schluss AS Schluss
               FROM dbo.asset a
               {d.OuterApplyVor} dbo.letzter_kurs(a.asset_id) k {d.OuterApplyNach}
-             WHERE a.asset_id IN @ids AND k.schluss IS NOT NULL
+             WHERE {d.In("a.asset_id", "ids")} AND k.schluss IS NOT NULL
             """, new { ids = assetIds }, cancellationToken: ct));
 
         foreach (var f in frisch)
@@ -960,7 +960,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
             Strategie traegt `zaehlt = 1`; die anderen bleiben in der
             Aufstellung und im Vergleich, aber draussen aus der Summe.        */
         var ausgenommen = (await conn.QueryAsync<string>(new CommandDefinition(
-            "SELECT depot FROM dbo.autopilot_einstellung WHERE zaehlt = 0",
+            $"SELECT depot FROM dbo.autopilot_einstellung WHERE zaehlt = {d.Falsch}",
             cancellationToken: ct))).ToHashSet();
 
         var fx = await conn.QuerySingleOrDefaultAsync<Tagesschluss>(new CommandDefinition("""
@@ -1138,7 +1138,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
             .Select(x => (Tag: x.TsUtc.Date, x.Schluss)).ToList();
 
         var ausgenommen = (await conn.QueryAsync<string>(new CommandDefinition(
-            "SELECT depot FROM dbo.autopilot_einstellung WHERE zaehlt = 0",
+            $"SELECT depot FROM dbo.autopilot_einstellung WHERE zaehlt = {d.Falsch}",
             cancellationToken: ct))).ToHashSet();
 
         decimal Um(decimal betrag, string von, DateTime tag)

@@ -16,7 +16,7 @@ public static class FlowEndpoints
        Die Umrechnung passiert deshalb schon in SQL, sonst müsste jede Abfrage
        Millionen Zeilen an den Prozess schicken. Siehe FlowMetrics. */
     private const string FlowExpr =
-        "CASE WHEN a.asset_class = 2 THEN p.volume ELSE p.[close] * p.volume END";
+        "CASE WHEN a.asset_class = 2 THEN p.volume ELSE p.\"close\" * p.volume END";
 
     public static void MapFlowEndpoints(this IEndpointRouteBuilder app)
     {
@@ -148,6 +148,6 @@ public static class FlowEndpoints
     }
 
     private sealed record FlowRow(
-        int AssetId, string Symbol, string? Name, byte AssetClass,
+        int AssetId, string Symbol, string? Name, AssetClass AssetClass,
         decimal RecentFlow, decimal BaseFlow, decimal RecentTotal, decimal BaseTotal);
 }

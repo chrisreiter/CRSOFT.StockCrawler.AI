@@ -13,6 +13,12 @@
 CREATE SCHEMA IF NOT EXISTS dbo;
 SET search_path = dbo, public;
 
+-- convert_to() ist nur STABLE, weil es von der Datenbankkodierung abhaengt; eine
+-- generierte Spalte verlangt IMMUTABLE. Die Kodierung dieser Datenbank ist UTF8
+-- und aendert sich nicht -- die Huelle darf das versprechen.
+CREATE OR REPLACE FUNCTION dbo.utf8(t text) RETURNS bytea
+LANGUAGE sql IMMUTABLE STRICT AS $$ SELECT convert_to(t, 'UTF8') $$;
+
 -- ----------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS dbo.app_session (
   "session_key" uuid NOT NULL,
@@ -425,7 +431,7 @@ CREATE TABLE IF NOT EXISTS dbo.knowledge_source (
   "pillar" varchar(12) NOT NULL,
   "title" varchar(400) NOT NULL,
   "origin" varchar(1000) NOT NULL,
-  "origin_hash" bytea GENERATED ALWAYS AS (sha256(convert_to(origin, 'UTF8'))) STORED,
+  "origin_hash" bytea GENERATED ALWAYS AS (sha256(dbo.utf8(origin))) STORED,
   "content_type" varchar(80),
   "bytes" bigint NOT NULL DEFAULT 0,
   "added_utc" timestamp(0) NOT NULL DEFAULT ((now() at time zone 'utc')),

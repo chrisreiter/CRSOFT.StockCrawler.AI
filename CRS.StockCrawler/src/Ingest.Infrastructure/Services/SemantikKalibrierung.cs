@@ -61,7 +61,7 @@ public sealed class SemantikKalibrierung : ISemantikKalibrierung
 
         var werte = (await conn.QueryAsync<(int AssetId, string Symbol, string? Name)>(
             new CommandDefinition(
-                "SELECT asset_id, symbol, name FROM dbo.asset WHERE is_tracked = 1",
+                $"SELECT asset_id, symbol, name FROM dbo.asset WHERE is_tracked = {d.Wahr}",
                 cancellationToken: ct))).ToList();
 
         var index = BaueIndex(werte);
@@ -128,7 +128,7 @@ public sealed class SemantikKalibrierung : ISemantikKalibrierung
                        AND ts_utc >= {d.PlusTage("-@tage - 40", d.Jetzt)}
                        AND "close" > 0
                 )
-                SELECT b.asset_id AS AssetId, CAST(b.ts_utc AS date) AS Tag,
+                SELECT b.asset_id AS AssetId, CAST(CAST(b.ts_utc AS date) AS {d.TypZeit}) AS Tag,
                        {d.Ln("z.c / b.c")} AS LogRendite
                   FROM b
                   JOIN b z ON z.asset_id = b.asset_id AND z.rn = b.rn + @schritte

@@ -121,7 +121,7 @@ public static class HygieneEndpoints
                      WHERE b.interval_code = '1d'
                 ),
                 zahlen AS (
-                    SELECT asset_id, COUNT(*) AS bars, MAX("close") AS hoch
+                    SELECT asset_id, CAST(COUNT(*) AS INT) AS bars, MAX("close") AS hoch
                       FROM dbo.price_bar WHERE interval_code = '1d'
                      GROUP BY asset_id
                 )

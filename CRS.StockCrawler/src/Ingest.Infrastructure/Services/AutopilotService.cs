@@ -1,4 +1,5 @@
 using System.Data.Common;
+using Ingest.Core.Enums;
 using System.Data;
 using System.Text.Json;
 using Dapper;
@@ -90,9 +91,9 @@ public sealed class AutopilotService(
                 eine Fallzahl, die es nicht gibt.                              */
             guete AS (
               SELECT d.asset_id,
-                     AVG(CAST(d.direction_correct AS float)) AS p,
-                     SUM(CAST(d.direction_correct AS int))   AS treffer,
-                     COUNT(*)                                AS n
+                     AVG(CAST(CAST(d.direction_correct AS INT) AS FLOAT)) AS p,
+                     CAST(SUM(CAST(d.direction_correct AS int)) AS INT) AS treffer,
+                     CAST(COUNT(*) AS INT)                                AS n
                 FROM (SELECT f.asset_id, s.direction_correct,
                              ROW_NUMBER() OVER (PARTITION BY f.asset_id,
                                                              CAST(f.target_ts_utc AS DATE)
@@ -114,7 +115,7 @@ public sealed class AutopilotService(
                GROUP BY d.asset_id
             ),
             beweg AS (
-              SELECT asset_id, AVG(ABS(r)) AS bewegung, COUNT(*) AS tage
+              SELECT asset_id, AVG(ABS(r)) AS bewegung, CAST(COUNT(*) AS INT) AS tage
                 FROM (SELECT p.asset_id,
                              {d.Ln("p.\"close\" / NULLIF(LAG(p.\"close\") OVER (PARTITION BY p.asset_id ORDER BY p.ts_utc), 0)")} AS r
                         FROM dbo.price_bar p
@@ -350,7 +351,7 @@ public sealed class AutopilotService(
             : $"Erwartungswert {ew * 100:0.000} % je Geschäft — Kosten nicht gedeckt";
     }
 
-    private static string Klassenname(byte k) => k switch
+    private static string Klassenname(AssetClass k) => (byte)k switch
     {
         1 => "Aktie", 2 => "Krypto", 3 => "Devisen", _ => "Fonds/ETF"
     };
@@ -456,7 +457,7 @@ public sealed class AutopilotService(
 
     private readonly record struct Bestandszeile(int AssetId, decimal Anteile);
 
-    private sealed record Rohwert(int AssetId, string Symbol, string? Name, byte Klasse,
+    private sealed record Rohwert(int AssetId, string Symbol, string? Name, AssetClass Klasse,
                                   decimal? Kurs, DateTime? KursUtc,
                                   double? Tag, double? Woche,
                                   double? Trefferquote, int Treffer, int Bewertet,
@@ -980,13 +981,14 @@ public sealed class AutopilotService(
     {
         if (ziel.Count < 2) return ziel;
 
+        var d = conn.Dialekt();
         var ids = ziel.Select(z => z.AssetId).ToArray();
 
-        var paare = (await conn.QueryAsync<Paar>(new CommandDefinition("""
+        var paare = (await conn.QueryAsync<Paar>(new CommandDefinition($"""
             SELECT asset_id_a AS A, asset_id_b AS B, corr0 AS Korrelation
               FROM dbo.pair_stat
              WHERE interval_code = '1d'
-               AND asset_id_a IN @ids AND asset_id_b IN @ids
+               AND {d.In("asset_id_a", "ids")} AND {d.In("asset_id_b", "ids")}
                AND ABS(corr0) > 0.9
             """, new { ids }, cancellationToken: ct))).ToList();
 
@@ -1129,8 +1131,8 @@ public sealed class AutopilotService(
                    gebuehren AS Gebuehren, vermoegen AS Vermoegen, handelstag AS Handelstag,
                    notiz AS Notiz
               FROM dbo.autopilot_lauf
-             WHERE (@depot IS NULL OR depot = @depot)
-             ORDER BY lauf_id DESC OFFSET 0 ROWS FETCH NEXT @grenze ROWS ONLY
+             WHERE (depot = @depot OR @depot IS NULL)
+             ORDER BY lauf_id DESC OFFSET 0 ROWS FETCH NEXT (@grenze) ROWS ONLY
             """, new { depot, grenze = Math.Clamp(grenze, 1, 200) },
             cancellationToken: ct))).ToList();
 
@@ -1155,7 +1157,7 @@ public sealed class AutopilotService(
               JOIN dbo.autopilot_lauf l ON l.lauf_id = e.lauf_id
               JOIN dbo.asset a ON a.asset_id = e.asset_id
              WHERE e.lauf_id = @lauf
-             ORDER BY e.rang OFFSET 0 ROWS FETCH NEXT @grenze ROWS ONLY
+             ORDER BY e.rang OFFSET 0 ROWS FETCH NEXT (@grenze) ROWS ONLY
             """, new { lauf = laufId, grenze = Math.Clamp(grenze, 1, 1000) },
             cancellationToken: ct));
 
@@ -1185,7 +1187,7 @@ public sealed class AutopilotService(
         };
 
         var geschaefte = (await conn.QueryAsync<Zaehlung>(new CommandDefinition("""
-            SELECT depot AS Depot, COUNT(*) AS Anzahl
+            SELECT depot AS Depot, CAST(COUNT(*) AS INT) AS Anzahl
               FROM dbo.invest_buchung GROUP BY depot
             """, cancellationToken: ct))).ToDictionary(x => x.Depot, x => x.Anzahl);
 

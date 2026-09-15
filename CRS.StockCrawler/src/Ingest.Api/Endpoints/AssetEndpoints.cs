@@ -84,7 +84,7 @@ public static class AssetEndpoints
 
             var suspects = (await conn.QueryAsync<(int AssetId, string Symbol, string? Name,
                                                    int Jumps, double WorstFactor)>(
-                new CommandDefinition("""
+                new CommandDefinition($"""
                     WITH d AS (
                       SELECT p.asset_id, p."close",
                              LAG(p."close") OVER (PARTITION BY p.asset_id ORDER BY p.ts_utc) AS prev
@@ -92,7 +92,7 @@ public static class AssetEndpoints
                        WHERE p.interval_code = '1d'
                     )
                     SELECT a.asset_id, a.symbol, a."name",
-                           COUNT(*) AS jumps,
+                           CAST(COUNT(*) AS INT) AS jumps,
                            MAX(CASE WHEN d."close" > d.prev
                                     THEN d."close" / d.prev ELSE d.prev / d."close" END) AS worst
                       FROM d
@@ -100,7 +100,7 @@ public static class AssetEndpoints
                      WHERE d.prev > 0 AND d."close" > 0
                        AND (d."close" / d.prev > @maxFactor OR d.prev / d."close" > @maxFactor)
                      GROUP BY a.asset_id, a.symbol, a."name"
-                    HAVING COUNT(*) >= @minJumps
+                    HAVING CAST(COUNT(*) AS INT) >= @minJumps
                      ORDER BY jumps DESC
                     """, new { maxFactor = (decimal)maxFactor, minJumps },
                     commandTimeout: 300, cancellationToken: ct))).ToList();
@@ -195,16 +195,16 @@ public static class AssetEndpoints
             // Abhängige Daten zuerst — Fremdschlüssel auf price_bar und forecast.
             await conn.ExecuteAsync(new CommandDefinition($"""
                 DELETE FROM dbo.forecast_component
-                 WHERE forecast_id IN (SELECT forecast_id FROM dbo.forecast WHERE asset_id IN @ids);
+                 WHERE forecast_id IN (SELECT forecast_id FROM dbo.forecast WHERE {d.In("asset_id", "ids")});
                 DELETE FROM dbo.forecast_score
-                 WHERE forecast_id IN (SELECT forecast_id FROM dbo.forecast WHERE asset_id IN @ids);
-                DELETE FROM dbo.forecast      WHERE asset_id IN @ids;
-                DELETE FROM dbo.model_weight  WHERE asset_id IN @ids;
-                DELETE FROM dbo.pair_stat     WHERE asset_id_a IN @ids OR asset_id_b IN @ids;
-                DELETE FROM dbo.crossing      WHERE asset_id_a IN @ids OR asset_id_b IN @ids;
-                DELETE FROM dbo.price_bar     WHERE asset_id IN @ids;
+                 WHERE forecast_id IN (SELECT forecast_id FROM dbo.forecast WHERE {d.In("asset_id", "ids")});
+                DELETE FROM dbo.forecast      WHERE {d.In("asset_id", "ids")};
+                DELETE FROM dbo.model_weight  WHERE {d.In("asset_id", "ids")};
+                DELETE FROM dbo.pair_stat     WHERE {d.In("asset_id_a", "ids")} OR {d.In("asset_id_b", "ids")};
+                DELETE FROM dbo.crossing      WHERE {d.In("asset_id_a", "ids")} OR {d.In("asset_id_b", "ids")};
+                DELETE FROM dbo.price_bar     WHERE {d.In("asset_id", "ids")};
                 UPDATE dbo.asset SET is_tracked = {d.Falsch}, updated_utc = {d.Jetzt}
-                 WHERE asset_id IN @ids;
+                 WHERE {d.In("asset_id", "ids")};
                 """, new { ids }, commandTimeout: 600, cancellationToken: ct));
 
             return Results.Ok(new
@@ -243,7 +243,7 @@ public static class AssetEndpoints
             }
 
             var byCat = await conn.QueryAsync<(string? Sector, int N)>(new CommandDefinition(
-                "SELECT sector, COUNT(*) FROM dbo.asset WHERE is_tracked = 1 GROUP BY sector",
+                "SELECT sector, CAST(COUNT(*) AS INT) FROM dbo.asset WHERE is_tracked = 1 GROUP BY sector",
                 cancellationToken: ct));
 
             return Results.Ok(new
@@ -261,13 +261,13 @@ public static class AssetEndpoints
             await using var conn = await factory.OpenAsync(ct);
             var d = conn.Dialekt();
 
-            var sectors = await conn.QueryAsync<(string Sector, int N)>(new CommandDefinition("""
-                SELECT sector, COUNT(*) AS n FROM dbo.asset
+            var sectors = await conn.QueryAsync<(string Sector, int N)>(new CommandDefinition($"""
+                SELECT sector, CAST(COUNT(*) AS INT) AS n FROM dbo.asset
                  WHERE sector IS NOT NULL GROUP BY sector ORDER BY n DESC
                 """, cancellationToken: ct));
 
-            var countries = await conn.QueryAsync<(string Country, int N)>(new CommandDefinition("""
-                SELECT country, COUNT(*) AS n FROM dbo.asset
+            var countries = await conn.QueryAsync<(string Country, int N)>(new CommandDefinition($"""
+                SELECT country, CAST(COUNT(*) AS INT) AS n FROM dbo.asset
                  WHERE country IS NOT NULL GROUP BY country ORDER BY n DESC
                 """, cancellationToken: ct));
 
