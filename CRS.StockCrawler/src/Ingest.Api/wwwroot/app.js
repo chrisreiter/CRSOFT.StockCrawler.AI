@@ -8004,7 +8004,134 @@ $('#nz-sammeln')?.addEventListener('click', async () => {
 
 $('#nz-laeufe')?.addEventListener('click', ladeNzLaeufe);
 
+/* ======================================================= Grundschwingungen === */
+
+let gsGewaehlt = null;
+
+/*  Die Skizze ist die Summe der Kosinusschwingungen der Klasse ueber zwei
+    Grundperioden, vom Server auf ±1 normiert. Als Inline-SVG statt uPlot:
+    Es sind Dutzende kleine Bilder in einem Raster, und ein Diagrammobjekt je
+    Karte waere fuer ein Bild, das nur eine Form zeigen soll, Verschwendung. */
+function gsSkizze(y, w = 220, h = 56) {
+  if (!y || !y.length) return '';
+  const pad = 3;
+  const pts = y.map((v, i) =>
+    (pad + i * (w - 2 * pad) / (y.length - 1)).toFixed(1) + ','
+    + (h / 2 - v * (h / 2 - pad)).toFixed(1)).join(' ');
+  return '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">'
+    + '<line x1="0" y1="' + h / 2 + '" x2="' + w + '" y2="' + h / 2
+    + '" stroke="var(--line)" stroke-width="1"/>'
+    + '<polyline points="' + pts + '" fill="none" stroke="var(--accent)" stroke-width="1.6"/>'
+    + '</svg>';
+}
+
+const gsHarmonik = h => ({
+  rein: 'rein', oberton: 'Oberton', schwebung: 'Schwebung', dreiklang: 'Dreiklang'
+}[h] || h);
+
+const gsName = k => k.perioden.map(p => fmtNum(p, 1)).join(' + ') + ' Bars';
+
+async function ladeGrundschwingungen() {
+  const d = await guard(() => api('/api/grundschwingungen/'));
+  if (!d) return;
+
+  const raus = $('#gs-out');
+  const kennzahl = (was, wert, titel) =>
+    '<div class="nz-kennzahl"' + (titel ? ' title="' + esc(titel) + '"' : '') + '>'
+    + '<div class="w">' + esc(was) + '</div><div class="zahl">' + wert + '</div></div>';
+
+  if (!d.lauf) {
+    raus.innerHTML = '<p class="hint block">' + esc(d.hinweis) + '</p>';
+    return;
+  }
+
+  const l = d.lauf;
+  raus.innerHTML =
+    '<div class="nz-kennzahlen">'
+    + kennzahl('Werte', l.werte, 'mit mindestens 1.064 Tagesbars')
+    + kennzahl('Epochen', l.epochen, 'Fenster von 1024 Bars, Schritt 256')
+    + kennzahl('Akkorde', l.akkorde, 'ein Akkord je Wert und Epoche')
+    + kennzahl('Klassen', l.klassen, 'Akkorde, deren Perioden innerhalb von 12 % übereinstimmen, ab drei Akkorden')
+    + kennzahl('Paare', l.paare, 'zwei Werte in derselben Klasse in mindestens drei Epochen')
+    + kennzahl('beständig', l.paareBestaendig, 'Versatz über die Epochen gleichbleibend und ungleich null')
+    + kennzahl('Stand', fmtDate(l.beendetUtc, false), (l.dauerSekunden || 0) + ' s')
+    + '</div>'
+    + '<p class="hint block">' + esc(d.hinweis) + '</p>'
+    + '<div class="gs-grid">'
+    + d.klassen.map(k =>
+        '<div class="gs-karte" data-id="' + k.classId + '" title="'
+        + esc('Prominenz ' + fmtNum(k.prominenz, 1) + ', Stabilität ' + fmtNum(k.stabilitaet, 2)) + '">'
+        + gsSkizze(k.skizze)
+        + '<div class="gs-name">#' + k.nr + ' · ' + esc(gsName(k))
+        + '<span class="gs-harmonik">' + esc(gsHarmonik(k.harmonik)) + '</span></div>'
+        + '<div class="gs-meta">' + k.werte + ' <span>Werte</span> · ' + k.epochen + ' <span>Epochen</span> · '
+        + k.paareBestaendig + ' / ' + k.paare + ' <span>Paare beständig</span></div>'
+        + '</div>').join('')
+    + '</div>'
+    + '<div id="gs-detail" class="gs-detail"><p class="hint">Eine Klasse anklicken, um die '
+    + 'Werte zu sehen, die dieses Muster teilen.</p></div>';
+
+  $$('#gs-out .gs-karte').forEach(el =>
+    el.addEventListener('click', () => ladeGsKlasse(+el.dataset.id)));
+
+  if (gsGewaehlt) ladeGsKlasse(gsGewaehlt);
+}
+
+async function ladeGsKlasse(id) {
+  gsGewaehlt = id;
+  $$('#gs-out .gs-karte').forEach(el => el.classList.toggle('aktiv', +el.dataset.id === id));
+
+  const d = await guard(() => api('/api/grundschwingungen/klasse/' + id));
+  if (!d) return;
+
+  const k = d.klasse;
+  const versatz = v => '<span class="gs-versatz">' + (v > 0 ? '+' : '') + fmtNum(v, 1) + ' Bars</span>';
+
+  $('#gs-detail').innerHTML =
+    '<h4>Klasse #' + k.nr + ' — ' + esc(gsName(k)) + ' <span class="dim">(' + esc(gsHarmonik(k.harmonik)) + ')</span></h4>'
+    + '<p class="hint block">' + esc(d.hinweis) + '</p>'
+
+    + '<h4>Werte mit diesem Muster <span class="dim">(' + d.mitglieder.length + ')</span></h4>'
+    + '<div class="gs-roll"><table class="grid gs-tab"><thead><tr>'
+    + '<th>Wert</th><th>Name</th><th class="num">Epochen</th><th class="num">zuletzt</th>'
+    + '<th class="num" title="Lage des Grundtons am Ende der jüngsten Epoche, in Grad">Phase</th>'
+    + '<th class="num" title="Mittlere Prominenz der Spitzen über dem Untergrund">Prominenz</th>'
+    + '<th>aktuell</th></tr></thead><tbody>'
+    + d.mitglieder.map(m =>
+        '<tr' + (m.aktuell ? '' : ' class="dim"') + '><td>' + esc(m.symbol) + '</td><td>' + esc(m.name || '') + '</td>'
+        + '<td class="num">' + m.epochen + '</td><td class="num">' + fmtDate(m.letzteEpocheUtc, false) + '</td>'
+        + '<td class="num">' + (isNaN(m.letztePhaseDeg) ? '–' : fmtNum(m.letztePhaseDeg, 0) + '°') + '</td>'
+        + '<td class="num">' + fmtNum(m.prominenz, 1) + '</td>'
+        + '<td>' + (m.aktuell ? 'ja' : 'älter') + '</td></tr>').join('')
+    + '</tbody></table></div>'
+
+    + '<h4>Paare mit gemeinsamem Muster <span class="dim">(' + d.paare.length
+    + ', davon ' + d.paare.filter(p => p.bestaendig).length + ' <span>beständig</span>)</span></h4>'
+    + (d.paare.length
+        ? '<div class="gs-roll"><table class="grid gs-tab"><thead><tr>'
+          + '<th>A</th><th>B</th><th class="num">gemeinsame Epochen</th>'
+          + '<th class="num" title="Phasenunterschied der Grundtöne in Bars; positiv: B liegt hinter A zurück">Versatz</th>'
+          + '<th class="num" title="Streuung des Versatzes über die Epochen">± Streuung</th><th>Urteil</th></tr></thead><tbody>'
+          + d.paare.map(p =>
+              '<tr class="' + (p.bestaendig ? 'bestaendig' : 'dim') + '"><td>' + esc(p.symbolA) + '</td><td>' + esc(p.symbolB) + '</td>'
+              + '<td class="num">' + p.epochen + '</td><td class="num">' + versatz(p.versatzBars) + '</td>'
+              + '<td class="num">' + fmtNum(p.versatzStreuung, 1) + '</td>'
+              + '<td>' + (p.bestaendig ? 'beständig — Versatz gleichbleibend und ungleich null'
+                                       : Math.abs(p.versatzBars) < 1 ? 'gleichzeitig, kein Vorlauf'
+                                                                     : 'Versatz springt, Zufall in hübscher Form') + '</td></tr>').join('')
+          + '</tbody></table></div>'
+        : '<p class="hint block">Kein Paar teilt diese Klasse in drei oder mehr Epochen.</p>');
+}
+
+$('#gs-lauf')?.addEventListener('click', async () => {
+  const r = await guard(() => api('/api/grundschwingungen/lauf', { method: 'POST' }),
+    'Grundschwingungen gerechnet.');
+  if (!r) return;
+  await ladeGrundschwingungen();
+});
+
 const VIEW_INIT = {
+  grundschwingung: () => { if (!$('#gs-out').children.length) ladeGrundschwingungen(); },
   neuzugang: () => { if (!$('#nz-out').children.length) ladeNeuzugaenge(); },
   charts: () => { if (!chartState.available.length) loadAvailable(); },
   select: () => { if (!$('#sel-table tbody').children.length) loadSelectTable(); },

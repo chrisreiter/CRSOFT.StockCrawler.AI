@@ -277,7 +277,15 @@ Kursbewegung zu setzen. Ein Artikel wird deshalb eine eigene Quelle mit
 
 **Deutsche Anführungszeichen in interpolierten C#-Zeichenketten.** `$"… „{x}" …"`
 endet am geraden Anführungszeichen und bricht die Übersetzung. Das schließende
-deutsche Zeichen ist `“`, nicht `"`. Dreimal in einer Sitzung passiert.
+deutsche Zeichen ist `“`, nicht `"`. Dreimal in einer Sitzung passiert — und
+ein viertes Mal beim Katalog der Grundschwingungen.
+
+**Epochen über mehrere Werte müssen auf einem Kalenderraster liegen.** Der
+erste Lauf der Grundschwingungen zählte die Epochen je Wert vom eigenen ersten
+Bar aus; keine Epoche zweier Werte endete am selben Tag, und „dieselbe Klasse
+in derselben Epoche" traf praktisch nie zu — 311 Klassen, zwei Paare. Mit
+Jahresankern sechs Paare, darunter SPY/^GSPC/VV bei Versatz 0,0 als Kontrolle.
+Gleichzeitigkeit kommt aus dem Kalender, nicht aus dem Zeilenindex.
 
 **Kennungen aus dem Inhalt statt aus dem Zufall.** Solange `vector_id` ein
 `NEWID()` war, hieß jeder Neuaufbau: erst löschen, dann schreiben. Zwei
@@ -1452,6 +1460,10 @@ Die Sprachumstellung der Oberfläche samt ihrer Grenzen steht in
 
 Vorankündigungen neuer Werte samt ihrer Quellen stehen in
 [docs/NEUZUGAENGE.md](docs/NEUZUGAENGE.md).
+
+Der Katalog der Grundschwingungen (Fourier-Akkorde je Epoche, Klassen,
+Paare mit Phasenversatz, Beitrag zur Prognose samt Rückhalt) steht in
+[docs/GRUNDSCHWINGUNGEN.md](docs/GRUNDSCHWINGUNGEN.md).
 
 Das virtuelle Depot (Konto, Gebühren, Vermögensverlauf) ist in
 [docs/INVESTINGS.md](docs/INVESTINGS.md) beschrieben, der selbsthandelnde

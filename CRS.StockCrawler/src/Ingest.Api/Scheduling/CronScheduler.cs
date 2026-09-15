@@ -281,6 +281,20 @@ public sealed class CronScheduler : BackgroundService
             _log.LogError(ex, "Neuzugänge übersprungen");
         }
 
+        /* Der Katalog der Grundschwingungen -- gemessen rund zwei Minuten ueber
+           alle Werte. Nach den frischen Tagesbars, damit die juengste Epoche den
+           heutigen Stand traegt; eigenes try/catch aus demselben Grund wie oben. */
+        try
+        {
+            var gs = await sp.GetRequiredService<IGrundschwingungService>().LaufeAsync("1d", ct);
+            _log.LogInformation("Grundschwingungen: {Klassen} Klassen, {Paare} Paare ({Bestaendig} beständig) in {S:F0} s",
+                gs.Klassen, gs.Paare, gs.PaareBestaendig, gs.DauerSekunden ?? 0);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Grundschwingungen übersprungen");
+        }
+
         try
         {
             var laeufe = await sp.GetRequiredService<IAutopilotService>().LaufeAlleAsync(ct);

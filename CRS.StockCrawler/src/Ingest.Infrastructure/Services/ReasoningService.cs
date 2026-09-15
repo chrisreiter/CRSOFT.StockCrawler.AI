@@ -77,6 +77,7 @@ public sealed class ReasoningService(
     IFeatureExportService features,
     IKnowledgeService knowledge,
     ICurveDiscussionService curve,
+    IGrundschwingungService grundschwingungen,
     ILocService loc,
     ILogger<ReasoningService> log) : IReasoningService
 {
@@ -126,7 +127,7 @@ public sealed class ReasoningService(
     public IReadOnlyList<string> ToolNames =>
     [
         "kurs", "prognose", "modellzustand", "kurvenereignisse",
-        "verknuepfungen", "wissen", "nachrichten", "werteliste"
+        "verknuepfungen", "grundschwingungen", "wissen", "nachrichten", "werteliste"
     ];
 
     public async Task<bool> IsAvailableAsync(CancellationToken ct = default)
@@ -474,6 +475,8 @@ public sealed class ReasoningService(
             "Welche Modelle gibt es / taugen sie?"       -> modellzustand
             "Auffaellige Stellen / Ausschlaege bei X"    -> kurvenereignisse
             "Was bewegt sich zusammen mit X?"            -> verknuepfungen
+            "Welche Zyklen / Schwingungen traegt X?"     -> grundschwingungen
+            "Wer schwingt wie X, wer laeuft X voraus?"   -> grundschwingungen
             "Was steht im Buch / in der Literatur zu Z?" -> wissen
             "Was wird ueber X geschrieben / berichtet?"  -> nachrichten
             "Welche Werte gibt es?"                      -> werteliste
@@ -508,6 +511,12 @@ public sealed class ReasoningService(
                              + "eines anderen zusammenfallen.",
              ("symbol", "string", "Optional: nur Paare mit diesem Wert", false),
              ("anzahl", "integer", "Wie viele, Standard 15", false)),
+
+        Tool("grundschwingungen", "Die Grundschwingungen eines Wertes aus der Fourier-Zerlegung: "
+                                + "seine ein bis drei stärksten Perioden in Bars, die Katalogklasse, "
+                                + "in der er mit anderen Werten steht, Partner mit gleichem Muster samt "
+                                + "Phasenversatz — und der gemessene Rückhalt einer Fortschreibung.",
+             ("symbol", "string", "Symbol des Wertes", true)),
 
         /* Die beiden Suchwerkzeuge brauchen kontrastierende Beschreibungen.
 
@@ -619,6 +628,7 @@ public sealed class ReasoningService(
             "kurvenereignisse" => await EreignisseAsync(
                 Str(symbolNamen), Str("art", "typ", "kind"), Int("anzahl", 10), ct),
             "verknuepfungen" => await VerknuepfungenAsync(Str(symbolNamen), Int("anzahl", 15), ct),
+            "grundschwingungen" => await GrundschwingungenAsync(Str(symbolNamen), ct),
             "wissen" => await SucheAsync("knowledge", Str(frageNamen), ct),
             "nachrichten" => await SucheAsync("semantic", Str(frageNamen), ct),
             "werteliste" => await ListeAsync(Str(frageNamen), ct),
@@ -850,6 +860,67 @@ public sealed class ReasoningService(
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Der Akkord eines Wertes und was daraus folgt — mit dem Rückhalt vorneweg,
+    /// weil ohne ihn jede Periode wie eine Prognose klänge.
+    /// </summary>
+    private async Task<string> GrundschwingungenAsync(string? symbol, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(symbol))
+            return "Kein Symbol angegeben. Erwartet wird z. B. {\"symbol\": \"NVDA\"}.";
+
+        var a = await FindeAsync(symbol, ct);
+        if (a is null) return $"Kein verfolgter Wert mit dem Symbol {symbol}.";
+
+        var w = await grundschwingungen.WertAsync(a.AssetId, ct);
+        if (w is null || w.Perioden.Length == 0)
+            return $"{a.Symbol}: keine stabile Grundschwingung gefunden (zu wenig Historie oder keine Spitze über dem Untergrund).";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Grundschwingungen von {a.Symbol} (Tagesbars, Fenster 1024 Bars"
+                    + (w.LetzteEpocheUtc is { } e ? $", Epoche bis {e:yyyy-MM-dd}" : "") + "):");
+        for (var i = 0; i < w.Perioden.Length; i++)
+            sb.AppendLine($"  Periode {w.Perioden[i]:0.#} Bars, relative Amplitude {w.Amplituden[i]:0.##}, Phase {w.Phasen[i]:0} Grad");
+        sb.AppendLine($"  Harmonik: {w.Harmonik}");
+
+        if (w.Klasse is { } k)
+        {
+            sb.AppendLine($"  Katalogklasse #{k.Nr}: [{string.Join(" + ", k.Perioden.Select(p => p.ToString("0.#")))}] Bars, "
+                        + $"{k.Werte} Werte in {k.Epochen} Epochen, {k.PaareBestaendig} beständige von {k.Paare} Paaren.");
+            if (w.Partner.Count > 0)
+            {
+                sb.AppendLine("  Partner mit demselben Muster (Versatz der Grundtöne in Bars, + = Partner liegt zurück):");
+                foreach (var p in w.Partner.Take(8))
+                {
+                    var anderer = p.AssetA == a.AssetId ? p.SymbolB : p.SymbolA;
+                    var versatz = p.AssetA == a.AssetId ? p.VersatzBars : -p.VersatzBars;
+                    sb.AppendLine($"    {anderer}: {p.Epochen} Epochen, Versatz {versatz:+0.0;-0.0} ± {p.VersatzStreuung:0.0} Bars — "
+                                + (p.Bestaendig ? "BESTÄNDIG (Versatz gleichbleibend und ungleich null)"
+                                                : "nicht beständig: gleichzeitig oder springend, kein Vorlauf"));
+                }
+            }
+            else sb.AppendLine("  Keine Partner mit mindestens drei gemeinsamen Epochen.");
+        }
+        else sb.AppendLine("  Keiner Katalogklasse zugeordnet (Einzelfall oder noch kein Lauf).");
+
+        /* Der Rückhalt ist die Aussage, nicht die Periode. Ein Modell, das die
+           Perioden weitergibt, ohne zu sagen, dass ihre Fortschreibung im
+           Sperrbereich nichts taugt, wäre die gefährlichste Komponente hier. */
+        if (w.Rueckhalt is { } skill)
+        {
+            sb.AppendLine(skill > 0
+                ? $"  Rückhalt der Fortschreibung: {skill:P1} besser als Stillstand über 40 Bars — "
+                  + $"Beitrag nach 5/20/40 Bars: {F(w.RenditeNach5)} / {F(w.RenditeNach20)} / {F(w.RenditeNach40)}. "
+                  + "Gemessen über 496 Werte hat nur jeder vierte überhaupt Rückhalt (Median 0,041)."
+                : "  Rückhalt der Fortschreibung: NULL — die Fortschreibung dieser Schwingungen war im "
+                  + "zurückgehaltenen Abschnitt nicht besser als Stillstand. KEINE Handelsgrundlage; "
+                  + "die Perioden beschreiben die Vergangenheit, nicht die Zukunft.");
+        }
+        return sb.ToString();
+
+        static string F(double? r) => r is { } x ? $"{x:+0.00%;-0.00%}" : "–";
     }
 
     private async Task<string> SucheAsync(string saeule, string? frage, CancellationToken ct)

@@ -283,6 +283,28 @@ public interface ILocService
 /// eigene Bestand taugt dafür nicht, weil dort ein Wert erst auftaucht,
 /// nachdem er gestiegen ist.</para>
 /// </summary>
+/// <summary>
+/// Der Katalog der Grundschwingungen: ein Lauf über alle verfolgten Werte, der
+/// je Wert und Epoche den Akkord der stärksten Perioden festhält, gleiche
+/// Akkorde zu Klassen zusammenfasst und Paare mit gemeinsamem Muster samt
+/// Phasenversatz ausweist. Mathematik in <c>Ingest.Core.Analysis.Spectral.Grundschwingungen</c>.
+/// </summary>
+public interface IGrundschwingungService
+{
+    /// <summary>Rechnet alle verfolgten Werte durch und ersetzt den vorigen Lauf.</summary>
+    Task<Models.GrundschwingungLauf> LaufeAsync(string interval = "1d", CancellationToken ct = default);
+
+    /// <summary>Der jüngste Lauf und sein Katalog.</summary>
+    Task<Models.GrundschwingungUebersicht> UebersichtAsync(string interval = "1d", CancellationToken ct = default);
+
+    /// <summary>Eine Klasse mit ihren Werten und den Paaren darin.</summary>
+    Task<Models.GrundschwingungKlasseDetail?> KlasseAsync(int classId, CancellationToken ct = default);
+
+    /// <summary>Was ein Wert trägt: sein jüngster Akkord, seine Klasse, seine Partner
+    /// und der Prognosebeitrag samt Rückhalt.</summary>
+    Task<Models.GrundschwingungWert?> WertAsync(int assetId, CancellationToken ct = default);
+}
+
 public interface INeuzugangService
 {
     /// <summary>Holt alle Quellen ab. Jede in ihrem eigenen <c>try</c>.</summary>

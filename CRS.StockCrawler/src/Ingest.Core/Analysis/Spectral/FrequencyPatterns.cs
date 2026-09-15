@@ -59,7 +59,7 @@ public static class FrequencyPatterns
         var result = new List<FreqPattern>();
         var n = closes.Length;
 
-        if (n < epochBars + 8) return result;
+        if (n < epochBars) return result;
 
         for (var start = 0; start + epochBars <= n; start += Math.Max(1, stepBars))
         {
@@ -79,8 +79,6 @@ public static class FrequencyPatterns
             var sp = Spectrum.Welch(band, segment, 0.5, minPeriod, maxPeriod);
             if (sp.DominantPeriod <= 0) continue;
 
-            var hilbert = HilbertCycle.Analyze(band, 20, minPeriod, maxPeriod);
-
             /* Die stärksten Spitzen des Bandes, gemessen am örtlichen
                Untergrund. Benachbarte Stützstellen derselben Spitze werden
                übersprungen — sonst bestünde die Liste aus fünf Punkten
@@ -92,23 +90,62 @@ public static class FrequencyPatterns
                 if (prom < minProminence) continue;
                 if (stab.Stability < minStability) continue;
 
+                /*  Phase und Amplitude JE SPITZE durch Projektion auf Sinus und
+                    Kosinus der gefundenen Periode -- nicht aus dem Momentanzyklus.
+
+                    Der erste Entwurf nahm die Hilbert-Phase und verwarf sie,
+                    sobald die Momentanperiode nicht zur Spitze passte. Gemessen
+                    an 25 Werten blieben 51 von 435 Mustern mit gueltiger Phase:
+                    Der Momentanzyklus beschreibt die STAERKSTE Schwingung am
+                    Reihenende, die zweite und dritte Spitze bekamen nie eine.
+                    Ohne Phase gibt es keinen Versatz, und ohne Versatz ist ein
+                    Treffer zwischen zwei Werten nur "gleiche Periode" -- das
+                    Uninteressante. Die Projektion gilt fuer jede Spitze, ist
+                    ueber die ganze Epoche gemittelt (unempfindlich gegen den
+                    letzten Ausschlag) und gibt die Lage am Epochenende an.   */
+                var (phase, amp) = Projektion(band, period);
+
                 result.Add(new FreqPattern(
                     assetId, symbol,
                     stamps[start], stamps[start + epochBars - 1],
                     Math.Round(period, 2), Math.Round(prom, 2),
                     Math.Round(stab.Stability, 4),
-
-                    /* Die Phase stammt aus dem Momentanzyklus und gilt nur,
-                       wenn dessen Länge zur Spitze passt. Andernfalls
-                       beschriebe sie eine andere Schwingung als die, die hier
-                       festgehalten wird. */
-                    hilbert.Valid && Math.Abs(hilbert.CyclePeriod - period) / period < 0.3
-                        ? hilbert.Phase : double.NaN,
-                    hilbert.Valid ? hilbert.Amplitude : double.NaN));
+                    Math.Round(phase, 1), amp));
             }
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Lage und Stärke der Schwingung einer Periode am Ende der Reihe: die Reihe
+    /// wird auf Kosinus und Sinus dieser Periode projiziert. Phase in Grad, 0 bis
+    /// 360, bezogen auf das letzte Element — 0 heisst „Kosinus-Scheitel liegt am
+    /// Reihenende", 90 heisst „der Scheitel liegt ein Viertel der Periode
+    /// zurück". Amplitude in Einheiten der (bandgefilterten) Reihe.
+    /// </summary>
+    public static (double PhaseDeg, double Amplitude) Projektion(
+        ReadOnlySpan<double> x, double period)
+    {
+        var n = x.Length;
+        if (n < 4 || period <= 0) return (double.NaN, double.NaN);
+
+        double c = 0, s = 0;
+        var w = 2 * Math.PI / period;
+        for (var t = 0; t < n; t++)
+        {
+            /* Zeit rueckwaerts vom Ende gezaehlt: So bezieht sich die Phase auf
+               das letzte Element und nicht auf den willkuerlichen Anfang. */
+            var tau = t - (n - 1);
+            c += x[t] * Math.Cos(w * tau);
+            s += x[t] * Math.Sin(w * tau);
+        }
+
+        var amp = 2 * Math.Sqrt(c * c + s * s) / n;
+        // x ≈ amp · cos(w·tau + φ)  =>  φ = atan2(−s, c); als Grad in [0, 360)
+        var phi = Math.Atan2(-s, c) * 180 / Math.PI;
+        if (phi < 0) phi += 360;
+        return (phi, amp);
     }
 
     /// <summary>

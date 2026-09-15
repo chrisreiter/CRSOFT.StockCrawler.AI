@@ -82,6 +82,7 @@ public static class DependencyInjection
         services.AddScoped<IInvestService, InvestService>();
         services.AddScoped<IAutopilotService, AutopilotService>();
         services.AddScoped<INeuzugangService, NeuzugangService>();
+        services.AddScoped<IGrundschwingungService, GrundschwingungService>();
 
         /*  Singleton, nicht Scoped: Die Sprachdateien werden beim Start gelesen
             und aendern sich nicht je Anfrage. Scoped hiesse, 1.711 Eintraege je
