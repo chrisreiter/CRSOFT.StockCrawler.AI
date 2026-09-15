@@ -65,7 +65,7 @@ public sealed class PortfolioService(ISqlConnectionFactory factory) : IPortfolio
         await using var conn = await factory.OpenAsync(ct);
 
         var id = await conn.ExecuteScalarAsync<int?>(new CommandDefinition(
-            "SELECT asset_id FROM dbo.asset WHERE symbol = @s",
+            "SELECT asset_id FROM dbo.asset WHERE UPPER(symbol) = UPPER(@s)",
             new { s = symbol.Trim() }, cancellationToken: ct));
 
         if (id is null) return null;

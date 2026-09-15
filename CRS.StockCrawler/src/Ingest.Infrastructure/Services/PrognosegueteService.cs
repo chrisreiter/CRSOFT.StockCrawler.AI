@@ -403,7 +403,7 @@ public sealed class PrognosegueteService : IPrognosegueteService
               FROM  dbo.forecast f
               JOIN  dbo.forecast_score s ON s.forecast_id = f.forecast_id
               JOIN  dbo.asset a          ON a.asset_id    = f.asset_id
-             WHERE  a.symbol = @symbol
+             WHERE  UPPER(a.symbol) = UPPER(@symbol)
                AND  f.target_ts_utc >= @von
                AND  (@h IS NULL OR f.horizon_hours = @h)
              ORDER  BY f.target_ts_utc DESC

@@ -237,7 +237,7 @@ public static class AssetEndpoints
                     UPDATE dbo.asset
                        SET sector = @sector, country = COALESCE(@country, country),
                            updated_utc = {d.Jetzt}
-                     WHERE symbol = @symbol AND asset_class IN (0, 1)
+                     WHERE UPPER(symbol) = UPPER(@symbol) AND asset_class IN (0, 1)
                     """, new { symbol, sector = info.Sector, country = info.Country },
                     cancellationToken: ct));
             }
