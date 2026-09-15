@@ -86,7 +86,7 @@ public static class SaeulenmischungEndpoints
                        f.predicted_return, f.combined_return, f.pillar_mix
                   FROM dbo.forecast f
                   JOIN dbo.asset a ON a.asset_id = f.asset_id
-                 WHERE a.symbol = @symbol AND f.horizon_hours = @h
+                 WHERE UPPER(a.symbol) = UPPER(@symbol) AND f.horizon_hours = @h
                  ORDER BY f.made_at_utc DESC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
                 """, new { symbol, h = horizont }, cancellationToken: ct));
 

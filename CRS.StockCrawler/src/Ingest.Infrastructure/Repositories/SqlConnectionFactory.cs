@@ -34,7 +34,9 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             throw new ArgumentException("Verbindungszeichenfolge fehlt.", nameof(connectionString));
 
         _system = system;
-        _connectionString = connectionString;
+        _connectionString = system == Datenbanksystem.Postgres
+            ? MitSuchpfad(connectionString)
+            : connectionString;
         Dialekt = system switch
         {
             Datenbanksystem.SqlServer => new SqlServerDialekt(),
@@ -57,6 +59,18 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
                 die Fabrik ist ein Singleton und entsteht davor.              */
             AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
         }
+    }
+
+    /*  Das Schema heisst dbo, damit die 300 "dbo."-Praefixe im Code fuer beide
+        Systeme gelten. Unqualifizierte Namen (Stage-Tabellen ausgenommen, die
+        sind temporaer) sollen trotzdem dort landen -- also der Suchpfad auf
+        der Verbindung, falls die Zeichenfolge keinen setzt. Wer einen setzt,
+        behaelt seinen.                                                       */
+    private static string MitSuchpfad(string cs)
+    {
+        var b = new NpgsqlConnectionStringBuilder(cs);
+        if (string.IsNullOrWhiteSpace(b.SearchPath)) b.SearchPath = "dbo,public";
+        return b.ConnectionString;
     }
 
     public async Task<DbConnection> OpenAsync(CancellationToken ct = default)

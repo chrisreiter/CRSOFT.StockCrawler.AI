@@ -204,12 +204,16 @@ public sealed class AuthService : IAuthService
     {
         await using var conn = await _factory.OpenAsync(ct);
 
+        /*  LOWER auf beiden Seiten: SQL Server vergleicht in der Standardkollation
+            ohne Ruecksicht auf Gross- und Kleinschreibung, Postgres nicht -- dort
+            waere "Admin" ein anderer Benutzer als "admin". Der eindeutige Index
+            liegt in Postgres deshalb ebenfalls auf LOWER(login).             */
         var u = await conn.QuerySingleOrDefaultAsync<Roh>(new CommandDefinition(
             """
             SELECT user_id AS UserId, login AS Login, display_name AS Anzeigename,
                    password_hash AS Hash, role AS Rolle, is_active AS Aktiv,
                    failed_logins AS Fehlversuche, locked_until_utc AS GesperrtBis
-              FROM dbo.app_user WHERE login = @login
+              FROM dbo.app_user WHERE LOWER(login) = LOWER(@login)
             """, new { login = (login ?? "").Trim() }, cancellationToken: ct));
 
         /* Auch bei unbekanntem Benutzer wird gerechnet.

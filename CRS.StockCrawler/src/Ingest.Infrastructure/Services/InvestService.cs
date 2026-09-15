@@ -295,7 +295,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
         await using var conn = await factory.OpenAsync(ct);
 
         var assetId = await conn.ExecuteScalarAsync<int?>(new CommandDefinition(
-            "SELECT asset_id FROM dbo.asset WHERE symbol = @s",
+            "SELECT asset_id FROM dbo.asset WHERE UPPER(symbol) = UPPER(@s)",
             new { s = symbol.Trim() }, cancellationToken: ct));
 
         if (assetId is null) return null;
