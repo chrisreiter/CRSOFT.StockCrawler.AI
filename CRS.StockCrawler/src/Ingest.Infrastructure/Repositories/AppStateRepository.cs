@@ -1,5 +1,6 @@
 using Dapper;
 using Ingest.Core.Abstractions;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Repositories;
 
@@ -54,6 +55,7 @@ public interface IAppStateRepository
 public sealed class AppStateRepository : IAppStateRepository
 {
     private readonly ISqlConnectionFactory _factory;
+    private SqlDialekt d => _factory.Dialekt;
 
     public AppStateRepository(ISqlConnectionFactory factory) => _factory = factory;
 
@@ -61,12 +63,12 @@ public sealed class AppStateRepository : IAppStateRepository
     {
         await using var conn = await _factory.OpenAsync(ct);
 
-        await conn.ExecuteAsync(new CommandDefinition("""
-            MERGE dbo.app_session AS t
+        await conn.ExecuteAsync(new CommandDefinition($"""
+            MERGE INTO dbo.app_session AS t
             USING (SELECT @key AS session_key) AS s
               ON t.session_key = s.session_key
             WHEN MATCHED THEN
-              UPDATE SET last_seen_utc = SYSUTCDATETIME()
+              UPDATE SET last_seen_utc = {d.Jetzt}
             WHEN NOT MATCHED THEN
               INSERT (session_key) VALUES (s.session_key);
             """, new { key = sessionKey }, cancellationToken: ct));
@@ -116,12 +118,12 @@ public sealed class AppStateRepository : IAppStateRepository
     {
         await using var conn = await _factory.OpenAsync(ct);
 
-        await conn.ExecuteAsync(new CommandDefinition("""
-            MERGE dbo.app_state AS t
+        await conn.ExecuteAsync(new CommandDefinition($"""
+            MERGE INTO dbo.app_state AS t
             USING (SELECT @kind AS owner_kind, @key AS owner_key, @area AS area) AS s
               ON t.owner_kind = s.owner_kind AND t.owner_key = s.owner_key AND t.area = s.area
             WHEN MATCHED THEN
-              UPDATE SET payload = @payload, updated_utc = SYSUTCDATETIME()
+              UPDATE SET payload = @payload, updated_utc = {d.Jetzt}
             WHEN NOT MATCHED THEN
               INSERT (owner_kind, owner_key, area, payload)
               VALUES (s.owner_kind, s.owner_key, s.area, @payload);

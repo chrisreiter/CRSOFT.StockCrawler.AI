@@ -61,8 +61,9 @@ public abstract class SqlDialekt
     public abstract string PlusStunden(string n, string basis);
     public abstract string PlusMinuten(string n, string basis);
 
-    /// <summary>Ganze Tage zwischen zwei Zeitpunkten (<c>bis − von</c>).</summary>
+    /// <summary>Ganze Tage bzw. Sekunden zwischen zwei Zeitpunkten (<c>bis − von</c>).</summary>
     public abstract string TageZwischen(string von, string bis);
+    public abstract string SekundenZwischen(string von, string bis);
 
     /// <summary>Natürlicher Logarithmus. In SQL Server heisst er <c>LOG</c>,
     /// in Postgres <c>LN</c> — und <c>LOG</c> ist dort Basis 10.</summary>
@@ -74,6 +75,30 @@ public abstract class SqlDialekt
 
     /// <summary>Stichprobenstandardabweichung als Aggregat.</summary>
     public abstract string Stdabw(string x);
+
+    /// <summary>
+    /// Median je Gruppe. In SQL Server ist <c>PERCENTILE_CONT</c> eine
+    /// Fensterfunktion (<c>DISTINCT … OVER (PARTITION BY)</c>), in Postgres ein
+    /// geordnetes Aggregat (<c>GROUP BY</c>) — die Abfrage hat also eine andere
+    /// Form, nicht nur einen anderen Funktionsnamen. Deshalb liefert der
+    /// Dialekt Kopf und Schluss:
+    /// <code>
+    /// {d.MedianSelect("tag", "wert", "median")} FROM t WHERE … {d.MedianGroupBy("tag")}
+    /// </code>
+    /// Das Ergebnis hat je Gruppe genau eine Zeile mit den Spalten
+    /// <paramref name="gruppe"/> und <paramref name="alias"/>.
+    /// </summary>
+    public abstract string MedianSelect(string gruppe, string spalte, string alias);
+    public abstract string MedianGroupBy(string gruppe);
+
+    /// <summary>
+    /// SHA-256 eines Textes als Binärwert, passend zur berechneten Spalte
+    /// <c>origin_hash</c>. Die Bytes unterscheiden sich zwischen den Systemen
+    /// (SQL Server hasht UTF-16, Postgres UTF-8) — das ist unerheblich, weil der
+    /// Wert nur innerhalb einer Datenbank verglichen wird und dort beide Seiten
+    /// denselben Ausdruck benutzen.
+    /// </summary>
+    public abstract string Sha256Text(string x);
 
     /// <summary>
     /// Eingefügte oder geänderte Werte zurückgeben. SQL Server schreibt
@@ -99,6 +124,10 @@ public abstract class SqlDialekt
     public abstract string OuterApplyVor { get; }
     public abstract string OuterApplyNach { get; }
 
+    /// <summary><c>CROSS APPLY</c> bzw. <c>CROSS JOIN LATERAL</c> — ohne Nachsatz,
+    /// weil ein CROSS JOIN kein <c>ON</c> braucht.</summary>
+    public abstract string CrossApply { get; }
+
     /// <summary>
     /// Anhängsel an einen absteigenden Sortierschlüssel, damit <c>NULL</c> auf
     /// beiden Systemen zuunterst landet. SQL Server tut das ohnehin und kennt
@@ -110,6 +139,16 @@ public abstract class SqlDialekt
     /// und der Kopf der Anweisung, die sie anlegt.</summary>
     public abstract string Temp(string name);
     public abstract string CreateTemp(string name);
+
+    /// <summary>
+    /// <c>SELECT … INTO #x FROM …</c> gibt es in Postgres nicht; dort heisst es
+    /// <c>CREATE TEMP TABLE x AS SELECT … FROM …</c>. Wieder ein Paar:
+    /// <code>
+    /// {d.SelectIntoVor("x")}SELECT a, b {d.SelectIntoNach("x")} FROM dbo.t
+    /// </code>
+    /// </summary>
+    public abstract string SelectIntoVor(string name);
+    public abstract string SelectIntoNach(string name);
 
     /// <summary>
     /// Spaltentypen für Tabellen, die im Code angelegt werden (Stage-Tabellen).
@@ -156,10 +195,15 @@ public sealed class SqlServerDialekt : SqlDialekt
     public override string PlusStunden(string n, string basis) => $"DATEADD(hour, {n}, {basis})";
     public override string PlusMinuten(string n, string basis) => $"DATEADD(minute, {n}, {basis})";
     public override string TageZwischen(string von, string bis) => $"DATEDIFF(day, {von}, {bis})";
+    public override string SekundenZwischen(string von, string bis) => $"DATEDIFF(second, {von}, {bis})";
 
     public override string Ln(string x) => $"LOG({x})";
     public override string Runden(string x, string stellen) => $"ROUND({x}, {stellen})";
     public override string Stdabw(string x) => $"STDEV({x})";
+    public override string MedianSelect(string gruppe, string spalte, string alias)
+        => $"SELECT DISTINCT {gruppe}, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {spalte}) OVER (PARTITION BY {gruppe}) AS {alias}";
+    public override string MedianGroupBy(string gruppe) => "";
+    public override string Sha256Text(string x) => $"CONVERT(VARBINARY(32), HASHBYTES('SHA2_256', {x}))";
 
     public override string RueckgabeVor(string spalten)
         => "OUTPUT " + string.Join(", ", spalten.Split(',').Select(s => "INSERTED." + s.Trim()));
@@ -167,10 +211,13 @@ public sealed class SqlServerDialekt : SqlDialekt
 
     public override string OuterApplyVor  => "OUTER APPLY";
     public override string OuterApplyNach => "";
+    public override string CrossApply     => "CROSS APPLY";
     public override string NullsLast      => "";
 
     public override string Temp(string name)       => "#" + name;
     public override string CreateTemp(string name) => "CREATE TABLE #" + name;
+    public override string SelectIntoVor(string name)  => "";
+    public override string SelectIntoNach(string name) => "INTO #" + name;
 
     public override string TypZeit => "DATETIME2(0)";
     public override string TypBool => "BIT";
@@ -201,20 +248,28 @@ public sealed class PostgresDialekt : SqlDialekt
     public override string PlusStunden(string n, string basis) => $"({basis} + ({n}) * INTERVAL '1 hour')";
     public override string PlusMinuten(string n, string basis) => $"({basis} + ({n}) * INTERVAL '1 minute')";
     public override string TageZwischen(string von, string bis) => $"(CAST({bis} AS DATE) - CAST({von} AS DATE))";
+    public override string SekundenZwischen(string von, string bis) => $"EXTRACT(EPOCH FROM ({bis} - {von}))";
 
     public override string Ln(string x) => $"LN({x})";
     public override string Runden(string x, string stellen) => $"ROUND(CAST({x} AS NUMERIC), {stellen})";
     public override string Stdabw(string x) => $"STDDEV_SAMP({x})";
+    public override string MedianSelect(string gruppe, string spalte, string alias)
+        => $"SELECT {gruppe}, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {spalte}) AS {alias}";
+    public override string MedianGroupBy(string gruppe) => "GROUP BY " + gruppe;
+    public override string Sha256Text(string x) => $"sha256(convert_to({x}, 'UTF8'))";
 
     public override string RueckgabeVor(string spalten)  => "";
     public override string RueckgabeNach(string spalten) => "RETURNING " + spalten;
 
     public override string OuterApplyVor  => "LEFT JOIN LATERAL";
     public override string OuterApplyNach => "ON TRUE";
+    public override string CrossApply     => "CROSS JOIN LATERAL";
     public override string NullsLast      => "NULLS LAST";
 
     public override string Temp(string name)       => name;
     public override string CreateTemp(string name) => "CREATE TEMP TABLE " + name;
+    public override string SelectIntoVor(string name)  => "CREATE TEMP TABLE " + name + " AS ";
+    public override string SelectIntoNach(string name) => "";
 
     public override string TypZeit => "TIMESTAMP(0)";
     public override string TypBool => "BOOLEAN";
@@ -226,4 +281,19 @@ public sealed class PostgresDialekt : SqlDialekt
 
     public override bool IstDoppelterSchluessel(DbException ex)
         => ex is Npgsql.PostgresException p && p.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation;
+}
+
+public static class DialektErweiterungen
+{
+    private static readonly SqlServerDialekt SqlServer = new();
+    private static readonly PostgresDialekt Postgres = new();
+
+    /// <summary>Der Dialekt zu einer offenen Verbindung — für Methoden, die nur
+    /// die Verbindung bekommen und keine Fabrik.</summary>
+    public static SqlDialekt Dialekt(this DbConnection conn) => conn switch
+    {
+        Npgsql.NpgsqlConnection => Postgres,
+        Microsoft.Data.SqlClient.SqlConnection => SqlServer,
+        _ => throw new NotSupportedException($"Kein Dialekt für {conn.GetType().Name}."),
+    };
 }

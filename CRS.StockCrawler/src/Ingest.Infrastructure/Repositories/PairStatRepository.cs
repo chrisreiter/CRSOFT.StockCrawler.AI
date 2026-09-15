@@ -11,6 +11,7 @@ namespace Ingest.Infrastructure.Repositories;
 public sealed class PairStatRepository : IPairStatRepository
 {
     private readonly ISqlConnectionFactory _factory;
+    private SqlDialekt d => _factory.Dialekt;
 
     public PairStatRepository(ISqlConnectionFactory factory) => _factory = factory;
 
@@ -26,8 +27,8 @@ public sealed class PairStatRepository : IPairStatRepository
 
         await using var conn = await _factory.OpenAsync(ct);
 
-        await ExecAsync(conn, """
-            CREATE TABLE #pair_stage (
+        await ExecAsync(conn, $"""
+            {d.CreateTemp("pair_stage")} (
               asset_id_a INT, asset_id_b INT, interval_code VARCHAR(3), window_bars INT,
               corr0 FLOAT, best_lag_bars INT, best_lag_corr FLOAT, n_obs INT);
             """, ct);
@@ -48,24 +49,24 @@ public sealed class PairStatRepository : IPairStatRepository
 
         await BulkCopyAsync(conn, table, "#pair_stage", ct);
 
-        await ExecAsync(conn, """
-            MERGE dbo.pair_stat WITH (HOLDLOCK) AS t
+        await ExecAsync(conn, $"""
+            MERGE INTO dbo.pair_stat {d.MergeSperre} AS t
             USING (SELECT asset_id_a, asset_id_b, interval_code, window_bars,
                           corr0, best_lag_bars, best_lag_corr, n_obs
-                     FROM #pair_stage) AS s
+                     FROM {d.Temp("pair_stage")}) AS s
                ON t.asset_id_a = s.asset_id_a AND t.asset_id_b = s.asset_id_b
               AND t.interval_code = s.interval_code AND t.window_bars = s.window_bars
             WHEN MATCHED THEN UPDATE SET
                   corr0 = s.corr0, best_lag_bars = s.best_lag_bars,
                   best_lag_corr = s.best_lag_corr, n_obs = s.n_obs,
-                  computed_utc = SYSUTCDATETIME()
+                  computed_utc = {d.Jetzt}
             WHEN NOT MATCHED THEN
               INSERT (asset_id_a, asset_id_b, interval_code, window_bars,
                       corr0, best_lag_bars, best_lag_corr, n_obs)
               VALUES (s.asset_id_a, s.asset_id_b, s.interval_code, s.window_bars,
                       s.corr0, s.best_lag_bars, s.best_lag_corr, s.n_obs);
 
-            DROP TABLE #pair_stage;
+            DROP TABLE {d.Temp("pair_stage")};
             """, ct);
     }
 
@@ -76,10 +77,10 @@ public sealed class PairStatRepository : IPairStatRepository
 
         await using var conn = await _factory.OpenAsync(ct);
 
-        await ExecAsync(conn, """
-            CREATE TABLE #cross_stage (
-              asset_id_a INT, asset_id_b INT, interval_code VARCHAR(3), ts_utc DATETIME2(0),
-              direction TINYINT, spread_before FLOAT, spread_after FLOAT);
+        await ExecAsync(conn, $"""
+            {d.CreateTemp("cross_stage")} (
+              asset_id_a INT, asset_id_b INT, interval_code VARCHAR(3), ts_utc {d.TypZeit},
+              direction SMALLINT, spread_before FLOAT, spread_after FLOAT);
             """, ct);
 
         var table = new DataTable();
@@ -98,7 +99,7 @@ public sealed class PairStatRepository : IPairStatRepository
         await BulkCopyAsync(conn, table, "#cross_stage", ct);
 
         // Nur neue Kreuzungen einfügen; der eindeutige Index verträgt keine Dubletten.
-        await ExecAsync(conn, """
+        await ExecAsync(conn, $"""
             INSERT INTO dbo.crossing
               (asset_id_a, asset_id_b, interval_code, ts_utc, direction, spread_before, spread_after)
             SELECT s.asset_id_a, s.asset_id_b, s.interval_code, s.ts_utc,
@@ -106,14 +107,14 @@ public sealed class PairStatRepository : IPairStatRepository
               FROM (SELECT *, ROW_NUMBER() OVER (
                        PARTITION BY asset_id_a, asset_id_b, interval_code, ts_utc
                        ORDER BY ts_utc) AS rn
-                      FROM #cross_stage) s
+                      FROM {d.Temp("cross_stage")}) s
              WHERE s.rn = 1
                AND NOT EXISTS (
                      SELECT 1 FROM dbo.crossing c
                       WHERE c.asset_id_a = s.asset_id_a AND c.asset_id_b = s.asset_id_b
                         AND c.interval_code = s.interval_code AND c.ts_utc = s.ts_utc);
 
-            DROP TABLE #cross_stage;
+            DROP TABLE {d.Temp("cross_stage")};
             """, ct);
     }
 
@@ -149,7 +150,7 @@ public sealed class PairStatRepository : IPairStatRepository
            (A,B) mit A < B ab. Steht das gesuchte Papier auf Seite A, dreht sich
            die Vorlaufrichtung um, deshalb die zweite Hälfte der Union. */
         var rows = await conn.QueryAsync<PairStat>(new CommandDefinition($"""
-            SELECT TOP (@limit) * FROM (
+            SELECT * FROM (
               SELECT {PairColumns}
                 FROM dbo.pair_stat
                WHERE asset_id_b = @assetId AND interval_code = @intervalCode
@@ -162,7 +163,7 @@ public sealed class PairStatRepository : IPairStatRepository
                WHERE asset_id_a = @assetId AND interval_code = @intervalCode
                  AND best_lag_bars < 0
             ) x
-            ORDER BY ABS(x.BestLagCorr) DESC
+            ORDER BY ABS(x.BestLagCorr) DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
             """, new { assetId = assetIdB, intervalCode, limit },
             commandTimeout: 120, cancellationToken: ct));
 
@@ -174,15 +175,14 @@ public sealed class PairStatRepository : IPairStatRepository
     {
         await using var conn = await _factory.OpenAsync(ct);
 
-        var rows = await conn.QueryAsync<Crossing>(new CommandDefinition("""
-            SELECT TOP (@limit)
-                   crossing_id AS CrossingId, asset_id_a AS AssetIdA, asset_id_b AS AssetIdB,
+        var rows = await conn.QueryAsync<Crossing>(new CommandDefinition($"""
+            SELECT crossing_id AS CrossingId, asset_id_a AS AssetIdA, asset_id_b AS AssetIdB,
                    interval_code AS IntervalCode, ts_utc AS TsUtc,
-                   CAST(direction AS BIT) AS Upward,
+                   CAST(direction AS {d.TypBool}) AS Upward,
                    spread_before AS SpreadBefore, spread_after AS SpreadAfter
               FROM dbo.crossing
              WHERE interval_code = @intervalCode AND ts_utc >= @fromUtc
-             ORDER BY ts_utc DESC
+             ORDER BY ts_utc DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
             """, new { fromUtc, intervalCode, limit }, commandTimeout: 120, cancellationToken: ct));
 
         return rows.ToList();

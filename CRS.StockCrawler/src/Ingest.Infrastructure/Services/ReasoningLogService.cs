@@ -2,6 +2,7 @@ using System.Text.Json;
 using Dapper;
 using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.Logging;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -51,6 +52,7 @@ public interface IReasoningLogService
 public sealed class ReasoningLogService : IReasoningLogService
 {
     private readonly ISqlConnectionFactory _factory;
+    private SqlDialekt d => _factory.Dialekt;
     private readonly ILogger<ReasoningLogService> _log;
 
     public ReasoningLogService(ISqlConnectionFactory factory, ILogger<ReasoningLogService> log)
@@ -68,12 +70,11 @@ public sealed class ReasoningLogService : IReasoningLogService
             await using var conn = await _factory.OpenAsync(ct);
 
             return await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-                """
+                $"""
                 INSERT INTO dbo.reasoning_log
                     (frage, antwort, modell, endpunkt, sekunden, runden, werkzeuge, user_id)
-                OUTPUT INSERTED.log_id
-                VALUES (@frage, @antwort, @modell, @endpunkt, @sekunden, @runden,
-                        @werkzeuge, @userId)
+                {d.RueckgabeVor("log_id")} VALUES (@frage, @antwort, @modell, @endpunkt, @sekunden, @runden,
+                        @werkzeuge, @userId) {d.RueckgabeNach("log_id")}
                 """,
                 new
                 {
@@ -104,7 +105,7 @@ public sealed class ReasoningLogService : IReasoningLogService
            filtert, findet einen älteren Treffer nie — dieselbe Falle wie bei `LinksAsync`,
            wo der Agent daraufhin wahrheitswidrig meldete, es gebe keine Verknüpfungen. */
         var zeilen = await conn.QueryAsync<ReasoningEintrag>(new CommandDefinition(
-            """
+            $"""
             SELECT  l.log_id      AS LogId,
                     l.asked_utc   AS AskedUtc,
                     u.login       AS Wer,
@@ -119,11 +120,11 @@ public sealed class ReasoningLogService : IReasoningLogService
                     l.notiz       AS Notiz
               FROM  dbo.reasoning_log l
               LEFT  JOIN dbo.app_user u ON u.user_id = l.user_id
-             WHERE  (@nurGemerkte = 0 OR l.gemerkt = 1)
+             WHERE  (@nurGemerkte = 0 OR l.gemerkt = {d.Wahr})
                AND  (@suche IS NULL
-                     OR l.frage   LIKE '%' + @suche + '%'
-                     OR l.antwort LIKE '%' + @suche + '%'
-                     OR l.notiz   LIKE '%' + @suche + '%')
+                     OR l.frage   LIKE CONCAT('%', @suche, '%')
+                     OR l.antwort LIKE CONCAT('%', @suche, '%')
+                     OR l.notiz   LIKE CONCAT('%', @suche, '%'))
              ORDER  BY l.asked_utc DESC, l.log_id DESC
             OFFSET  @versatz ROWS FETCH NEXT @limit ROWS ONLY
             """,
@@ -192,10 +193,10 @@ public sealed class ReasoningLogService : IReasoningLogService
 
         /* Gemerkte Einträge überleben das Aufräumen — das ist der ganze Zweck des Häkchens. */
         return await conn.ExecuteAsync(new CommandDefinition(
-            """
+            $"""
             DELETE FROM dbo.reasoning_log
-             WHERE gemerkt = 0
-               AND asked_utc < DATEADD(day, -@tage, SYSUTCDATETIME())
+             WHERE gemerkt = {d.Falsch}
+               AND asked_utc < {d.PlusTage("-@tage", d.Jetzt)}
             """,
             new { tage = Math.Max(1, aelterAlsTage) }, cancellationToken: ct));
     }

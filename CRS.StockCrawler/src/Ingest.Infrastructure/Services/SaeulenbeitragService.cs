@@ -3,6 +3,7 @@ using Dapper;
 using Ingest.Core.Analysis;
 using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.Logging;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -91,6 +92,7 @@ public interface ISaeulenbeitragService
 public sealed class SaeulenbeitragService : ISaeulenbeitragService
 {
     private readonly ISqlConnectionFactory _factory;
+    private SqlDialekt d => _factory.Dialekt;
     private readonly ILogger<SaeulenbeitragService> _log;
 
     public SaeulenbeitragService(ISqlConnectionFactory factory,
@@ -160,22 +162,22 @@ public sealed class SaeulenbeitragService : ISaeulenbeitragService
         try
         {
             var aktiv = (await conn.QueryAsync<AktiverAusloeser>(new CommandDefinition(
-                """
-                CREATE TABLE #a (ausloeser NVARCHAR(100), richtung INT, asset_id INT,
-                                 asset_class TINYINT, ts_utc DATETIME2(0));
-                INSERT INTO #a EXEC dbo.get_active_triggers @tage = 3;
+                $"""
+                {d.CreateTemp("a")} (ausloeser {d.TypText(100)}, richtung INT, asset_id INT,
+                                 asset_class SMALLINT, ts_utc {d.TypZeit});
+                INSERT INTO {d.Temp("a")} {d.Aufruf("dbo.get_active_triggers", "tage")};
 
                 SELECT a.asset_id AS AssetId, a.ausloeser AS Ausloeser, a.richtung AS Richtung,
                        s.r1 - s.b1 AS Ueber1, s.r5 - s.b5 AS Ueber5, s.r20 - s.b20 AS Ueber20,
                        s.richtung1 AS Treffer1, s.richtung5 AS Treffer5, s.richtung20 AS Treffer20,
                        s.ereignisse AS Ereignisse
-                  FROM #a a
+                  FROM {d.Temp("a")} a
                   JOIN dbo.bot_trigger_stat s
                     ON s.ausloeser = a.ausloeser AND s.klasse = a.asset_class
                    AND s.run_id = (SELECT MAX(run_id) FROM dbo.bot_trigger_stat);
 
-                DROP TABLE #a;
-                """, cancellationToken: ct))).ToList();
+                DROP TABLE {d.Temp("a")};
+                """, new { tage = 3 }, cancellationToken: ct))).ToList();
 
             if (aktiv.Count == 0) return;
 
@@ -346,15 +348,14 @@ public sealed class SaeulenbeitragService : ISaeulenbeitragService
             /* Die Artikel der letzten drei Tage. Länger zurück lohnt nicht: Die
                Halbwertszeit von einem Tag drückt alles Ältere ohnehin unter ein Achtel. */
             var texte = (await conn.QueryAsync<Artikel>(new CommandDefinition(
-                """
-                SELECT TOP 20000
-                       c.content AS Text,
-                       ISNULL(c.occurred_utc, s.published_utc) AS AlsUtc
+                $"""
+                SELECT c.content AS Text,
+                       COALESCE(c.occurred_utc, s.published_utc) AS AlsUtc
                   FROM dbo.knowledge_chunk c
                   JOIN dbo.knowledge_source s ON s.source_id = c.source_id
                  WHERE s.pillar = 'semantic'
-                   AND ISNULL(c.occurred_utc, s.published_utc) >= DATEADD(day, -3, SYSUTCDATETIME())
-                 ORDER BY ISNULL(c.occurred_utc, s.published_utc) DESC
+                   AND COALESCE(c.occurred_utc, s.published_utc) >= {d.PlusTage("-3", d.Jetzt)}
+                 ORDER BY COALESCE(c.occurred_utc, s.published_utc) DESC OFFSET 0 ROWS FETCH NEXT 20000 ROWS ONLY
                 """, cancellationToken: ct))).ToList();
 
             if (texte.Count == 0) return;

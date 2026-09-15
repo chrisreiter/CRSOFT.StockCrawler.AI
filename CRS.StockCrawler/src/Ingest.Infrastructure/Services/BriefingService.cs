@@ -4,6 +4,7 @@ using Ingest.Core.Abstractions;
 using Ingest.Core.Enums;
 using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.Logging;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -58,6 +59,7 @@ public sealed class BriefingService(
     IDeepForecastService deep,
     ICurveDiscussionService curve) : IBriefingService
 {
+    private SqlDialekt d => factory.Dialekt;
     public async Task<Briefing> BuildAsync(
         IReadOnlyDictionary<string, int> pillarWeights,
         int[]? assetIds, CancellationToken ct = default)
@@ -250,11 +252,11 @@ public sealed class BriefingService(
         var neu = (await conn.QueryAsync<(string Title, string Origin, DateTime? Published, string? Region)>(
             new CommandDefinition(
                 """
-                SELECT TOP 8 title, origin, published_utc, region
+                SELECT title, origin, published_utc, region
                   FROM dbo.knowledge_source
                  WHERE pillar = 'semantic' AND kind = 'article'
                    AND published_utc IS NOT NULL
-                 ORDER BY published_utc DESC;
+                 ORDER BY published_utc DESC OFFSET 0 ROWS FETCH NEXT 8 ROWS ONLY;
                 """, cancellationToken: ct))).ToList();
 
         if (neu.Count == 0)
@@ -334,12 +336,12 @@ public sealed class BriefingService(
         CancellationToken ct)
     {
         var stumm = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-            """
+            $"""
             SELECT COUNT(*) FROM dbo.asset a
-             WHERE a.is_tracked = 1
+             WHERE a.is_tracked = {d.Wahr}
                AND (SELECT MAX(b.ts_utc) FROM dbo.price_bar b
                      WHERE b.asset_id = a.asset_id AND b.interval_code = '1d')
-                   < DATEADD(DAY, -30, SYSUTCDATETIME());
+                   < {d.PlusTage("-30", d.Jetzt)};
             """, cancellationToken: ct));
 
         if (stumm > 0)

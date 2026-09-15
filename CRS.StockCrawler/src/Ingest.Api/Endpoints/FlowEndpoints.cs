@@ -2,6 +2,7 @@ using Dapper;
 using Ingest.Core.Analysis;
 using Ingest.Core.Enums;
 using Ingest.Infrastructure.Repositories;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Api.Endpoints;
 
@@ -33,6 +34,7 @@ public static class FlowEndpoints
 
             var from = DateTime.UtcNow.AddMonths(-Math.Clamp(months, 1, 240));
             await using var conn = await factory.OpenAsync(ct);
+            var d = conn.Dialekt();
 
             var rows = (await conn.QueryAsync<(DateTime TsUtc, byte AssetClass, decimal Flow)>(
                 new CommandDefinition($"""
@@ -40,7 +42,7 @@ public static class FlowEndpoints
                       FROM dbo.price_bar p
                       JOIN dbo.asset a ON a.asset_id = p.asset_id
                      WHERE p.interval_code = @interval AND p.ts_utc >= @from
-                       AND a.is_tracked = 1 AND p.volume > 0
+                       AND a.is_tracked = {d.Wahr} AND p.volume > 0
                      GROUP BY p.ts_utc, a.asset_class
                      ORDER BY p.ts_utc
                     """, new { interval, from }, commandTimeout: 300, cancellationToken: ct))).ToList();
@@ -84,6 +86,7 @@ public static class FlowEndpoints
             var baseFrom = now.AddDays(-baselineDays);
 
             await using var conn = await factory.OpenAsync(ct);
+            var d = conn.Dialekt();
 
             var rows = (await conn.QueryAsync<FlowRow>(new CommandDefinition($"""
                 WITH f AS (
@@ -91,14 +94,14 @@ public static class FlowEndpoints
                     FROM dbo.price_bar p
                     JOIN dbo.asset a ON a.asset_id = p.asset_id
                    WHERE p.interval_code = @interval AND p.ts_utc >= @baseFrom
-                     AND a.is_tracked = 1 AND p.volume > 0
+                     AND a.is_tracked = {d.Wahr} AND p.volume > 0
                 ),
                 tot AS (
                   SELECT SUM(CASE WHEN ts_utc >= @recentFrom THEN flow ELSE 0 END) AS recent_total,
                          SUM(CASE WHEN ts_utc <  @recentFrom THEN flow ELSE 0 END) AS base_total
                     FROM f
                 )
-                SELECT a.asset_id AS AssetId, a.symbol AS Symbol, a.[name] AS Name,
+                SELECT a.asset_id AS AssetId, a.symbol AS Symbol, a."name" AS Name,
                        a.asset_class AS AssetClass,
                        SUM(CASE WHEN f.ts_utc >= @recentFrom THEN f.flow ELSE 0 END) AS RecentFlow,
                        SUM(CASE WHEN f.ts_utc <  @recentFrom THEN f.flow ELSE 0 END) AS BaseFlow,
@@ -107,7 +110,7 @@ public static class FlowEndpoints
                   FROM f
                   JOIN dbo.asset a ON a.asset_id = f.asset_id
                   CROSS JOIN tot t
-                 GROUP BY a.asset_id, a.symbol, a.[name], a.asset_class
+                 GROUP BY a.asset_id, a.symbol, a."name", a.asset_class
                 HAVING SUM(CASE WHEN f.ts_utc >= @recentFrom THEN f.flow ELSE 0 END) > 0
                 """, new { interval, baseFrom, recentFrom },
                 commandTimeout: 300, cancellationToken: ct))).ToList();

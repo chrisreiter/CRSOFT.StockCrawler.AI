@@ -3,12 +3,14 @@ using Dapper;
 using Ingest.Core.Abstractions;
 using Ingest.Core.Enums;
 using Ingest.Core.Models;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Repositories;
 
 public sealed class AssetRepository : IAssetRepository
 {
     private readonly ISqlConnectionFactory _factory;
+    private SqlDialekt d => _factory.Dialekt;
 
     public AssetRepository(ISqlConnectionFactory factory) => _factory = factory;
 
@@ -17,7 +19,9 @@ public sealed class AssetRepository : IAssetRepository
         await using var conn = await _factory.OpenAsync(ct);
 
         return await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-            "dbo.upsert_asset",
+            d.Aufruf("dbo.upsert_asset",
+                     "asset_class", "symbol", "provider", "provider_symbol", "name", "currency",
+                     "exchange", "market_cap", "market_cap_rank", "reference_price", "sector", "country"),
             new
             {
                 asset_class = (byte)asset.AssetClass,
@@ -33,7 +37,6 @@ public sealed class AssetRepository : IAssetRepository
                 sector = asset.Sector,
                 country = asset.Country
             },
-            commandType: CommandType.StoredProcedure,
             cancellationToken: ct));
     }
 
@@ -71,15 +74,15 @@ public sealed class AssetRepository : IAssetRepository
         await using var conn = await _factory.OpenAsync(ct);
 
         var sql = $"""
-            SELECT TOP (@limit) {SelectColumns}
+            SELECT {SelectColumns}
               FROM dbo.asset
              WHERE (@cls IS NULL OR asset_class = @cls)
                AND (@tracked IS NULL OR is_tracked = @tracked)
-               AND (@search IS NULL OR symbol LIKE @like OR [name] LIKE @like)
+               AND (@search IS NULL OR symbol LIKE @like OR "name" LIKE @like)
                AND (@sector IS NULL OR sector = @sector)
                AND (@country IS NULL OR country = @country)
              ORDER BY CASE WHEN market_cap_rank IS NULL THEN 1 ELSE 0 END,
-                      market_cap_rank, symbol
+                      market_cap_rank, symbol OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
             """;
 
         var rows = await conn.QueryAsync<Asset>(new CommandDefinition(sql, new
@@ -102,7 +105,7 @@ public sealed class AssetRepository : IAssetRepository
         var rows = await conn.QueryAsync<Asset>(new CommandDefinition(
             $"""
              SELECT {SelectColumns} FROM dbo.asset
-              WHERE is_tracked = 1
+              WHERE is_tracked = {d.Wahr}
               ORDER BY asset_class,
                        CASE WHEN market_cap_rank IS NULL THEN 1 ELSE 0 END,
                        market_cap_rank, symbol
@@ -124,7 +127,7 @@ public sealed class AssetRepository : IAssetRepository
         foreach (var chunk in SqlBatching.Chunks(ids))
         {
             affected += await conn.ExecuteAsync(new CommandDefinition(
-                "UPDATE dbo.asset SET is_tracked = @tracked, updated_utc = SYSUTCDATETIME() "
+                $"UPDATE dbo.asset SET is_tracked = @tracked, updated_utc = {d.Jetzt} "
                 + "WHERE asset_id IN @ids",
                 new { tracked, ids = chunk }, cancellationToken: ct));
         }
@@ -138,7 +141,7 @@ public sealed class AssetRepository : IAssetRepository
 
         // Nur die Top-N dieser Klasse aktivieren; bereits getrackte Werte
         // anderer Klassen bleiben unberührt.
-        return await conn.ExecuteAsync(new CommandDefinition("""
+        return await conn.ExecuteAsync(new CommandDefinition($"""
             WITH ranked AS (
               SELECT asset_id,
                      ROW_NUMBER() OVER (ORDER BY
@@ -148,10 +151,10 @@ public sealed class AssetRepository : IAssetRepository
                 FROM dbo.asset
                WHERE asset_class = @cls
             )
-            UPDATE a SET is_tracked = 1, updated_utc = SYSUTCDATETIME()
+            UPDATE a SET is_tracked = {d.Wahr}, updated_utc = {d.Jetzt}
               FROM dbo.asset a
               JOIN ranked r ON r.asset_id = a.asset_id
-             WHERE r.rn <= @limit AND a.is_tracked = 0
+             WHERE r.rn <= @limit AND a.is_tracked = {d.Falsch}
             """, new { cls = (byte)cls, limit }, cancellationToken: ct));
     }
 }

@@ -65,6 +65,7 @@ public sealed class CurveDiscussionService(
     IAssetRepository assets,
     ILogger<CurveDiscussionService> log) : ICurveDiscussionService
 {
+    private SqlDialekt d => factory.Dialekt;
     public async Task<CurveRunResult> RunAsync(
         string intervalCode, CurveDiscussion.Options opt,
         int[]? assetIds, DateTime? fromUtc, DateTime? toUtc,
@@ -75,13 +76,12 @@ public sealed class CurveDiscussionService(
         await using var conn = await factory.OpenAsync(ct);
 
         var runId = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-            """
+            $"""
             INSERT INTO dbo.curve_run
                 (interval_code, from_utc, to_utc, half_window, causal,
                  ref_window, min_z, refractory, min_severity)
-            OUTPUT INSERTED.run_id
-            VALUES (@interval, @from, @to, @half, @causal,
-                    @ref, @minZ, @refr, @minSev);
+            {d.RueckgabeVor("run_id")} VALUES (@interval, @from, @to, @half, @causal,
+                    @ref, @minZ, @refr, @minSev) {d.RueckgabeNach("run_id")};
             """,
             new
             {
@@ -202,9 +202,9 @@ public sealed class CurveDiscussionService(
                  + $"{(opt.Causal ? "kausal" : "zentriert")} geglättet";
 
         await conn.ExecuteAsync(new CommandDefinition(
-            """
+            $"""
             UPDATE dbo.curve_run
-               SET finished_utc = SYSUTCDATETIME(),
+               SET finished_utc = {d.Jetzt},
                    assets = @a, events = @e, note = @n
              WHERE run_id = @id;
             """,
@@ -301,9 +301,9 @@ public sealed class CurveDiscussionService(
         await using var conn = await factory.OpenAsync(ct);
 
         return await conn.ExecuteScalarAsync<int?>(new CommandDefinition(
-            """
+            $"""
             SELECT MAX(run_id) FROM dbo.curve_run
-             WHERE causal = 1 AND finished_utc IS NOT NULL;
+             WHERE causal = {d.Wahr} AND finished_utc IS NOT NULL;
             """, cancellationToken: ct));
     }
 
@@ -313,11 +313,11 @@ public sealed class CurveDiscussionService(
 
         return (await conn.QueryAsync(new CommandDefinition(
             """
-            SELECT TOP 40 run_id, started_utc, finished_utc, interval_code,
+            SELECT run_id, started_utc, finished_utc, interval_code,
                    half_window, causal, ref_window, min_z, refractory,
                    min_severity, assets, events, note
               FROM dbo.curve_run
-             ORDER BY run_id DESC;
+             ORDER BY run_id DESC OFFSET 0 ROWS FETCH NEXT 40 ROWS ONLY;
             """, cancellationToken: ct))).ToList();
     }
 
@@ -338,8 +338,7 @@ public sealed class CurveDiscussionService(
 
         return (await conn.QueryAsync(new CommandDefinition(
             """
-            SELECT TOP (@limit)
-                   l.lift, l.pairs, l.expected, l.median_lag_bars, l.lead_share,
+            SELECT l.lift, l.pairs, l.expected, l.median_lag_bars, l.lead_share,
                    l.mean_severity, l.type_a, l.type_b,
                    a.symbol AS symbol_a, b.symbol AS symbol_b,
                    l.asset_a, l.asset_b
@@ -348,7 +347,7 @@ public sealed class CurveDiscussionService(
               JOIN dbo.asset b ON b.asset_id = l.asset_b
              WHERE l.run_id = @id
                AND (@assetId IS NULL OR l.asset_a = @assetId OR l.asset_b = @assetId)
-             ORDER BY l.lift DESC;
+             ORDER BY l.lift DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY;
             """, new { id, limit = Math.Clamp(limit, 10, 500), assetId },
             cancellationToken: ct))).ToList();
     }

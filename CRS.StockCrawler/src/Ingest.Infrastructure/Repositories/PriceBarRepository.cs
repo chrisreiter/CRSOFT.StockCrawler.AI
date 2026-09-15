@@ -1,5 +1,6 @@
 using System.Data;
 using Dapper;
+using Ingest.Infrastructure.Datenbank;
 using Ingest.Core.Abstractions;
 using Ingest.Core.Enums;
 using Ingest.Core.Models;
@@ -9,6 +10,7 @@ namespace Ingest.Infrastructure.Repositories;
 public sealed class PriceBarRepository : IPriceBarRepository
 {
     private readonly ISqlConnectionFactory _factory;
+    private SqlDialekt d => _factory.Dialekt;
 
     /// <summary>
     /// Obergrenze je MERGE-Aufruf. Größere Blöcke sprengen die Grenze für
@@ -26,7 +28,18 @@ public sealed class PriceBarRepository : IPriceBarRepository
         await using var conn = await _factory.OpenAsync(ct);
         var total = 0;
 
-        // Dubletten müssen vorher raus: der TVP hat ts_utc als Primärschlüssel.
+        /*  Frueher lief das ueber einen Tabellenwertparameter (dbo.PriceBarList)
+            und die Prozedur upsert_price_bars. Beides kennt nur SQL Server; die
+            Stage-Tabelle plus MERGE hier im Code kennen beide Systeme, und die
+            Logik steht dort, wo man sie sucht.                                */
+        await conn.ExecuteAsync(new CommandDefinition($"""
+            {d.CreateTemp("bars")} (
+              ts_utc {d.TypZeit} NOT NULL PRIMARY KEY,
+              "open" DECIMAL(19,8) NULL, "high" DECIMAL(19,8) NULL, "low" DECIMAL(19,8) NULL,
+              "close" DECIMAL(19,8) NOT NULL, adj_close DECIMAL(19,8) NULL, volume DECIMAL(38,8) NULL);
+            """, cancellationToken: ct));
+
+        // Dubletten müssen vorher raus: die Stage-Tabelle hat ts_utc als Primärschlüssel.
         var distinct = bars
             .GroupBy(b => b.TsUtc)
             .Select(g => g.Last())
@@ -58,18 +71,33 @@ public sealed class PriceBarRepository : IPriceBarRepository
                     (object?)b.Volume ?? DBNull.Value);
             }
 
-            var p = new DynamicParameters();
-            p.Add("@asset_id", assetId);
-            p.Add("@interval_code", intervalCode);
-            p.Add("@provider", (byte)provider);
-            p.Add("@bars", table.AsTableValuedParameter("dbo.PriceBarList"));
+            await conn.ExecuteAsync(new CommandDefinition(
+                $"""DELETE FROM {d.Temp("bars")}""", cancellationToken: ct));
+            await Massenkopie.SchreibeAsync(conn, table, d.Temp("bars"), 120, ct);
 
-            total += await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-                "dbo.upsert_price_bars", p,
-                commandType: CommandType.StoredProcedure,
-                commandTimeout: 120,
-                cancellationToken: ct));
+            total += await conn.ExecuteAsync(new CommandDefinition($"""
+                MERGE INTO dbo.price_bar {d.MergeSperre} AS t
+                USING (SELECT @asset_id AS asset_id, @interval_code AS interval_code, b.*
+                         FROM {d.Temp("bars")} b) AS s
+                   ON t.asset_id = s.asset_id
+                  AND t.interval_code = s.interval_code
+                  AND t.ts_utc = s.ts_utc
+                WHEN MATCHED THEN UPDATE SET
+                      "open" = s."open", "high" = s."high", "low" = s."low",
+                      "close" = s."close", adj_close = s.adj_close, volume = s.volume,
+                      provider = @provider, ingested_at_utc = {d.Jetzt}
+                WHEN NOT MATCHED THEN
+                  INSERT (asset_id, interval_code, ts_utc, "open", "high", "low",
+                          "close", adj_close, volume, provider)
+                  VALUES (s.asset_id, s.interval_code, s.ts_utc, s."open", s."high", s."low",
+                          s."close", s.adj_close, s.volume, @provider);
+                """,
+                new { asset_id = assetId, interval_code = intervalCode, provider = (short)provider },
+                commandTimeout: 120, cancellationToken: ct));
         }
+
+        await conn.ExecuteAsync(new CommandDefinition(
+            $"""DROP TABLE {d.Temp("bars")}""", cancellationToken: ct));
 
         return total;
     }
@@ -125,7 +153,7 @@ public sealed class PriceBarRepository : IPriceBarRepository
             var part = await conn.QueryAsync<(int AssetId, DateTime TsUtc, decimal? Open, decimal? High,
                                               decimal? Low, decimal Close, decimal? AdjClose, decimal? Volume)>(
                 new CommandDefinition("""
-                    SELECT asset_id, ts_utc, [open], [high], [low], [close], adj_close, volume
+                    SELECT asset_id, ts_utc, "open", "high", "low", "close", adj_close, volume
                       FROM dbo.price_bar
                      WHERE asset_id IN @ids AND interval_code = @intervalCode
                        AND ts_utc >= @fromUtc AND ts_utc <= @toUtc
@@ -161,10 +189,10 @@ public sealed class PriceBarRepository : IPriceBarRepository
 
         var row = await conn.QuerySingleOrDefaultAsync<(DateTime TsUtc, decimal Close)?>(
             new CommandDefinition("""
-            SELECT TOP 1 ts_utc, [close]
+            SELECT ts_utc, "close"
               FROM dbo.price_bar
              WHERE asset_id = @assetId AND interval_code = @intervalCode AND ts_utc <= @tsUtc
-             ORDER BY ts_utc DESC
+             ORDER BY ts_utc DESC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
             """, new { assetId, intervalCode, tsUtc }, cancellationToken: ct));
 
         return row;
@@ -176,10 +204,10 @@ public sealed class PriceBarRepository : IPriceBarRepository
         await using var conn = await _factory.OpenAsync(ct);
 
         return await conn.ExecuteScalarAsync<decimal?>(new CommandDefinition("""
-            SELECT TOP 1 [close]
+            SELECT "close"
               FROM dbo.price_bar
              WHERE asset_id = @assetId AND interval_code = @intervalCode AND ts_utc <= @tsUtc
-             ORDER BY ts_utc DESC
+             ORDER BY ts_utc DESC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
             """, new { assetId, intervalCode, tsUtc }, cancellationToken: ct));
     }
 }

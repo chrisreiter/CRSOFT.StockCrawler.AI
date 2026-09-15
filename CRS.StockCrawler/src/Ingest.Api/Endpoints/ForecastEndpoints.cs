@@ -5,6 +5,7 @@ using Dapper;
 using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.Options;
 using Ingest.Infrastructure.Options;
+using Ingest.Infrastructure.Datenbank;
 namespace Ingest.Api.Endpoints;
 
 public static class ForecastEndpoints
@@ -36,14 +37,15 @@ public static class ForecastEndpoints
                                   CancellationToken ct) =>
         {
             await using var conn = await factory.OpenAsync(ct);
+            var d = conn.Dialekt();
 
             var (bar, gestellt, zeilen) = await conn.QuerySingleAsync<(DateTime?, DateTime?, int)>(
                 new CommandDefinition(
-                    """
+                    $"""
                     SELECT (SELECT MAX(b.ts_utc)
                               FROM dbo.price_bar b
                               JOIN dbo.asset a ON a.asset_id = b.asset_id
-                             WHERE a.is_tracked = 1),
+                             WHERE a.is_tracked = {d.Wahr}),
                            (SELECT MAX(made_at_utc) FROM dbo.forecast),
                            (SELECT COUNT(*) FROM dbo.forecast
                              WHERE made_at_utc = (SELECT MAX(made_at_utc) FROM dbo.forecast))
@@ -74,14 +76,15 @@ public static class ForecastEndpoints
             if (nurWennVeraltet)
             {
                 await using var conn = await factory.OpenAsync(ct);
+                var d = conn.Dialekt();
 
                 var (bar, gestellt) = await conn.QuerySingleAsync<(DateTime?, DateTime?)>(
                     new CommandDefinition(
-                        """
+                        $"""
                         SELECT (SELECT MAX(b.ts_utc)
                                   FROM dbo.price_bar b
                                   JOIN dbo.asset a ON a.asset_id = b.asset_id
-                                 WHERE a.is_tracked = 1),
+                                 WHERE a.is_tracked = {d.Wahr}),
                                (SELECT MAX(made_at_utc) FROM dbo.forecast)
                         """, cancellationToken: ct));
 

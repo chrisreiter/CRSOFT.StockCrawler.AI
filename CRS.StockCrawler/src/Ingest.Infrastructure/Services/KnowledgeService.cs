@@ -6,6 +6,7 @@ using Dapper;
 using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.Logging;
 using UglyToad.PdfPig;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -98,6 +99,7 @@ public sealed class KnowledgeService(
     ILogger<KnowledgeService> log,
     IOllamaEndpointService? endpunkte = null) : IKnowledgeService
 {
+    private SqlDialekt d => factory.Dialekt;
     /// <summary>Wohin die Vektoren gehen. Je Säule eine eigene Sammlung.</summary>
     private static string Collection(string pillar) =>
         pillar == "semantic" ? "crs_semantik" : "crs_wissen";
@@ -115,7 +117,7 @@ public sealed class KnowledgeService(
         await using var conn = await factory.OpenAsync(ct);
 
         return (await conn.QueryAsync<KnowledgeSource>(new CommandDefinition(
-            """
+            $"""
             /* Artikel erscheinen NICHT als eigene Zeilen im Raster.
 
                Bei zwanzig Feeds und stündlichem Lauf wären das nach einer
@@ -129,10 +131,10 @@ public sealed class KnowledgeService(
                    s.poll_minutes AS PollMinutes, s.chunks AS Chunks, s.status AS Status,
                    s.parent_source_id AS ParentSourceId, s.published_utc AS PublishedUtc,
                    s.region AS Region,
-                   ISNULL(a.n, 0) AS Articles
+                   COALESCE(a.n, 0) AS Articles
               FROM dbo.knowledge_source s
-              OUTER APPLY (SELECT COUNT(*) n FROM dbo.knowledge_source k
-                            WHERE k.parent_source_id = s.source_id) a
+              {d.OuterApplyVor} (SELECT COUNT(*) n FROM dbo.knowledge_source k
+                            WHERE k.parent_source_id = s.source_id) a {d.OuterApplyNach}
              WHERE s.pillar = @pillar AND s.parent_source_id IS NULL
              ORDER BY s.added_utc DESC;
             """, new { pillar }, cancellationToken: ct))).ToList();
@@ -160,11 +162,10 @@ public sealed class KnowledgeService(
         await using var conn = await factory.OpenAsync(ct);
 
         var id = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-            """
+            $"""
             INSERT INTO dbo.knowledge_source
                 (kind, pillar, title, origin, content_type, bytes, status)
-            OUTPUT INSERTED.source_id
-            VALUES ('file', @pillar, @title, @origin, @ct, @bytes, 'aufgenommen, noch nicht eingebettet');
+            {d.RueckgabeVor("source_id")} VALUES ('file', @pillar, @title, @origin, @ct, @bytes, 'aufgenommen, noch nicht eingebettet') {d.RueckgabeNach("source_id")};
             """,
             new { pillar, title = Path.GetFileNameWithoutExtension(fileName), origin = ziel, ct = contentType, bytes },
             cancellationToken: ct));
@@ -206,11 +207,10 @@ public sealed class KnowledgeService(
         try
         {
             id = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-                """
+                $"""
                 INSERT INTO dbo.knowledge_source
                     (kind, pillar, title, origin, poll_minutes, status)
-                OUTPUT INSERTED.source_id
-                VALUES ('web', @pillar, @title, @origin, @poll, 'eingetragen, noch nicht abgerufen');
+                {d.RueckgabeVor("source_id")} VALUES ('web', @pillar, @title, @origin, @poll, 'eingetragen, noch nicht abgerufen') {d.RueckgabeNach("source_id")};
                 """,
                 new
                 {
@@ -303,7 +303,7 @@ public sealed class KnowledgeService(
         if (!force && alt == hash && src.Chunks > 0)
         {
             await conn.ExecuteAsync(new CommandDefinition(
-                "UPDATE dbo.knowledge_source SET last_checked_utc = SYSUTCDATETIME() WHERE source_id = @id;",
+                $"UPDATE dbo.knowledge_source SET last_checked_utc = {d.Jetzt} WHERE source_id = @id;",
                 new { id = sourceId }, cancellationToken: ct));
 
             return (src.Chunks, "unverändert seit dem letzten Durchgang");
@@ -333,13 +333,13 @@ public sealed class KnowledgeService(
            Die halbe Stunde Verfallszeit ist da, damit ein abgestürzter Lauf die
            Quelle nicht dauerhaft blockiert. */
         var sperre = await conn.ExecuteAsync(new CommandDefinition(
-            """
+            $"""
             UPDATE dbo.knowledge_source
-               SET status = 'wird eingebettet', last_checked_utc = SYSUTCDATETIME()
+               SET status = 'wird eingebettet', last_checked_utc = {d.Jetzt}
              WHERE source_id = @id
                AND (status <> 'wird eingebettet'
                     OR last_checked_utc IS NULL
-                    OR last_checked_utc < DATEADD(MINUTE, -30, SYSUTCDATETIME()));
+                    OR last_checked_utc < {d.PlusMinuten("-30", d.Jetzt)});
             """, new { id = sourceId }, cancellationToken: ct));
 
         if (sperre == 0)
@@ -475,15 +475,15 @@ public sealed class KnowledgeService(
                     abgeloest.Add(alteId);
 
                 await conn.ExecuteAsync(new CommandDefinition(
-                    """
-                    MERGE dbo.knowledge_chunk AS z
+                    $"""
+                    MERGE INTO dbo.knowledge_chunk AS z
                     USING (SELECT @src AS source_id, @ord AS ordinal) AS q
                        ON z.source_id = q.source_id AND z.ordinal = q.ordinal
                     WHEN MATCHED THEN UPDATE SET
                         page_from = @pf, page_to = @pt, content = @content,
                         tokens = @tok, occurred_utc = @occ,
                         char_from = @cf, char_to = @cto, anchor = @anker,
-                        embedded_utc = SYSUTCDATETIME(),
+                        embedded_utc = {d.Jetzt},
                         vector_id = @vid, chunk_hash = @hash
                     WHEN NOT MATCHED THEN INSERT
                         (source_id, ordinal, page_from, page_to, content, tokens,
@@ -491,7 +491,7 @@ public sealed class KnowledgeService(
                          embedded_utc, vector_id, chunk_hash)
                         VALUES (@src, @ord, @pf, @pt, @content, @tok, @occ,
                                 @cf, @cto, @anker,
-                                SYSUTCDATETIME(), @vid, @hash);
+                                {d.Jetzt}, @vid, @hash);
                     """,
                     new
                     {
@@ -563,10 +563,10 @@ public sealed class KnowledgeService(
             src.Title, geschrieben, unveraendert, ueberhang.Count);
 
         await conn.ExecuteAsync(new CommandDefinition(
-            """
+            $"""
             UPDATE dbo.knowledge_source
-               SET chunks = @n, indexed_utc = SYSUTCDATETIME(),
-                   last_checked_utc = SYSUTCDATETIME(),
+               SET chunks = @n, indexed_utc = {d.Jetzt},
+                   last_checked_utc = {d.Jetzt},
                    content_hash = @hash, status = @s
              WHERE source_id = @id;
             """,
@@ -593,12 +593,12 @@ public sealed class KnowledgeService(
            fünf Minuten abzurufen ist gegenüber der Gegenstelle unhöflich und
            bringt nichts. */
         var faellig = (await conn.QueryAsync<int>(new CommandDefinition(
-            """
+            $"""
             SELECT source_id
               FROM dbo.knowledge_source
-             WHERE pillar = @pillar AND kind = 'web' AND active = 1
+             WHERE pillar = @pillar AND kind = 'web' AND active = {d.Wahr}
                AND (last_checked_utc IS NULL
-                    OR DATEADD(MINUTE, ISNULL(poll_minutes, 240), last_checked_utc) <= SYSUTCDATETIME());
+                    OR {d.PlusMinuten("COALESCE(poll_minutes, 240)", "last_checked_utc")} <= {d.Jetzt});
             """, new { pillar }, cancellationToken: ct))).ToList();
 
         var n = 0;
@@ -640,14 +640,14 @@ public sealed class KnowledgeService(
            bringt nichts. */
         var faellig = (await conn.QueryAsync<(int SourceId, string Origin, string Title, string? Region)>(
             new CommandDefinition(
-                """
+                $"""
                 SELECT source_id, origin, title, region
                   FROM dbo.knowledge_source
-                 WHERE pillar = @pillar AND kind = 'feed' AND active = 1
+                 WHERE pillar = @pillar AND kind = 'feed' AND active = {d.Wahr}
                    AND parent_source_id IS NULL
                    AND (last_checked_utc IS NULL
-                        OR DATEADD(MINUTE, ISNULL(poll_minutes, 120), last_checked_utc)
-                           <= SYSUTCDATETIME());
+                        OR {d.PlusMinuten("COALESCE(poll_minutes, 120)", "last_checked_utc")}
+                           <= {d.Jetzt});
                 """, new { pillar }, cancellationToken: ct))).ToList();
 
         var http = httpFactory.CreateClient("browser");
@@ -725,18 +725,16 @@ public sealed class KnowledgeService(
                 try
                 {
                     var id = await conn.ExecuteScalarAsync<int?>(new CommandDefinition(
-                        """
+                        $"""
                         INSERT INTO dbo.knowledge_source
                             (kind, pillar, title, origin, parent_source_id,
                              published_utc, region, status)
-                        OUTPUT INSERTED.source_id
-                        SELECT 'article', @pillar, @title, @origin, @parent,
+                        {d.RueckgabeVor("source_id")} SELECT 'article', @pillar, @title, @origin, @parent,
                                @published, @region, 'neu, noch nicht eingebettet'
                          WHERE NOT EXISTS (
                              SELECT 1 FROM dbo.knowledge_source
                               WHERE pillar = @pillar
-                                AND origin_hash = CONVERT(VARBINARY(32),
-                                        HASHBYTES('SHA2_256', @origin)));
+                                AND origin_hash = {d.Sha256Text("@origin")}) {d.RueckgabeNach("source_id")};
                         """,
                         new
                         {
@@ -790,9 +788,9 @@ public sealed class KnowledgeService(
             }
 
             await conn.ExecuteAsync(new CommandDefinition(
-                """
+                $"""
                 UPDATE dbo.knowledge_source
-                   SET last_checked_utc = SYSUTCDATETIME(), status = @s
+                   SET last_checked_utc = {d.Jetzt}, status = @s
                  WHERE source_id = @id;
                 """,
                 new
@@ -852,17 +850,15 @@ public sealed class KnowledgeService(
             try
             {
                 var id = await conn.ExecuteScalarAsync<int?>(new CommandDefinition(
-                    """
+                    $"""
                     INSERT INTO dbo.knowledge_source
                         (kind, pillar, title, origin, poll_minutes, region, status)
-                    OUTPUT INSERTED.source_id
-                    SELECT @kind, @pillar, @title, @origin, @poll, @region,
+                    {d.RueckgabeVor("source_id")} SELECT @kind, @pillar, @title, @origin, @poll, @region,
                            'eingetragen, noch nicht abgerufen'
                      WHERE NOT EXISTS (
                          SELECT 1 FROM dbo.knowledge_source
                           WHERE pillar = @pillar
-                            AND origin_hash = CONVERT(VARBINARY(32),
-                                    HASHBYTES('SHA2_256', @origin)));
+                            AND origin_hash = {d.Sha256Text("@origin")}) {d.RueckgabeNach("source_id")};
                     """,
                     new { kind, pillar, title = titel, origin = url, poll = abstand, region },
                     cancellationToken: ct));
@@ -909,7 +905,7 @@ public sealed class KnowledgeService(
                    c.ordinal AS Ordinal,
                    c.page_from AS PageFrom, c.page_to AS PageTo,
                    c.char_from AS CharFrom, c.char_to AS CharTo, c.anchor AS Anchor,
-                   ISNULL(c.occurred_utc, s.published_utc) AS OccurredUtc,
+                   COALESCE(c.occurred_utc, s.published_utc) AS OccurredUtc,
                    c.content AS Content
               FROM dbo.knowledge_chunk c
               JOIN dbo.knowledge_source s ON s.source_id = c.source_id
@@ -1105,9 +1101,9 @@ public sealed class KnowledgeService(
         await using var conn = await factory.OpenAsync(ct);
 
         await conn.ExecuteAsync(new CommandDefinition(
-            """
+            $"""
             UPDATE dbo.knowledge_source
-               SET status = @s, last_checked_utc = SYSUTCDATETIME()
+               SET status = @s, last_checked_utc = {d.Jetzt}
              WHERE source_id = @id;
             """, new { s = status, id }, cancellationToken: ct));
     }

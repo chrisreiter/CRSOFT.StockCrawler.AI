@@ -6,6 +6,7 @@ using Ingest.Infrastructure.Services;
 using Microsoft.Extensions.Options;
 
 using Dapper;
+using Ingest.Infrastructure.Datenbank;
 using Ingest.Infrastructure.Repositories;
 namespace Ingest.Api.Scheduling;
 
@@ -209,8 +210,9 @@ public sealed class CronScheduler : BackgroundService
                Werte dauert gemessen 42 Sekunden. Sondern weil ein Fünfjahresmedian
                sich in einem Tag kaum bewegt: Ein täglich neu gewürfelter Verdienst
                liesse die Prognose schwanken, ohne dass sich etwas geändert hätte. */
+            var d = conn.Dialekt();
             var alter = await conn.ExecuteScalarAsync<int?>(new CommandDefinition(
-                "SELECT DATEDIFF(day, MAX(von_utc), SYSUTCDATETIME()) FROM dbo.bot_trigger_run",
+                $"SELECT {d.TageZwischen("MAX(von_utc)", d.Jetzt)} FROM dbo.bot_trigger_run",
                 cancellationToken: ct));
 
             if (alter is null || alter >= 7)
@@ -219,8 +221,7 @@ public sealed class CronScheduler : BackgroundService
                                   + "{Alter} Tage her)", alter);
 
                 await conn.ExecuteAsync(new CommandDefinition(
-                    "dbo.run_bot_trigger_test", new { jahre = 5 },
-                    commandType: System.Data.CommandType.StoredProcedure,
+                    d.Aufruf("dbo.run_bot_trigger_test", "jahre"), new { jahre = 5 },
                     commandTimeout: 3600, cancellationToken: ct));
 
                 _log.LogInformation("Bot-Muster neu gemessen");

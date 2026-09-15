@@ -5,6 +5,7 @@ using Ingest.Core.Analysis;
 using Ingest.Core.Enums;
 using Ingest.Core.Models;
 using Ingest.Infrastructure.Repositories;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -36,6 +37,7 @@ public sealed class DayTradingService(
     ISqlConnectionFactory factory,
     IKnowledgeService knowledge) : IDayTradingService
 {
+    private SqlDialekt d => factory.Dialekt;
     public async Task<TagesHandel> BuildAsync(int stunden, CancellationToken ct = default)
     {
         stunden = Math.Clamp(stunden, 24, 24 * 90);
@@ -171,38 +173,39 @@ public sealed class DayTradingService(
     private static async Task<List<Beweglichkeit>> BeweglichkeitAsync(
         System.Data.Common.DbConnection conn, int stunden, Handelskosten k, CancellationToken ct)
     {
-        var rows = await conn.QueryAsync<BeweglichkeitZeile>(new CommandDefinition("""
-            SET NOCOUNT ON;
+        var d = conn.Dialekt();
+        var rows = await conn.QueryAsync<BeweglichkeitZeile>(new CommandDefinition($"""
 
             /* Betragsbewegung je Stundenbar, nur auf verfolgten Werten. */
             WITH r AS (
               SELECT a.asset_class,
                      p.asset_id,
-                     ABS(LOG(CAST(p.[close] AS FLOAT) /
-                         LAG(CAST(p.[close] AS FLOAT))
-                             OVER (PARTITION BY p.asset_id ORDER BY p.ts_utc))) AS bew
+                     ABS({d.Ln("CAST(p.\"close\" AS FLOAT) / LAG(CAST(p.\"close\" AS FLOAT)) OVER (PARTITION BY p.asset_id ORDER BY p.ts_utc)")}) AS bew
                 FROM dbo.price_bar p
-                JOIN dbo.asset a ON a.asset_id = p.asset_id AND a.is_tracked = 1
+                JOIN dbo.asset a ON a.asset_id = p.asset_id AND a.is_tracked = {d.Wahr}
                WHERE p.interval_code = '1h'
-                 AND p.ts_utc >= DATEADD(HOUR, -@stunden, SYSUTCDATETIME())
-                 AND p.[close] > 0
+                 AND p.ts_utc >= {d.PlusStunden("-@stunden", d.Jetzt)}
+                 AND p."close" > 0
             ),
             g AS (
-              SELECT asset_class, asset_id, bew,
-                     PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY bew)
-                       OVER (PARTITION BY asset_class) AS median
-                FROM r WHERE bew IS NOT NULL
+              SELECT asset_class, asset_id, bew FROM r WHERE bew IS NOT NULL
+            ),
+            med AS (
+              {d.MedianSelect("asset_class", "bew", "median")}
+                FROM g
+              {d.MedianGroupBy("asset_class")}
             )
-            SELECT asset_class AS Klasse,
+            SELECT g.asset_class AS Klasse,
                    COUNT(*) AS Bars,
-                   COUNT(DISTINCT asset_id) AS Werte,
-                   AVG(bew) AS MittlereBewegung,
-                   MAX(median) AS MedianBewegung,
-                   AVG(CASE WHEN bew > @kosten THEN 1.0 ELSE 0.0 END) AS AnteilUeberKosten,
-                   AVG(CASE WHEN bew > 2 * @kosten THEN 1.0 ELSE 0.0 END) AS AnteilUeberDoppelt
+                   COUNT(DISTINCT g.asset_id) AS Werte,
+                   AVG(g.bew) AS MittlereBewegung,
+                   MAX(med.median) AS MedianBewegung,
+                   AVG(CASE WHEN g.bew > @kosten THEN 1.0 ELSE 0.0 END) AS AnteilUeberKosten,
+                   AVG(CASE WHEN g.bew > 2 * @kosten THEN 1.0 ELSE 0.0 END) AS AnteilUeberDoppelt
               FROM g
-             GROUP BY asset_class
-             ORDER BY asset_class;
+              JOIN med ON med.asset_class = g.asset_class
+             GROUP BY g.asset_class
+             ORDER BY g.asset_class;
             """,
             new { stunden, kosten = k.Rundlauf }, commandTimeout: 180, cancellationToken: ct));
 
@@ -222,12 +225,13 @@ public sealed class DayTradingService(
     private static async Task<List<Handelsfenster>> FensterAsync(
         System.Data.Common.DbConnection conn, CancellationToken ct)
     {
-        var rows = await conn.QueryAsync<FensterZeile>(new CommandDefinition("""
+        var d = conn.Dialekt();
+        var rows = await conn.QueryAsync<FensterZeile>(new CommandDefinition($"""
             SELECT a.asset_class AS Klasse, MAX(p.ts_utc) AS Juengste
               FROM dbo.price_bar p
-              JOIN dbo.asset a ON a.asset_id = p.asset_id AND a.is_tracked = 1
+              JOIN dbo.asset a ON a.asset_id = p.asset_id AND a.is_tracked = {d.Wahr}
              WHERE p.interval_code = '1h'
-               AND p.ts_utc >= DATEADD(DAY, -7, SYSUTCDATETIME())
+               AND p.ts_utc >= {d.PlusTage("-7", d.Jetzt)}
              GROUP BY a.asset_class
              ORDER BY a.asset_class
             """, commandTimeout: 120, cancellationToken: ct));
@@ -255,17 +259,17 @@ public sealed class DayTradingService(
     private static async Task<List<Stundenbewegung>> BewegungenAsync(
         System.Data.Common.DbConnection conn, CancellationToken ct)
     {
-        var rows = await conn.QueryAsync<BewegungZeile>(new CommandDefinition("""
-            SET NOCOUNT ON;
+        var d = conn.Dialekt();
+        var rows = await conn.QueryAsync<BewegungZeile>(new CommandDefinition($"""
 
             /* Je Wert die jüngste Stundenbar und der Vergleich eine bzw. sechs
                Stunden davor. Die Fensterfunktion ist der einzige Weg, das ohne
                eine Unterabfrage je Wert zu bekommen. */
             WITH n AS (
-              SELECT p.asset_id, p.ts_utc, p.[close], p.high, p.low,
+              SELECT p.asset_id, p.ts_utc, p."close", p.high, p.low,
                      ROW_NUMBER() OVER (PARTITION BY p.asset_id ORDER BY p.ts_utc DESC) AS rn
                 FROM dbo.price_bar p
-                JOIN dbo.asset a ON a.asset_id = p.asset_id AND a.is_tracked = 1
+                JOIN dbo.asset a ON a.asset_id = p.asset_id AND a.is_tracked = {d.Wahr}
                WHERE p.interval_code = '1h'
                  /* 48 statt 12 Stunden.
 
@@ -275,21 +279,21 @@ public sealed class DayTradingService(
                     nach acht Stunden ohne Abruf gibt es im Fenster nur noch
                     vier. Leer heißt dann „keine Bewegung", obwohl es „keine
                     Daten" heißt -- zwei sehr verschiedene Aussagen. */
-                 AND p.ts_utc >= DATEADD(HOUR, -48, SYSUTCDATETIME())
-                 AND p.[close] > 0
+                 AND p.ts_utc >= {d.PlusStunden("-48", d.Jetzt)}
+                 AND p."close" > 0
             )
             SELECT a.symbol AS Symbol, a.name AS Name, a.asset_class AS Klasse,
-                   n1.[close] AS Kurs, n1.ts_utc AS TsUtc,
-                   CAST(n1.[close] AS FLOAT) / n2.[close] - 1 AS VeraenderungStunde,
-                   CAST(n1.[close] AS FLOAT) / n6.[close] - 1 AS VeraenderungSechs,
+                   n1."close" AS Kurs, n1.ts_utc AS TsUtc,
+                   CAST(n1."close" AS FLOAT) / n2."close" - 1 AS VeraenderungStunde,
+                   CAST(n1."close" AS FLOAT) / n6."close" - 1 AS VeraenderungSechs,
                    CASE WHEN n1.low > 0
                         THEN CAST(n1.high AS FLOAT) / n1.low - 1 ELSE 0 END AS Spannweite
               FROM n n1
-              JOIN n n2 ON n2.asset_id = n1.asset_id AND n2.rn = 2 AND n2.[close] > 0
-              JOIN n n6 ON n6.asset_id = n1.asset_id AND n6.rn = 6 AND n6.[close] > 0
+              JOIN n n2 ON n2.asset_id = n1.asset_id AND n2.rn = 2 AND n2."close" > 0
+              JOIN n n6 ON n6.asset_id = n1.asset_id AND n6.rn = 6 AND n6."close" > 0
               JOIN dbo.asset a ON a.asset_id = n1.asset_id
              WHERE n1.rn = 1
-             ORDER BY ABS(CAST(n1.[close] AS FLOAT) / n2.[close] - 1) DESC
+             ORDER BY ABS(CAST(n1."close" AS FLOAT) / n2."close" - 1) DESC
             OFFSET 0 ROWS FETCH NEXT 20 ROWS ONLY;
             """, commandTimeout: 180, cancellationToken: ct));
 
@@ -318,10 +322,11 @@ public sealed class DayTradingService(
     private static async Task<List<IntradayGuete>> GueteAsync(
         System.Data.Common.DbConnection conn, Handelskosten k, CancellationToken ct)
     {
-        var rows = await conn.QueryAsync<GueteZeile>(new CommandDefinition("""
+        var d = conn.Dialekt();
+        var rows = await conn.QueryAsync<GueteZeile>(new CommandDefinition($"""
             SELECT f.horizon_hours AS Horizont,
                    COUNT(*) AS N,
-                   AVG(CASE WHEN s.direction_correct = 1 THEN 1.0 ELSE 0.0 END) AS Trefferquote,
+                   AVG(CASE WHEN s.direction_correct = {d.Wahr} THEN 1.0 ELSE 0.0 END) AS Trefferquote,
                    AVG(s.abs_pct_error) AS MittlererFehler,
                    AVG(ABS(s.actual_return)) AS MittlereBewegung
               FROM dbo.forecast f

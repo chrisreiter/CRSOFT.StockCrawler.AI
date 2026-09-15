@@ -5,6 +5,7 @@ using Ingest.Core.Analysis;
 using Ingest.Core.Enums;
 using Ingest.Core.Models;
 using Ingest.Infrastructure.Repositories;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -30,6 +31,7 @@ namespace Ingest.Infrastructure.Services;
 /// </summary>
 public sealed class LangfristService(ISqlConnectionFactory factory) : ILangfristService
 {
+    private SqlDialekt d => factory.Dialekt;
     /// <summary>
     /// Anteil der Reihe, auf dem Körbe zusammengestellt werden. Der Rest ist
     /// Sperrbereich. 60 zu 40 statt der sonst üblichen 70 zu 30, weil ein
@@ -528,17 +530,17 @@ public sealed class LangfristService(ISqlConnectionFactory factory) : ILangfrist
     private static async Task<List<Reihe>> ReihenAsync(
         System.Data.Common.DbConnection conn, DateTime von, int minTage, CancellationToken ct)
     {
-        var rows = await conn.QueryAsync<KursZeile>(new CommandDefinition("""
-            SET NOCOUNT ON;
+        var d = conn.Dialekt();
+        var rows = await conn.QueryAsync<KursZeile>(new CommandDefinition($"""
 
             SELECT p.asset_id, a.symbol, a.name, a.asset_class, p.ts_utc,
-                   CAST(p.[close] AS FLOAT) AS kurs
+                   CAST(p."close" AS FLOAT) AS kurs
               FROM dbo.price_bar p
-              JOIN dbo.asset a ON a.asset_id = p.asset_id AND a.is_tracked = 1
-             WHERE p.interval_code = '1d' AND p.ts_utc >= @von AND p.[close] > 0
+              JOIN dbo.asset a ON a.asset_id = p.asset_id AND a.is_tracked = {d.Wahr}
+             WHERE p.interval_code = '1d' AND p.ts_utc >= @von AND p."close" > 0
                AND p.asset_id IN (
                      SELECT asset_id FROM dbo.price_bar
-                      WHERE interval_code = '1d' AND ts_utc >= @von AND [close] > 0
+                      WHERE interval_code = '1d' AND ts_utc >= @von AND "close" > 0
                       GROUP BY asset_id HAVING COUNT(*) >= @minTage)
              ORDER BY p.asset_id, p.ts_utc;
             """, new { von, minTage }, commandTimeout: 300, cancellationToken: ct));

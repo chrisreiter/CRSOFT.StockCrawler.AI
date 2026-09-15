@@ -4,6 +4,7 @@ using Ingest.Infrastructure.Options;
 using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.Options;
 using Dapper;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Api.Endpoints;
 
@@ -47,12 +48,13 @@ public static class HealthEndpoints
                                                CancellationToken ct) =>
         {
             await using var conn = await factory.OpenAsync(ct);
+            var d = conn.Dialekt();
 
             var byClass = await conn.QueryAsync<(byte AssetClass, int Total, int Tracked)>(
-                new CommandDefinition("""
+                new CommandDefinition($"""
                     SELECT asset_class,
                            COUNT(*) AS total,
-                           SUM(CASE WHEN is_tracked = 1 THEN 1 ELSE 0 END) AS tracked
+                           SUM(CASE WHEN is_tracked = {d.Wahr} THEN 1 ELSE 0 END) AS tracked
                       FROM dbo.asset
                      GROUP BY asset_class
                     """, cancellationToken: ct));

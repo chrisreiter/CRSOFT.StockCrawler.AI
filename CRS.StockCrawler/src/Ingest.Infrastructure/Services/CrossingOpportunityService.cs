@@ -5,6 +5,7 @@ using Ingest.Core.Analysis;
 using Ingest.Core.Enums;
 using Ingest.Core.Models;
 using Ingest.Infrastructure.Repositories;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -30,6 +31,7 @@ namespace Ingest.Infrastructure.Services;
 public sealed class CrossingOpportunityService(ISqlConnectionFactory factory)
     : ICrossingOpportunityService
 {
+    private SqlDialekt d => factory.Dialekt;
     /// <summary>
     /// Ein Ein-Bar-Sprung dieser Größe ist bei einer Aktie kein Kurs, sondern
     /// ein Datenfehler oder ein Split. Beides erzeugt einen Scheingewinn von
@@ -74,6 +76,9 @@ public sealed class CrossingOpportunityService(ISqlConnectionFactory factory)
         var p = new DynamicParameters();
         p.Add("@interval", intervalCode);
         p.Add("@tage", tage);
+        /*  Der Stichtag wird hier gerechnet, nicht in SQL: Ein DECLARE gibt es
+            in Postgres nicht, und ein Parameter ist ohnehin klarer.           */
+        p.Add("@seit", DateTime.UtcNow.AddDays(-tage));
         p.Add("@limit", rohlimit);
         p.Add("@nur_wechsel", nurKlassenwechsel);
         p.Add("@sprung_aktie", SprungAktie);
@@ -225,22 +230,19 @@ public sealed class CrossingOpportunityService(ISqlConnectionFactory factory)
     /// Drei Ergebnismengen: die Rangliste, die wegen eines Kurssprungs
     /// ausgelassenen Paare, die Zahl der geprüften Paare.
     /// </summary>
-    private const string RanglisteSql = """
-        SET NOCOUNT ON;
-        DECLARE @seit DATETIME2(0) = DATEADD(DAY, -@tage, SYSUTCDATETIME());
-
+    private string RanglisteSql => $"""
         /* Je Paar zählt nur die JÜNGSTE Kreuzung. Ein Paar, das im Fenster
            dreimal hin und her gekippt ist, hat kein dreifaches Signal — es hat
            gar keines, und die letzte Lage ist alles, was zählt. */
-        SELECT l.asset_id_a, l.asset_id_b, l.ts_utc, l.direction
-          INTO #paar
+        {d.SelectIntoVor("paar")}SELECT l.asset_id_a, l.asset_id_b, l.ts_utc, l.direction
+          {d.SelectIntoNach("paar")}
           FROM (SELECT c.asset_id_a, c.asset_id_b, c.ts_utc, c.direction,
                        ROW_NUMBER() OVER (PARTITION BY c.asset_id_a, c.asset_id_b
                                           ORDER BY c.ts_utc DESC) AS rn
                   FROM dbo.crossing c
                  WHERE c.interval_code = @interval AND c.ts_utc >= @seit) l
-          JOIN dbo.asset aa ON aa.asset_id = l.asset_id_a AND aa.is_tracked = 1
-          JOIN dbo.asset ab ON ab.asset_id = l.asset_id_b AND ab.is_tracked = 1
+          JOIN dbo.asset aa ON aa.asset_id = l.asset_id_a AND aa.is_tracked = {d.Wahr}
+          JOIN dbo.asset ab ON ab.asset_id = l.asset_id_b AND ab.is_tracked = {d.Wahr}
          WHERE l.rn = 1
            AND (@nur_wechsel = 0
                 OR (CASE WHEN aa.asset_class = 2 THEN 1 ELSE 0 END)
@@ -251,67 +253,67 @@ public sealed class CrossingOpportunityService(ISqlConnectionFactory factory)
            Nicht die jeweils letzte Bar: Samstags handelt nur Krypto. Wer den
            Krypto-Samstag gegen den Aktien-Freitag rechnet, misst den Kalender
            statt den Markt. */
-        SELECT p.asset_id_a, p.asset_id_b, MAX(pa.ts_utc) AS ts_jetzt
-          INTO #jetzt
-          FROM #paar p
+        {d.SelectIntoVor("jetzt")}SELECT p.asset_id_a, p.asset_id_b, MAX(pa.ts_utc) AS ts_jetzt
+          {d.SelectIntoNach("jetzt")}
+          FROM {d.Temp("paar")} p
           JOIN dbo.price_bar pa ON pa.asset_id = p.asset_id_a AND pa.interval_code = @interval
-                                AND pa.ts_utc >= DATEADD(DAY, -15, SYSUTCDATETIME())
+                                AND pa.ts_utc >= {d.PlusTage("-15", d.Jetzt)}
           JOIN dbo.price_bar pb ON pb.asset_id = p.asset_id_b AND pb.interval_code = @interval
                                 AND pb.ts_utc = pa.ts_utc
          GROUP BY p.asset_id_a, p.asset_id_b;
 
         /* Der größte Ein-Bar-Sprung je Wert im Fenster — die Sprungprüfung. */
-        SELECT s.asset_id, MAX(ABS(LOG(s.c / s.vor))) AS max_sprung
-          INTO #sprung
-          FROM (SELECT p.asset_id, p.[close] AS c,
-                       LAG(p.[close]) OVER (PARTITION BY p.asset_id ORDER BY p.ts_utc) AS vor
+        {d.SelectIntoVor("sprung")}SELECT s.asset_id, MAX(ABS({d.Ln("s.c / s.vor")})) AS max_sprung
+          {d.SelectIntoNach("sprung")}
+          FROM (SELECT p.asset_id, p."close" AS c,
+                       LAG(p."close") OVER (PARTITION BY p.asset_id ORDER BY p.ts_utc) AS vor
                   FROM dbo.price_bar p
-                  JOIN (SELECT asset_id_a AS id FROM #paar
-                        UNION SELECT asset_id_b FROM #paar) w ON w.id = p.asset_id
+                  JOIN (SELECT asset_id_a AS id FROM {d.Temp("paar")}
+                        UNION SELECT asset_id_b FROM {d.Temp("paar")}) w ON w.id = p.asset_id
                  WHERE p.interval_code = @interval
-                   AND p.ts_utc >= DATEADD(DAY, -(@tage + 5), SYSUTCDATETIME())
-                   AND p.[close] > 0) s
+                   AND p.ts_utc >= {d.PlusTage("-(@tage + 5)", d.Jetzt)}
+                   AND p."close" > 0) s
          WHERE s.vor > 0
          GROUP BY s.asset_id;
 
-        SELECT p.asset_id_a AS AssetIdA, p.asset_id_b AS AssetIdB,
+        {d.SelectIntoVor("alle")}SELECT p.asset_id_a AS AssetIdA, p.asset_id_b AS AssetIdB,
                aa.symbol AS SymbolA, aa.name AS NameA, aa.asset_class AS KlasseA,
                ab.symbol AS SymbolB, ab.name AS NameB, ab.asset_class AS KlasseB,
                p.ts_utc AS TsUtc, p.direction AS Direction,
-               CAST(na.[close] AS FLOAT) / ka.[close] - 1 AS RenditeA,
-               CAST(nb.[close] AS FLOAT) / kb.[close] - 1 AS RenditeB,
+               CAST(na."close" AS FLOAT) / ka."close" - 1 AS RenditeA,
+               CAST(nb."close" AS FLOAT) / kb."close" - 1 AS RenditeB,
                CASE WHEN p.direction = 1
-                    THEN CAST(na.[close] AS FLOAT) / ka.[close] - CAST(nb.[close] AS FLOAT) / kb.[close]
-                    ELSE CAST(nb.[close] AS FLOAT) / kb.[close] - CAST(na.[close] AS FLOAT) / ka.[close]
+                    THEN CAST(na."close" AS FLOAT) / ka."close" - CAST(nb."close" AS FLOAT) / kb."close"
+                    ELSE CAST(nb."close" AS FLOAT) / kb."close" - CAST(na."close" AS FLOAT) / ka."close"
                END AS Paargewinn,
-               CASE WHEN ISNULL(sa.max_sprung, 0)
+               CASE WHEN COALESCE(sa.max_sprung, 0)
                        >= CASE WHEN aa.asset_class = 2 THEN @sprung_krypto ELSE @sprung_aktie END
-                      OR ISNULL(sb.max_sprung, 0)
+                      OR COALESCE(sb.max_sprung, 0)
                        >= CASE WHEN ab.asset_class = 2 THEN @sprung_krypto ELSE @sprung_aktie END
                     THEN 1 ELSE 0 END AS Verdacht,
-               CASE WHEN ISNULL(sa.max_sprung, 0) > ISNULL(sb.max_sprung, 0)
-                    THEN ISNULL(sa.max_sprung, 0) ELSE ISNULL(sb.max_sprung, 0) END AS MaxSprung
-          INTO #alle
-          FROM #paar p
-          JOIN #jetzt j ON j.asset_id_a = p.asset_id_a AND j.asset_id_b = p.asset_id_b
+               CASE WHEN COALESCE(sa.max_sprung, 0) > COALESCE(sb.max_sprung, 0)
+                    THEN COALESCE(sa.max_sprung, 0) ELSE COALESCE(sb.max_sprung, 0) END AS MaxSprung
+          {d.SelectIntoNach("alle")}
+          FROM {d.Temp("paar")} p
+          JOIN {d.Temp("jetzt")} j ON j.asset_id_a = p.asset_id_a AND j.asset_id_b = p.asset_id_b
           JOIN dbo.asset aa ON aa.asset_id = p.asset_id_a
           JOIN dbo.asset ab ON ab.asset_id = p.asset_id_b
           JOIN dbo.price_bar ka ON ka.asset_id = p.asset_id_a AND ka.interval_code = @interval
-                                AND ka.ts_utc = p.ts_utc AND ka.[close] > 0
+                                AND ka.ts_utc = p.ts_utc AND ka."close" > 0
           JOIN dbo.price_bar kb ON kb.asset_id = p.asset_id_b AND kb.interval_code = @interval
-                                AND kb.ts_utc = p.ts_utc AND kb.[close] > 0
+                                AND kb.ts_utc = p.ts_utc AND kb."close" > 0
           JOIN dbo.price_bar na ON na.asset_id = p.asset_id_a AND na.interval_code = @interval
-                                AND na.ts_utc = j.ts_jetzt AND na.[close] > 0
+                                AND na.ts_utc = j.ts_jetzt AND na."close" > 0
           JOIN dbo.price_bar nb ON nb.asset_id = p.asset_id_b AND nb.interval_code = @interval
-                                AND nb.ts_utc = j.ts_jetzt AND nb.[close] > 0
-          LEFT JOIN #sprung sa ON sa.asset_id = p.asset_id_a
-          LEFT JOIN #sprung sb ON sb.asset_id = p.asset_id_b;
+                                AND nb.ts_utc = j.ts_jetzt AND nb."close" > 0
+          LEFT JOIN {d.Temp("sprung")} sa ON sa.asset_id = p.asset_id_a
+          LEFT JOIN {d.Temp("sprung")} sb ON sb.asset_id = p.asset_id_b;
 
-        SELECT TOP (@limit) * FROM #alle WHERE Verdacht = 0 ORDER BY Paargewinn DESC;
+        SELECT * FROM {d.Temp("alle")} WHERE Verdacht = 0 ORDER BY Paargewinn DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY;
 
-        SELECT TOP (50) * FROM #alle WHERE Verdacht = 1 ORDER BY MaxSprung DESC;
+        SELECT * FROM {d.Temp("alle")} WHERE Verdacht = 1 ORDER BY MaxSprung DESC OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;
 
-        SELECT COUNT(*) FROM #alle;
+        SELECT COUNT(*) FROM {d.Temp("alle")};
         """;
 
     // ------------------------------------------------------------ Rohzeilen --

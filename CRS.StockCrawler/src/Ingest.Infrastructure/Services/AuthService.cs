@@ -3,6 +3,7 @@ using Dapper;
 using Ingest.Core.Analysis;
 using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.Logging;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -95,6 +96,7 @@ public interface IAuthService
 public sealed class AuthService : IAuthService
 {
     private readonly ISqlConnectionFactory _factory;
+    private SqlDialekt d => _factory.Dialekt;
     private readonly ILogger<AuthService> _log;
 
     /// <summary>Sitzungsdauer. Vierzehn Tage, bei jedem Zugriff verlängert.</summary>
@@ -232,11 +234,11 @@ public sealed class AuthService : IAuthService
             var neu = u.Fehlversuche + 1;
 
             await conn.ExecuteAsync(new CommandDefinition(
-                """
+                $"""
                 UPDATE dbo.app_user
                    SET failed_logins = @neu,
                        locked_until_utc = CASE WHEN @neu >= @max
-                                               THEN DATEADD(MINUTE, @minuten, SYSUTCDATETIME())
+                                               THEN {d.PlusMinuten("@minuten", d.Jetzt)}
                                                ELSE locked_until_utc END
                  WHERE user_id = @id
                 """,
@@ -252,20 +254,20 @@ public sealed class AuthService : IAuthService
 
         // Erfolg: Zähler zurück, Sitzung binden, Hash bei Bedarf erneuern.
         await conn.ExecuteAsync(new CommandDefinition(
-            """
+            $"""
             UPDATE dbo.app_user
                SET failed_logins = 0, locked_until_utc = NULL,
-                   last_login_utc = SYSUTCDATETIME()
+                   last_login_utc = {d.Jetzt}
              WHERE user_id = @id;
 
-            MERGE dbo.app_session WITH (HOLDLOCK) AS t
+            MERGE INTO dbo.app_session {d.MergeSperre} AS t
             USING (SELECT @key AS session_key) AS s ON t.session_key = s.session_key
             WHEN MATCHED THEN UPDATE SET
-                 user_id = @id, last_seen_utc = SYSUTCDATETIME(),
-                 expires_utc = DATEADD(DAY, @tage, SYSUTCDATETIME())
+                 user_id = @id, last_seen_utc = {d.Jetzt},
+                 expires_utc = {d.PlusTage("@tage", d.Jetzt)}
             WHEN NOT MATCHED THEN
                  INSERT (session_key, user_id, expires_utc)
-                 VALUES (@key, @id, DATEADD(DAY, @tage, SYSUTCDATETIME()));
+                 VALUES (@key, @id, {d.PlusTage("@tage", d.Jetzt)});
             """,
             new { id = u.UserId, key = sitzung, tage = (int)Sitzungsdauer.TotalDays },
             cancellationToken: ct));
@@ -296,23 +298,23 @@ public sealed class AuthService : IAuthService
         await using var conn = await _factory.OpenAsync(ct);
 
         var u = await conn.QuerySingleOrDefaultAsync<Angemeldet>(new CommandDefinition(
-            """
+            $"""
             SELECT u.user_id AS UserId, u.login AS Login,
                    u.display_name AS Anzeigename, u.role AS Rolle
               FROM dbo.app_session s
               JOIN dbo.app_user u ON u.user_id = s.user_id
              WHERE s.session_key = @key
-               AND u.is_active = 1
-               AND (s.expires_utc IS NULL OR s.expires_utc > SYSUTCDATETIME())
+               AND u.is_active = {d.Wahr}
+               AND (s.expires_utc IS NULL OR s.expires_utc > {d.Jetzt})
             """, new { key = sitzung }, cancellationToken: ct));
 
         if (u is not null)
             // Gleitender Ablauf: Wer die Anwendung benutzt, bleibt angemeldet.
             await conn.ExecuteAsync(new CommandDefinition(
-                """
+                $"""
                 UPDATE dbo.app_session
-                   SET last_seen_utc = SYSUTCDATETIME(),
-                       expires_utc = DATEADD(DAY, @tage, SYSUTCDATETIME())
+                   SET last_seen_utc = {d.Jetzt},
+                       expires_utc = {d.PlusTage("@tage", d.Jetzt)}
                  WHERE session_key = @key
                 """, new { key = sitzung, tage = (int)Sitzungsdauer.TotalDays },
                 cancellationToken: ct));
@@ -327,11 +329,11 @@ public sealed class AuthService : IAuthService
         await using var conn = await _factory.OpenAsync(ct);
 
         var rows = await conn.QueryAsync<BenutzerZeile>(new CommandDefinition(
-            """
+            $"""
             SELECT user_id AS UserId, login AS Login, display_name AS Anzeigename,
                    role AS Rolle, is_active AS Aktiv, created_utc AS ErstelltUtc,
                    last_login_utc AS LetzteAnmeldungUtc,
-                   CAST(CASE WHEN locked_until_utc > SYSUTCDATETIME() THEN 1 ELSE 0 END AS BIT) AS Gesperrt
+                   CAST(CASE WHEN locked_until_utc > {d.Jetzt} THEN 1 ELSE 0 END AS {d.TypBool}) AS Gesperrt
               FROM dbo.app_user ORDER BY role, login
             """, cancellationToken: ct));
 
@@ -401,9 +403,9 @@ public sealed class AuthService : IAuthService
         if (rolle == "user" || aktiv == false)
         {
             var verbleibend = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-                """
+                $"""
                 SELECT COUNT(*) FROM dbo.app_user
-                 WHERE role = 'admin' AND is_active = 1 AND user_id <> @id
+                 WHERE role = 'admin' AND is_active = {d.Wahr} AND user_id <> @id
                 """, new { id = userId }, cancellationToken: ct));
 
             if (verbleibend == 0)
@@ -471,9 +473,9 @@ public sealed class AuthService : IAuthService
         await using var conn = await _factory.OpenAsync(ct);
 
         var verbleibend = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-            """
+            $"""
             SELECT COUNT(*) FROM dbo.app_user
-             WHERE role = 'admin' AND is_active = 1 AND user_id <> @id
+             WHERE role = 'admin' AND is_active = {d.Wahr} AND user_id <> @id
             """, new { id = userId }, cancellationToken: ct));
 
         if (verbleibend == 0)

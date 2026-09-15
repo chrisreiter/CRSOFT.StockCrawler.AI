@@ -5,6 +5,7 @@ using Ingest.Core.Abstractions;
 using Ingest.Core.Enums;
 using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.Logging;
+using Ingest.Infrastructure.Datenbank;
 
 namespace Ingest.Infrastructure.Services;
 
@@ -57,6 +58,7 @@ public sealed class JournalService(
     IKnowledgeService knowledge,
     ICrossingOpportunityService kreuzungen) : IJournalService
 {
+    private SqlDialekt d => factory.Dialekt;
     public async Task<Journal> BuildAsync(
         IReadOnlyDictionary<string, int> pillarWeights,
         int[]? assetIds, CancellationToken ct = default)
@@ -312,7 +314,7 @@ public sealed class JournalService(
     {
         var neu = (await conn.QueryAsync<(string Title, string Origin, DateTime? Published, string? Region)>(
             new CommandDefinition(
-                """
+                $"""
                 /* Je Schlagzeile ein Eintrag.
 
                    Dieselbe Meldung erscheint in mehreren Feeds -- Reuters
@@ -326,11 +328,11 @@ public sealed class JournalService(
                       FROM dbo.knowledge_source
                      WHERE pillar = 'semantic' AND kind = 'article'
                        AND published_utc IS NOT NULL
-                       AND published_utc > DATEADD(HOUR, -36, SYSUTCDATETIME())
+                       AND published_utc > {d.PlusStunden("-36", d.Jetzt)}
                 )
-                SELECT TOP 12 title, origin, published_utc, region
+                SELECT title, origin, published_utc, region
                   FROM einmalig WHERE rn = 1
-                 ORDER BY published_utc DESC;
+                 ORDER BY published_utc DESC OFFSET 0 ROWS FETCH NEXT 12 ROWS ONLY;
                 """, cancellationToken: ct))).ToList();
 
         var quellen = new List<string>();
