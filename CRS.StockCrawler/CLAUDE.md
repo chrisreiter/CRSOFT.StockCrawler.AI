@@ -23,24 +23,38 @@ src/
   Ingest.Infrastructure/
     Providers/            YahooProvider, TwelveDataProvider,
                           CoinGeckoUniverseProvider, YahooScreenerUniverseProvider
-    Repositories/         Dapper; SqlBulkCopy für Massenschreibvorgänge
+    Repositories/         Dapper; Massenkopie für Massenschreibvorgänge
+    Datenbank/            SqlDialekt (SQL Server / PostgreSQL), Massenkopie, EnumHandler
     Services/             Universe, Ingest, Analysis, Forecast, Scoring, Backtest
   Ingest.Api/             Minimal-API, CronScheduler, wwwroot (Oberfläche)
-infra/sql/                010 Schema, 011 Analyse/Prognose, 012 Prozeduren
+infra/sql/                SQL Server: 35 Migrationen 010–043
 infra/sql/legacy/         abgelöstes Ursprungsschema, nur als Referenz
+infra/pgsql/              PostgreSQL: 010 Schema, 011 Routinen, 012 Stammdaten
 ```
 
 ## Befehle
 
 ```bash
 dotnet build                                    # aus CRS.StockCrawler/
-powershell -File infra/apply-sql.ps1            # Schema einspielen (idempotent)
+powershell -File infra/apply-sql.ps1            # Schema einspielen, SQL Server (idempotent)
+powershell -File infra/apply-pgsql.ps1          # Schema einspielen, PostgreSQL (idempotent)
 cd src/Ingest.Api && dotnet run                 # API auf http://localhost:5011
 ```
 
 Erstbefüllung: `POST /api/ingest/bootstrap?months=24`
 
 ## Regeln, die beim Ändern zu beachten sind
+
+**Jedes SQL muss auf SQL Server UND PostgreSQL laufen.** Portables portabel
+schreiben (`"spalte"`, `COALESCE`, `OFFSET … FETCH`, `CAST(COUNT(*) AS INT)`),
+echte Unterschiede als Token des `SqlDialekt` (`{d.Jetzt}`, `{d.Wahr}`,
+`{d.In}`, `{d.PlusTage}`, …). Kein Übersetzer zur Laufzeit. Schemaänderungen
+kommen **paarweise**: `infra/sql/` und `infra/pgsql/`. Die vollständige
+Token-Liste und die gemessenen Fallen stehen in
+[docs/DATENBANK.md](docs/DATENBANK.md) — die drei häufigsten: `x IN @ids` ist
+bei Npgsql ein Syntaxfehler (`{d.In}`), `(@von IS NULL OR ts >= @von)`
+scheitert bei `DateTime? null` mit 42P08 (Reihenfolge drehen), und
+`COUNT(*)` ist in Postgres `bigint`.
 
 **Zeitstempel immer über `BarNormalizer` rastern.** Yahoo stempelt Tagesbars von
 US-Aktien auf 13:30 UTC, Krypto auf 00:00; Stundenbars auf `:30` gegenüber
@@ -1389,9 +1403,10 @@ Anführungszeichen für den **Rest der Datei** verschoben. Kein Fehler, keine
 Meldung, nur zu wenig Treffer — mit einem richtigen Leser waren es **1.128**
 statt 27.
 
-**Massenschreibvorgänge über SqlBulkCopy.** 300 verfolgte Werte ergeben ~35.000
-Paare und bis zu 190.000 Kreuzungen. Einzelne INSERT/MERGE-Aufrufe sind dabei
-chancenlos — Muster siehe `PairStatRepository`.
+**Massenschreibvorgänge über `Massenkopie.SchreibeAsync`** (SqlBulkCopy bzw.
+`COPY FROM STDIN`). 300 verfolgte Werte ergeben ~35.000 Paare und bis zu
+190.000 Kreuzungen. Einzelne INSERT/MERGE-Aufrufe sind dabei chancenlos —
+Muster siehe `PairStatRepository`.
 
 **Yahoo und CoinGecko brauchen einen Browser-User-Agent**, sonst antworten sie
 mit 403. Zentral in `DependencyInjection.BrowserUserAgent`.

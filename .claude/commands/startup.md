@@ -28,8 +28,8 @@ Am Ende gib eine Übersicht in dieser Form:
 | Bestandteil | Zustand | Anmerkung |
 | --- | --- | --- |
 | .NET SDK | … | |
-| SQL Server | … | |
-| Schema | … | bis 043 |
+| Datenbank (PostgreSQL oder SQL Server) | … | welches, und warum |
+| Schema | … | Postgres: 43 Tabellen · SQL Server: bis 043 |
 | Ollama · bge-m3 | … | Laufzeitbedarf, nicht Zubehör |
 | Ollama · nemotron3:33b | … | optional |
 | Qdrant | … | |
