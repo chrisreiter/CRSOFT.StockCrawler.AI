@@ -1,4 +1,5 @@
 using Ingest.Core.Abstractions;
+using Ingest.Infrastructure.Datenbank;
 using Ingest.Infrastructure.Options;
 using Ingest.Infrastructure.Providers;
 using Ingest.Infrastructure.Repositories;
@@ -18,6 +19,41 @@ public static class DependencyInjection
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/122.0 Safari/537.36";
 
+    /// <summary>
+    /// Welche Datenbank, entscheidet die Konfiguration in dieser Reihenfolge:
+    /// <list type="number">
+    /// <item><c>Datenbank:System</c> = <c>SqlServer</c> | <c>Postgres</c>, wenn gesetzt.</item>
+    /// <item>Sonst <c>ConnectionStrings:Postgres</c>, wenn nicht leer.</item>
+    /// <item>Sonst <c>ConnectionStrings:Sql</c>.</item>
+    /// </list>
+    /// Wer umsteigen will, traegt also nur die Postgres-Zeichenfolge ein und
+    /// laesst die andere stehen; wer beide eingetragen hat und wechseln will,
+    /// setzt <c>Datenbank:System</c>. Der Name der Zeichenfolge, die tatsaechlich
+    /// gewaehlt wurde, steht beim Start im Protokoll.
+    /// </summary>
+    private static SqlConnectionFactory VerbindungAusKonfiguration(IConfiguration config)
+    {
+        var sql = config.GetConnectionString("Sql");
+        var pg  = config.GetConnectionString("Postgres");
+        var gewuenscht = config["Datenbank:System"];
+
+        var system = gewuenscht switch
+        {
+            null or "" => string.IsNullOrWhiteSpace(pg) ? Datenbanksystem.SqlServer : Datenbanksystem.Postgres,
+            _ when Enum.TryParse<Datenbanksystem>(gewuenscht, ignoreCase: true, out var s) => s,
+            _ => throw new InvalidOperationException(
+                $"Datenbank:System = '{gewuenscht}' ist unbekannt. Erlaubt: SqlServer, Postgres."),
+        };
+
+        var cs = system == Datenbanksystem.Postgres ? pg : sql;
+        if (string.IsNullOrWhiteSpace(cs))
+            throw new InvalidOperationException(
+                $"Datenbanksystem {system} gewaehlt, aber ConnectionStrings:"
+                + (system == Datenbanksystem.Postgres ? "Postgres" : "Sql") + " ist leer.");
+
+        return new SqlConnectionFactory(system, cs);
+    }
+
     public static IServiceCollection AddIngestInfrastructure(
         this IServiceCollection services, IConfiguration config)
     {
@@ -26,10 +62,7 @@ public static class DependencyInjection
         services.Configure<CoinGeckoOptions>(config.GetSection("Sources:CoinGecko"));
         services.Configure<IngestOptions>(config.GetSection("Ingest"));
 
-        var cs = config.GetConnectionString("Sql")
-                 ?? throw new InvalidOperationException("ConnectionStrings:Sql fehlt in der Konfiguration.");
-
-        services.AddSingleton<ISqlConnectionFactory>(_ => new SqlConnectionFactory(cs));
+        services.AddSingleton<ISqlConnectionFactory>(_ => VerbindungAusKonfiguration(config));
 
         services.AddScoped<IAssetRepository, AssetRepository>();
         services.AddScoped<IPriceBarRepository, PriceBarRepository>();

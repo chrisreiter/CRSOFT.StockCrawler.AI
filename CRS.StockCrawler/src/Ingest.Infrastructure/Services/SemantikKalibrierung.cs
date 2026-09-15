@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Dapper;
 using Ingest.Core.Analysis;
 using Ingest.Infrastructure.Repositories;
@@ -178,7 +179,7 @@ public sealed class SemantikKalibrierung : ISemantikKalibrierung
         return ergebnisse;
     }
 
-    private async Task SchreibeAsync(Microsoft.Data.SqlClient.SqlConnection conn,
+    private async Task SchreibeAsync(System.Data.Common.DbConnection conn,
                                      IReadOnlyList<Kalibrierergebnis> e, CancellationToken ct)
     {
         foreach (var r in e)

@@ -7,8 +7,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Zwei Datenbanktreiber, einer davon aktiv: Datenbank:System in der
+         Konfiguration entscheidet. Beide liegen im Paket, damit dieselbe
+         Auslieferung auf SQL Server wie auf PostgreSQL laeuft. -->
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.1" />
     <PackageReference Include="Dapper" Version="2.1.66" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
     <!-- Inferenz des in Python trainierten Modells. Nur Ausfuehrung, kein
          Training: ONNX ist die Naht zwischen beiden Welten. -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />

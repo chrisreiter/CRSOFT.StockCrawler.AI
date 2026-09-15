@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -381,7 +382,7 @@ public sealed class KnowledgeService(
     /// in jedem Fall wieder lösen kann.
     /// </summary>
     private async Task<(int Chunks, string Note)> EinbettenAsync(
-        Microsoft.Data.SqlClient.SqlConnection conn,
+        System.Data.Common.DbConnection conn,
         KnowledgeSource src, int sourceId,
         List<Abschnitt> abschnitte, string hash, CancellationToken ct)
     {

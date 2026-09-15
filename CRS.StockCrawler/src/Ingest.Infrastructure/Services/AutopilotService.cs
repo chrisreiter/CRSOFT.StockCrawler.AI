@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Data;
 using System.Text.Json;
 using Dapper;
@@ -365,7 +366,7 @@ public sealed class AutopilotService(
     /// Überschuss ist kein Verkaufssignal, sondern gar keins.</para>
     /// </summary>
     private async Task<Dictionary<int, AutopilotBeitrag>> MusterAsync(
-        Microsoft.Data.SqlClient.SqlConnection conn, CancellationToken ct)
+        System.Data.Common.DbConnection conn, CancellationToken ct)
     {
         try
         {
@@ -439,7 +440,7 @@ public sealed class AutopilotService(
     }
 
     private static async Task<Dictionary<int, decimal>> GehaltenAsync(
-        Microsoft.Data.SqlClient.SqlConnection conn, string depot, CancellationToken ct)
+        System.Data.Common.DbConnection conn, string depot, CancellationToken ct)
     {
         var rows = await conn.QueryAsync<Bestandszeile>(new CommandDefinition("""
             SELECT b.asset_id AS AssetId, SUM(b.anteile) AS Anteile
