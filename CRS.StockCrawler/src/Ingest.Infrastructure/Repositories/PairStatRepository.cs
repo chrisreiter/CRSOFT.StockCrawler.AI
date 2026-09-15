@@ -1,5 +1,7 @@
+using System.Data.Common;
 using System.Data;
 using Dapper;
+using Ingest.Infrastructure.Datenbank;
 using Ingest.Core.Abstractions;
 using Ingest.Core.Models;
 using Microsoft.Data.SqlClient;
@@ -188,22 +190,10 @@ public sealed class PairStatRepository : IPairStatRepository
 
     // ------------------------------------------------------------------ Hilfen
 
-    private static Task ExecAsync(SqlConnection conn, string sql, CancellationToken ct)
+    private static Task ExecAsync(DbConnection conn, string sql, CancellationToken ct)
         => conn.ExecuteAsync(new CommandDefinition(sql, commandTimeout: 600, cancellationToken: ct));
 
-    private static async Task BulkCopyAsync(SqlConnection conn, DataTable table, string target,
-                                            CancellationToken ct)
-    {
-        using var bulk = new SqlBulkCopy(conn)
-        {
-            DestinationTableName = target,
-            BatchSize = 10_000,
-            BulkCopyTimeout = 600
-        };
-
-        foreach (DataColumn c in table.Columns)
-            bulk.ColumnMappings.Add(c.ColumnName, c.ColumnName);
-
-        await bulk.WriteToServerAsync(table, ct);
-    }
+    private static Task BulkCopyAsync(DbConnection conn, DataTable table, string target,
+                                      CancellationToken ct)
+        => Massenkopie.SchreibeAsync(conn, table, target, 600, ct);
 }

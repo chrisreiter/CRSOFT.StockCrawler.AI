@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Dapper;
 using Ingest.Core.Abstractions;
 using Ingest.Core.Enums;
@@ -122,7 +123,7 @@ public sealed class BriefingService(
 
     /// <summary>Was die verfolgten Werte gestern gemacht haben.</summary>
     private async Task LageAsync(
-        Microsoft.Data.SqlClient.SqlConnection conn, List<BriefingItem> items,
+        System.Data.Common.DbConnection conn, List<BriefingItem> items,
         IReadOnlyList<Core.Models.Asset> beobachtet, CancellationToken ct)
     {
         var von = DateTime.UtcNow.AddDays(-10);
@@ -243,7 +244,7 @@ public sealed class BriefingService(
 
     /// <summary>Die jüngsten eingelesenen Meldungen.</summary>
     private async Task NachrichtenAsync(
-        Microsoft.Data.SqlClient.SqlConnection conn, List<BriefingItem> items,
+        System.Data.Common.DbConnection conn, List<BriefingItem> items,
         int gewicht, CancellationToken ct)
     {
         var neu = (await conn.QueryAsync<(string Title, string Origin, DateTime? Published, string? Region)>(
@@ -329,7 +330,7 @@ public sealed class BriefingService(
 
     /// <summary>Was gepflegt werden müsste.</summary>
     private async Task WartungAsync(
-        Microsoft.Data.SqlClient.SqlConnection conn, List<BriefingItem> items,
+        System.Data.Common.DbConnection conn, List<BriefingItem> items,
         CancellationToken ct)
     {
         var stumm = await conn.ExecuteScalarAsync<int>(new CommandDefinition(

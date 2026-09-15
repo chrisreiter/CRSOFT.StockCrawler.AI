@@ -1,7 +1,8 @@
+using System.Data.Common;
 using System.Data;
 using Dapper;
+using Ingest.Infrastructure.Datenbank;
 using Ingest.Core.Abstractions;
-using Microsoft.Data.SqlClient;
 
 namespace Ingest.Infrastructure.Repositories;
 
@@ -169,19 +170,7 @@ public sealed class LearningRepository : ILearningRepository
     private static double Sane(double v)
         => double.IsNaN(v) || double.IsInfinity(v) ? 0 : v;
 
-    private static async Task BulkAsync(SqlConnection conn, DataTable table, string target,
-                                        CancellationToken ct)
-    {
-        using var bulk = new SqlBulkCopy(conn)
-        {
-            DestinationTableName = target,
-            BatchSize = 5000,
-            BulkCopyTimeout = 300
-        };
-
-        foreach (DataColumn c in table.Columns)
-            bulk.ColumnMappings.Add(c.ColumnName, c.ColumnName);
-
-        await bulk.WriteToServerAsync(table, ct);
-    }
+    private static Task BulkAsync(DbConnection conn, DataTable table, string target,
+                                  CancellationToken ct)
+        => Massenkopie.SchreibeAsync(conn, table, target, 300, ct);
 }

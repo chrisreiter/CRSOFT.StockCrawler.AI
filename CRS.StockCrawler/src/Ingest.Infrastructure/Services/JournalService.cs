@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Text;
 using Dapper;
 using Ingest.Core.Abstractions;
@@ -305,7 +306,7 @@ public sealed class JournalService(
     }
 
     private async Task<(JournalSection Abschnitt, List<string> Quellen)> NachrichtenAsync(
-        Microsoft.Data.SqlClient.SqlConnection conn,
+        System.Data.Common.DbConnection conn,
         List<(string Symbol, string? Name, double Pct)> bewegungen,
         CancellationToken ct)
     {

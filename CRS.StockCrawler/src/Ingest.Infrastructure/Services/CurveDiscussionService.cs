@@ -1,10 +1,10 @@
 using System.Data;
 using Dapper;
+using Ingest.Infrastructure.Datenbank;
 using Ingest.Core.Abstractions;
 using Ingest.Infrastructure.Repositories;
 using Ingest.Core.Analysis;
 using Ingest.Core.Enums;
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 
 namespace Ingest.Infrastructure.Services;
@@ -379,22 +379,11 @@ public sealed class CurveDiscussionService(
 
     private async Task BulkAsync(DataTable t, string ziel, CancellationToken ct)
     {
-        // SqlBulkCopy statt einzelner INSERTs: Ein Durchgang erzeugt leicht
+        // Massenkopie statt einzelner INSERTs: Ein Durchgang erzeugt leicht
         // hunderttausend Zeilen, und dafür ist die Zeilenschnittstelle
         // chancenlos.
         await using var conn = await factory.OpenAsync(ct);
-
-        using var bulk = new SqlBulkCopy(conn)
-        {
-            DestinationTableName = ziel,
-            BulkCopyTimeout = 600,
-            BatchSize = 10_000
-        };
-
-        foreach (DataColumn c in t.Columns)
-            bulk.ColumnMappings.Add(c.ColumnName, c.ColumnName);
-
-        await bulk.WriteToServerAsync(t, ct);
+        await Massenkopie.SchreibeAsync(conn, t, ziel, 600, ct);
     }
 
     private static DataTable NewEventTable()

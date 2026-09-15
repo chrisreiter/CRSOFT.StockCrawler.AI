@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Dapper;
 using Ingest.Core.Analysis;
 using Ingest.Infrastructure.Repositories;
@@ -153,7 +154,7 @@ public sealed class SaeulenbeitragService : ISaeulenbeitragService
     /// deren Richtungstrefferquote liegt bei 0,40 bis 0,43.</para>
     /// </summary>
     private async Task WissenAsync(
-        Microsoft.Data.SqlClient.SqlConnection conn, IReadOnlyList<int> horizonte,
+        System.Data.Common.DbConnection conn, IReadOnlyList<int> horizonte,
         Func<int, Saeulenlage> fuer, CancellationToken ct)
     {
         try
@@ -325,7 +326,7 @@ public sealed class SaeulenbeitragService : ISaeulenbeitragService
     /// baut sich Lookahead ein.</para>
     /// </summary>
     private async Task SemantikAsync(
-        Microsoft.Data.SqlClient.SqlConnection conn, IReadOnlyList<int> horizonte,
+        System.Data.Common.DbConnection conn, IReadOnlyList<int> horizonte,
         Func<int, Saeulenlage> fuer, CancellationToken ct)
     {
         try
