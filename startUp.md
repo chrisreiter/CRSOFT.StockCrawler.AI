@@ -92,7 +92,7 @@ psql --version
 Fehlt es:
 
 - **Windows:** Installer von postgresql.org; `psql` liegt danach unter
-  `C:\Program Files\PostgreSQL\<Version>in`, aber nicht im PATH —
+  `C:\Program Files\PostgreSQL\<Version>bin`, aber nicht im PATH —
   `apply-pgsql.ps1` findet es dort trotzdem.
 - **Linux / macOS / überall:**
   ```bash
