@@ -26,7 +26,7 @@ Trefferquote.
 | Art | wer | wie sie eingeht |
 | --- | --- | --- |
 | **Grundlage** | `learning`, `math` | schätzt die Rendite selbst; gewichtet gemittelt |
-| **Aufschlag** | `knowledge`, `semantic` | sagt, was **zusätzlich** zum üblichen Gang zu erwarten ist; kommt obendrauf |
+| **Aufschlag** | `knowledge`, `semantic`, `reasoning` | sagt, was **zusätzlich** zum üblichen Gang zu erwarten ist; kommt obendrauf |
 
 ### Warum die Trennung nötig war
 
@@ -142,6 +142,28 @@ Nachrichten hängen mit heute zusammen, nicht mit morgen.
 Die Säule ist damit **eingebaut, sichtbar und ohne Wirkung**. Das ist kein
 Fehlschlag, sondern der Zweck der Kalibrierung: Sie steht bereit, falls sich das
 ändert, und erfindet bis dahin nichts.
+
+### `reasoning` — das Urteil des Agenten · Aufschlag
+
+Seit 16.09.2026. Der Agent gibt je Wert ein **Urteil** ab — Richtung −2…+2
+und Zuversicht 0…1 —, nachdem er Journal, Tagesübersicht, Prognose, Kurs,
+Nachrichten und Grundschwingungen per Werkzeug gelesen hat. Ein Urteil ohne
+Werkzeugaufruf wird verworfen; das ist die Regel, an der alles hängt.
+
+**Der Betrag kommt nicht vom Modell.** Rendite = Richtung/2 × Zuversicht ×
+Tagesschwankung des Werts × √Horizonttage — ein volles Urteil bei voller
+Zuversicht ist eine Standardabweichung, nie mehr; dazu der Deckel der
+Aufschläge. **Der Verdienst kommt aus der Nachprüfung:** Jedes Urteil wird
+nach fünf Handelstagen gegen den Kurs gehalten (`reasoning_urteil`,
+Migration 045). Ab zwanzig gerichteten, nachgeprüften Urteilen zählt die
+Trefferquote (0,50 → 0, 0,70 → 1); davor der Zwischenwert 0,25. Urteile älter
+als drei Tage zählen nicht mehr — sie wurden auf einen anderen Kurs gebildet.
+
+Der Urteilslauf ist vom Prognoselauf **entkoppelt** (auf der CPU kostet ein
+Urteil mit dem 33-Milliarden-Modell mehrere Minuten): Der Tageslauf bildet
+`UrteileJeTag` (12) im Budget `UrteilBudgetMinuten` (60), Werte ohne Urteil
+zuerst, gehaltene Positionen vor allen anderen. Einzelheiten in
+[SAEULE-REASONING.md](SAEULE-REASONING.md).
 
 ### `flow`, `deep`
 

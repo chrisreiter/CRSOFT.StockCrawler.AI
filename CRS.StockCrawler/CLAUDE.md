@@ -206,6 +206,14 @@ nicht am Ziffernanteil. Details in
 Aufrufe neu baut, bekommt in der zweiten Runde 400 — der Agent ruft dann genau
 einmal ein Werkzeug auf und bricht ab.
 
+**Die Reasoning-Säule bekommt ihr Gewicht aus einem Urteil, nicht aus einer
+Zahl des Modells.** Richtung −2…+2 und Zuversicht 0…1 per JSON, nach
+Pflicht-Werkzeugaufrufen; ohne Aufruf verworfen. Betrag = Richtung/2 ×
+Zuversicht × Tagesschwankung × √Horizont als Aufschlag; Verdienst aus der
+Nachprüfung nach fünf Handelstagen (`reasoning_urteil`, ab 20 Fällen), davor
+0,25. Der Urteilslauf ist entkoppelt (12 je Tag, 60 min Budget), weil ein
+Urteil auf der CPU Minuten kostet. Siehe [docs/SAEULE-REASONING.md](docs/SAEULE-REASONING.md).
+
 **Der Reasoning-Agent muss die Grenzen mitsagen.** Seine Anweisung verpflichtet
 ihn, zu jeder Prognose das Fehlerverhältnis im Sperrbereich zu nennen und bei
 Werten ab 1 ausdrücklich zu sagen, dass sie keine Handelsgrundlage ist. Ein

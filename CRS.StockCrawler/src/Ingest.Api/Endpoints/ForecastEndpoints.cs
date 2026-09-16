@@ -175,7 +175,7 @@ public static class ForecastEndpoints
             var w = new Dictionary<string, int>
             {
                 ["learning"] = 100, ["math"] = 0, ["flow"] = 0,
-                ["deep"] = 0, ["knowledge"] = 0, ["semantic"] = 0
+                ["deep"] = 0, ["knowledge"] = 0, ["semantic"] = 0, ["reasoning"] = 0
             };
 
             foreach (var teil in (gewichte ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries))

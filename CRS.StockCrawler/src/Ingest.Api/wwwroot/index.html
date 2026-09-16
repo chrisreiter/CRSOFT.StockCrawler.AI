@@ -1377,12 +1377,12 @@
     <div class="pillar-panel" data-panel="reasoning">
       <div class="pillar-head">
         <label class="check">
-          <input type="checkbox" class="pillar-on" data-key="reasoning" disabled>
+          <input type="checkbox" class="pillar-on" data-key="reasoning">
           in die Prognose einbeziehen
         </label>
         <div class="weight">
           <label>Gewichtung</label>
-          <input type="range" class="pillar-weight" data-key="reasoning" min="0" max="100" value="0" disabled>
+          <input type="range" class="pillar-weight" data-key="reasoning" min="0" max="100" value="0">
           <output class="pillar-weight-out" data-key="reasoning">0</output>
           <span class="share" data-share="reasoning"></span>
         </div>
@@ -1390,10 +1390,32 @@
 
       <p class="hint block">
         Der Agent beantwortet Fragen zu Prognosen, Kurvenereignissen,
-        Verknüpfungen und dem gesammelten Wissen. Er <b>erzeugt keine
-        Prognose</b> — er liest die vorhandenen ab. Deshalb hat diese Säule
-        kein Gewicht am Ergebnis: Sie erklärt, sie rechnet nicht mit.
+        Verknüpfungen und dem gesammelten Wissen — und er gibt je Wert ein
+        <b>Urteil</b> ab: Richtung (−2 bis +2) und Zuversicht (0 bis 1), gebildet
+        aus Journal, Tagesübersicht, Prognosen, Nachrichten und
+        Grundschwingungen. <b>Einen Betrag bestimmt er nicht.</b> Der kommt aus
+        der gemessenen Schwankung des Werts, und der Verdienst der Säule aus
+        der Nachprüfung: Jedes Urteil wird nach fünf Handelstagen gegen den
+        Kurs gehalten. Bis zwanzig Urteile nachgeprüft sind, gilt der
+        vorsichtige Zwischenwert 0,25.
       </p>
+
+      <div class="card" id="rs-urteile-card">
+        <h3>Urteile</h3>
+        <p class="hint block">
+          Ein Urteil ohne Werkzeugaufruf wird verworfen. Der Lauf ist vom
+          Prognoselauf entkoppelt: Auf der CPU kostet ein Urteil Minuten, deshalb
+          bildet der Tageslauf zwölf je Tag mit einer Stunde Budget — die Werte
+          ohne Urteil zuerst, gehaltene Positionen vor allen anderen. Die
+          Prognose mischt Urteile, die höchstens drei Tage alt sind.
+        </p>
+        <div class="toolbar">
+          <button id="rs-urteile-lauf" class="primary">Urteile bilden</button>
+          <label class="check"><input id="rs-urteile-max" type="number" min="1" max="50" value="3" style="width:4em"> Werte</label>
+          <button id="rs-urteile-bewerten">Fällige nachprüfen</button>
+        </div>
+        <div id="rs-urteile-out"></div>
+      </div>
 
       <p class="hint block">
         <b>Er darf keine Zahl erfinden.</b> Jede Zahl seiner Antwort stammt aus

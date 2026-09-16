@@ -127,8 +127,98 @@ public sealed class SaeulenbeitragService : ISaeulenbeitragService
 
         await WissenAsync(conn, horizonte, Fuer, ct);
         await SemantikAsync(conn, horizonte, Fuer, ct);
+        await ReasoningAsync(conn, horizonte, Fuer, ct);
 
         return lage;
+    }
+
+    // =================================================== Säule Reasoning ====
+
+    /// <summary>
+    /// Das Urteil des Agenten als Auf- oder Abschlag.
+    ///
+    /// <para><b>Das Modell liefert keinen Betrag.</b> Es liefert eine Richtung (−2…+2)
+    /// und eine Zuversicht (0…1). Der Betrag kommt aus der Messung: Richtung/2 ×
+    /// Zuversicht × die übliche Tagesschwankung DIESES Werts × √Horizont — ein volles
+    /// Urteil bei voller Zuversicht ist also eine Standardabweichung, nie mehr. Der
+    /// Deckel der Mischung (höchstens so viel wie die Grundlage) gilt obendrein.</para>
+    ///
+    /// <para><b>Der Verdienst kommt aus der Nachprüfung</b> — Trefferquote der
+    /// gerichteten Urteile nach fünf Handelstagen, ab zwanzig Fällen; davor 0,25.
+    /// Ein Urteil, das älter als drei Tage ist, zählt nicht mehr: Es wurde auf
+    /// einen anderen Kurs gebildet.</para>
+    /// </summary>
+    private async Task ReasoningAsync(
+        System.Data.Common.DbConnection conn, IReadOnlyList<int> horizonte,
+        Func<int, Saeulenlage> fuer, CancellationToken ct)
+    {
+        try
+        {
+            var urteile = (await conn.QueryAsync<(int AssetId, short Richtung, double Zuversicht, string? Begruendung)>(
+                new CommandDefinition($"""
+                    SELECT u.asset_id, u.richtung, u.zuversicht, u.begruendung
+                      FROM dbo.reasoning_urteil u
+                      JOIN (SELECT asset_id, MAX(made_at_utc) AS m FROM dbo.reasoning_urteil
+                             WHERE made_at_utc >= {d.PlusTage("-3", d.Jetzt)} GROUP BY asset_id) j
+                        ON j.asset_id = u.asset_id AND j.m = u.made_at_utc
+                    """, cancellationToken: ct))).Where(u => u.Richtung != 0).ToList();
+
+            if (urteile.Count == 0) return;
+
+            var (gerichtet, treffer) = await conn.QuerySingleAsync<(int, int)>(new CommandDefinition($"""
+                SELECT CAST(COUNT(*) AS INT), CAST(SUM(CASE WHEN treffer = {d.Wahr} THEN 1 ELSE 0 END) AS INT)
+                  FROM dbo.reasoning_urteil WHERE bewertet_utc IS NOT NULL AND richtung <> 0
+                """, cancellationToken: ct));
+            var (verdienst, grund) = IReasoningUrteilService.Verdienst(gerichtet, treffer);
+
+            /*  Die uebliche Tagesschwankung je Wert -- Standardabweichung der
+                Log-Renditen der letzten 120 Tage. Sie ist die Einheit, in der
+                das Urteil zu Geld wird; ohne sie waere ein "+2" bei einem
+                Staatsanleihen-ETF dieselbe Zahl wie bei einem Krypto-Wert.   */
+            var ids = urteile.Select(u => u.AssetId).Distinct().ToList();
+            var sigma = new Dictionary<int, double>();
+            foreach (var block in SqlBatching.Chunks(ids, 500))
+            {
+                var rows = await conn.QueryAsync<(int AssetId, double? Sigma)>(new CommandDefinition($"""
+                    SELECT asset_id, {d.Stdabw("r")}
+                      FROM (SELECT asset_id,
+                                   {d.Ln("\"close\"")} - LAG({d.Ln("\"close\"")}) OVER (PARTITION BY asset_id ORDER BY ts_utc) AS r
+                              FROM dbo.price_bar
+                             WHERE interval_code = '1d' AND "close" > 0
+                               AND ts_utc >= {d.PlusTage("-180", d.Jetzt)}
+                               AND {d.In("asset_id", "ids")}) t
+                     WHERE r IS NOT NULL
+                     GROUP BY asset_id
+                    """, new { ids = block }, cancellationToken: ct));
+                foreach (var (id, sg) in rows) if (sg is > 0) sigma[id] = sg.Value;
+            }
+
+            var mit = 0;
+            foreach (var u in urteile)
+            {
+                if (!sigma.TryGetValue(u.AssetId, out var sg)) continue;
+                mit++;
+                var staerke = u.Richtung / 2.0 * u.Zuversicht;
+                var begr = string.IsNullOrWhiteSpace(u.Begruendung) ? "" : u.Begruendung!;
+                if (begr.Length > 90) begr = begr[..90] + "…";
+
+                foreach (var h in horizonte)
+                {
+                    var tage = Math.Max(1, h / 24);
+                    fuer(u.AssetId).Fuege(h, new Saeulenbeitrag(
+                        "reasoning", staerke * sg * Math.Sqrt(tage), verdienst,
+                        $"Urteil {u.Richtung:+0;-0} bei Zuversicht {u.Zuversicht:P0}: {begr} — {grund}",
+                        Beitragsart.Aufschlag));
+                }
+            }
+
+            _log.LogInformation("Reasoning-Säule: {Mit} Werte mit gerichtetem Urteil (≤ 3 Tage), Verdienst {V:F2} ({Grund})",
+                mit, verdienst, grund);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Reasoning-Säule übersprungen");
+        }
     }
 
     // ====================================================== Säule Wissen ====
