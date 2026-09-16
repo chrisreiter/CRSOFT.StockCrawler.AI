@@ -39,6 +39,7 @@ dotnet build                                    # aus CRS.StockCrawler/
 powershell -File infra/apply-sql.ps1            # Schema einspielen, SQL Server (idempotent)
 powershell -File infra/apply-pgsql.ps1          # Schema einspielen, PostgreSQL (idempotent)
 cd src/Ingest.Api && dotnet run                 # API auf http://localhost:5011
+start-app.bat                                   # alles auf einmal: Datenbank pruefen, Qdrant, Ollama, App, Browser
 ```
 
 Erstbefüllung: `POST /api/ingest/bootstrap?months=24`

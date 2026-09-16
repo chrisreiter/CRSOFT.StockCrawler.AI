@@ -382,6 +382,14 @@ ersten Einbetten selbst an.
 
 ## 7 · Bauen und starten
 
+**Kurzweg unter Windows:** `CRS.StockCrawler\start-app.bat` prüft die
+Datenbankdienste, startet Qdrant und Ollama, falls sie nicht laufen, baut die
+Anwendung, startet sie in einem eigenen Fenster und öffnet den Browser. Jeder
+Schritt prüft zuerst, ob das Ziel schon läuft. Pfade zu Qdrant und Ollama
+lassen sich über `CRS_QDRANT_DIR` und `CRS_OLLAMA_APP` übersteuern. Eine
+Verknüpfung auf dem Desktop, die diese Datei per `call` aufruft, genügt —
+dann bleibt das Repository die einzige Stelle, an der das Skript gepflegt wird.
+
 ```bash
 cd CRS.StockCrawler
 dotnet build
