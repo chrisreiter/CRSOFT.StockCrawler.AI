@@ -22,6 +22,17 @@ public sealed record ReasoningAnswer(
     string Model,
     double Seconds);
 
+/// <summary>
+/// Das Urteil des Agenten zu einem Wert — Richtung und Zuversicht, kein Betrag.
+/// </summary>
+/// <param name="Richtung">−2 stark abwärts … 0 neutral … +2 stark aufwärts.</param>
+/// <param name="Zuversicht">0 bis 1.</param>
+/// <param name="Werkzeuge">Welche Werkzeuge das Urteil gestützt haben. Leer
+/// gibt es nicht — ein Urteil ohne Werkzeugaufruf wird nicht gebildet.</param>
+public sealed record ReasoningUrteil(
+    int Richtung, double Zuversicht, string Begruendung,
+    IReadOnlyList<string> Werkzeuge, int Rounds, string Model, double Seconds);
+
 public interface IReasoningService
 {
     Task<bool> IsAvailableAsync(CancellationToken ct = default);
@@ -45,6 +56,16 @@ public interface IReasoningService
     Task<ReasoningAnswer> AskAsync(
         IReadOnlyList<ChatTurn> history, string question,
         string? sprachcode = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Ein Urteil zu einem Wert: Richtung und Zuversicht, gebildet aus den
+    /// Werkzeugen — Prognose, Kurs, Nachrichten, Grundschwingungen, Ereignisse —
+    /// und dem mitgegebenen Tageskontext (Journal, Tagesübersicht).
+    /// <c>null</c>, wenn das Modell nicht antwortet, kein Werkzeug gerufen hat
+    /// oder kein auswertbares Urteil geliefert hat; <c>Grund</c> sagt dann, warum.
+    /// </summary>
+    Task<(ReasoningUrteil? Urteil, string? Grund)> UrteilAsync(
+        string symbol, string? kontext, TimeSpan frist, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -194,11 +215,6 @@ public sealed class ReasoningService(
            Mit eigener Frist bricht der Agent selbst ab und liefert, was er hat.
            Ein Teilergebnis mit dem Hinweis „Zeit abgelaufen" ist mehr wert als
            ein Serverfehler. */
-        using var frist = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        frist.CancelAfter(TimeSpan.FromMinutes(12));
-
-        ct = frist.Token;
-
         var messages = new List<object>
         {
             new { role = "system", content = SystemPrompt(Sprachname(loc.Erkenne(question) ?? sprachcode)) }
@@ -211,6 +227,22 @@ public sealed class ReasoningService(
             messages.Add(new { role = t.Role, content = t.Content });
 
         messages.Add(new { role = "user", content = question });
+
+        return await RundenAsync(messages, TimeSpan.FromMinutes(12), sw, ct);
+    }
+
+    /// <summary>
+    /// Die Werkzeugschleife — gemeinsam für Fragen und Urteile. Bricht mit
+    /// eigener Frist ab und liefert, was bis dahin da ist.
+    /// </summary>
+    private async Task<ReasoningAnswer> RundenAsync(
+        List<object> messages, TimeSpan fristDauer,
+        System.Diagnostics.Stopwatch sw, CancellationToken ct)
+    {
+        using var frist = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        frist.CancelAfter(fristDauer);
+
+        ct = frist.Token;
 
         var traces = new List<ToolTrace>();
         var runde = 0;
@@ -371,6 +403,111 @@ public sealed class ReasoningService(
             + "eine engere Frage.",
             traces, runde, Model, sw.Elapsed.TotalSeconds);
     }
+
+    // --------------------------------------------------------------- Urteil --
+
+    public async Task<(ReasoningUrteil? Urteil, string? Grund)> UrteilAsync(
+        string symbol, string? kontext, TimeSpan frist, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        var messages = new List<object>
+        {
+            new { role = "system", content = UrteilPrompt() },
+            new { role = "user", content =
+                $"Bilde dein Urteil zu {symbol}." +
+                (string.IsNullOrWhiteSpace(kontext) ? "" :
+                 "\n\nTAGESKONTEXT (Journal und Tagesübersicht, aus Messungen erzeugt):\n" + kontext) }
+        };
+
+        var antwort = await RundenAsync(messages, frist, sw, ct);
+
+        /*  Kein Werkzeug, kein Urteil. Das ist die eine Regel, die das Ganze
+            traegt: Ein Modell, das frei antwortet, darf keine Zahl in eine
+            Mischung setzen, deren Regel „keine Zahl ohne Messung“ lautet.
+            Gemessen antwortete es bei den ersten drei Fragen zweimal so.       */
+        if (antwort.Tools.Count == 0)
+            return (null, "Kein Werkzeugaufruf — Urteil verworfen: " + Kurz(antwort.Text));
+
+        var json = JsonAusText(antwort.Text);
+        if (json is null)
+            return (null, "Kein auswertbares JSON in der Antwort: " + Kurz(antwort.Text));
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var r = doc.RootElement;
+
+            var richtung = Zahl(r, "richtung");
+            var zuversicht = Zahl(r, "zuversicht");
+            if (richtung is null || zuversicht is null)
+                return (null, "richtung oder zuversicht fehlt: " + Kurz(json));
+
+            var begr = r.TryGetProperty("begruendung", out var b) && b.ValueKind == JsonValueKind.String
+                ? b.GetString() ?? "" : "";
+
+            return (new ReasoningUrteil(
+                Math.Clamp((int)Math.Round(richtung.Value), -2, 2),
+                Math.Clamp(zuversicht.Value, 0, 1),
+                begr.Length > 600 ? begr[..600] : begr,
+                antwort.Tools.Select(t => t.Name).Distinct().ToList(),
+                antwort.Rounds, antwort.Model, antwort.Seconds), null);
+        }
+        catch (JsonException ex)
+        {
+            return (null, "JSON nicht lesbar: " + ex.Message);
+        }
+
+        static string Kurz(string t) => t.Length > 200 ? t[..200] + " …" : t;
+
+        static double? Zahl(JsonElement r, string name)
+        {
+            if (!r.TryGetProperty(name, out var v)) return null;
+            if (v.ValueKind == JsonValueKind.Number) return v.GetDouble();
+            if (v.ValueKind == JsonValueKind.String
+                && double.TryParse(v.GetString(), System.Globalization.NumberStyles.Float,
+                                   System.Globalization.CultureInfo.InvariantCulture, out var d))
+                return d;
+            return null;
+        }
+    }
+
+    /// <summary>Das äusserste {…} aus einem Text, der auch Prosa enthalten kann.</summary>
+    private static string? JsonAusText(string text)
+    {
+        var a = text.IndexOf('{');
+        var e = text.LastIndexOf('}');
+        return a >= 0 && e > a ? text[a..(e + 1)] : null;
+    }
+
+    /// <summary>
+    /// Die Anweisung für ein Urteil. Deutsch und knapp; das Ergebnis ist eine
+    /// Zahl, keine Prosa — und die Zahl ist eine Richtung, kein Betrag.
+    /// </summary>
+    private static string UrteilPrompt() => """
+        Du bist der Pruefer in einer Anlage-Analyseanwendung. Du sollst zu EINEM Wert
+        ein Urteil abgeben: Richtung und Zuversicht fuer die naechsten ein bis zwanzig
+        Handelstage. Du bestimmst KEINEN Betrag -- den rechnet die Anwendung aus der
+        gemessenen Schwankung des Werts. Dein Urteil wird gespeichert und nach fuenf
+        Handelstagen gegen den Kurs geprueft; deine Trefferquote bestimmt, wie viel
+        Gewicht deine Urteile kuenftig bekommen.
+
+        PFLICHT: Rufe zuerst Werkzeuge auf -- mindestens `prognose` und `kurs`, dazu
+        nach Bedarf `nachrichten`, `grundschwingungen`, `kurvenereignisse`. Ein Urteil
+        ohne Werkzeugaufruf wird verworfen.
+
+        BEACHTE die gemessenen Grenzen: Kein Modell dieser Anwendung schlaegt im
+        Sperrbereich die blosse Drift. Ein Fehlerverhaeltnis ab 1,0 heisst: die
+        Prognose ist keine Handelsgrundlage. Wenn nichts ueberzeugt, ist Richtung 0
+        mit niedriger Zuversicht die richtige Antwort -- ein ehrliches "weiss nicht"
+        kostet dich nichts, ein erfundenes Urteil kostet Trefferquote.
+
+        Antworte am Ende AUSSCHLIESSLICH mit einem JSON-Objekt, ohne Text davor oder
+        danach:
+
+          {"richtung": -2 | -1 | 0 | 1 | 2, "zuversicht": 0.0 bis 1.0,
+           "begruendung": "ein bis drei Saetze, mit den Zahlen aus den Werkzeugen"}
+        """;
 
     // ------------------------------------------------------------ Anweisung --
 

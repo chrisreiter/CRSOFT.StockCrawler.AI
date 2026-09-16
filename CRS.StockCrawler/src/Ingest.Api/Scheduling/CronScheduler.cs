@@ -295,6 +295,24 @@ public sealed class CronScheduler : BackgroundService
             _log.LogError(ex, "Grundschwingungen übersprungen");
         }
 
+        /* Die Urteile der Reasoning-Saeule: erst die faelligen nachpruefen (das
+           ist die Messung, an der ihr Gewicht haengt), dann neue bilden -- mit
+           Zeitbudget, denn ein Urteil kostet auf der CPU Minuten. Am Ende des
+           Tageslaufs, damit es nichts anderes aufhaelt; Ollama fehlt -> der
+           Lauf meldet es und ist in einer Sekunde fertig.                    */
+        try
+        {
+            var urteile = sp.GetRequiredService<IReasoningUrteilService>();
+            var geprueft = await urteile.BewerteAsync(ct);
+            var lauf = await urteile.LaufeAsync(_opt.UrteileJeTag, TimeSpan.FromMinutes(_opt.UrteilBudgetMinuten), ct);
+            _log.LogInformation("Reasoning-Urteile: {Geprueft} nachgeprüft, {Gebildet} gebildet, {Verworfen} verworfen in {S:F0} s",
+                geprueft, lauf.Gebildet, lauf.Verworfen, lauf.Sekunden);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Reasoning-Urteile übersprungen");
+        }
+
         try
         {
             var laeufe = await sp.GetRequiredService<IAutopilotService>().LaufeAlleAsync(ct);

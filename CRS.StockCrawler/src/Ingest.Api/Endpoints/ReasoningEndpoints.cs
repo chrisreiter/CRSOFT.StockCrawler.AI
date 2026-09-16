@@ -24,6 +24,20 @@ public static class ReasoningEndpoints
     {
         var g = app.MapGroup("/api/reasoning").WithTags("Reasoning");
 
+        /* Die Urteile: Stand, Nachpruefung, Lauf. Der Lauf ist ein POST mit
+           Zeitbudget -- auf der CPU kostet ein Urteil Minuten, und der Knopf
+           soll nicht eine Stunde blockieren. */
+        g.MapGet("/urteile", async (IReasoningUrteilService svc, int letzte = 30, CancellationToken ct = default) =>
+            Results.Ok(await svc.StandAsync(letzte, ct)));
+
+        g.MapPost("/urteile/lauf", async (IReasoningUrteilService svc, int max = 5, int minuten = 20,
+                                          CancellationToken ct = default) =>
+            Results.Ok(await svc.LaufeAsync(Math.Clamp(max, 1, 200),
+                                            TimeSpan.FromMinutes(Math.Clamp(minuten, 1, 240)), ct)));
+
+        g.MapPost("/urteile/bewerten", async (IReasoningUrteilService svc, CancellationToken ct) =>
+            Results.Ok(new { bewertet = await svc.BewerteAsync(ct) }));
+
         /* Das Modell wechseln. Wirkt sofort und für alle Sitzungen — es ist
            eine Eigenschaft der Anwendung, nicht des Fensters. */
         g.MapPost("/modell", (IReasoningService svc, string name, bool? denken = null) =>

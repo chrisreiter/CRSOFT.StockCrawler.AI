@@ -40,6 +40,15 @@ public sealed class IngestOptions
     public int TopCrypto { get; set; } = 100;
 
     public string DailyCronUtc { get; set; } = "20 2 * * *";
+
+    /// <summary>
+    /// Wie viele Reasoning-Urteile der Tageslauf höchstens bildet und wie viel
+    /// Zeit er sich dafür nimmt. Auf der CPU kostet ein Urteil mit dem
+    /// 33-Milliarden-Modell mehrere Minuten; zwölf Werte in einer Stunde sind
+    /// dort realistisch. Mit einer GPU passt ein Vielfaches ins selbe Budget.
+    /// </summary>
+    public int UrteileJeTag { get; set; } = 12;
+    public int UrteilBudgetMinuten { get; set; } = 60;
     public string HourlyCronUtc { get; set; } = "8 * * * *";
 
     /// <summary>

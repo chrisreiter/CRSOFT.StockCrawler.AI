@@ -1,16 +1,52 @@
 # Säule „Reasoning"
 
-**CRSOFT.StockCrawler**, Stand 22.08.2026
+**CRSOFT.StockCrawler**, Stand 16.09.2026
 
 Ein Gesprächsagent auf allem, was das System weiß — Prognosen,
 Kurvendiskussion, Verknüpfungen, Fachliteratur, Nachrichten.
 
-## Warum diese Säule kein Gewicht bekommt
+## Wie diese Säule ein Gewicht bekommt — und warum sie lange keines hatte
 
-Sie **erzeugt keine Prognose**. Sie liest die vorhandenen ab und erklärt sie.
-Ein Gewicht am Ergebnis hätte hier nichts zu gewichten — und wäre gefährlich:
-Eine Säule, die dieselben Zahlen noch einmal einbringt, würde ihnen doppeltes
-Gewicht geben.
+Bis 16.09.2026 hatte sie keines, und der Grund stand hier: Sie erzeugt keine
+Prognose, sie liest die vorhandenen ab; eine Säule, die dieselben Zahlen noch
+einmal einbringt, gäbe ihnen doppeltes Gewicht. Dazu die Messung, dass das
+Modell bei den ersten drei echten Fragen zweimal ohne Werkzeugaufruf, also
+frei, geantwortet hatte.
+
+Der Betreiber wollte Nemotrons Einschätzung und das Journal trotzdem in die
+Prognose mischen können. Der Weg, der die Regel „keine Zahl ohne Messung"
+nicht bricht, hat vier Teile:
+
+1. **Das Modell liefert ein Urteil, keinen Betrag.** `UrteilAsync` fragt je
+   Wert nach Richtung (−2…+2) und Zuversicht (0…1) als JSON — nachdem es
+   `prognose`, `kurs` und nach Bedarf `nachrichten`, `grundschwingungen`,
+   `kurvenereignisse` gerufen hat. Der Tageskontext (Journal-Lage, Punkte der
+   Tagesübersicht zu diesem Wert) geht als Text mit.
+2. **Kein Werkzeugaufruf, kein Urteil.** Antwortet das Modell frei, wird das
+   Urteil verworfen und der Grund festgehalten. Das ist die Antwort auf die
+   Messung von oben.
+3. **Der Betrag kommt aus der Schwankung des Werts**, nicht aus dem Modell:
+   Richtung/2 × Zuversicht × σ_Tag × √Horizont, als Aufschlag mit Deckel.
+   Ein „+2 bei 100 %" ist eine Standardabweichung — bei einem Anleihen-ETF
+   ein Zehntelprozent, bei einem Krypto-Wert fünf.
+4. **Der Verdienst kommt aus der Nachprüfung.** `reasoning_urteil` hält
+   Urteil, Werkzeuge, Dauer und den Basiskurs; fünf Handelstage später wird
+   der Kurs geholt und das Vorzeichen geprüft. Ab zwanzig gerichteten Urteilen
+   zählt die Trefferquote, davor 0,25 — derselbe vorsichtige Zwischenwert wie
+   bei der ersten Säule, solange sie jung ist.
+
+Der Lauf ist vom Prognoselauf entkoppelt (`ReasoningUrteilService`): zwölf
+Urteile je Tag mit einer Stunde Budget, Werte ohne Urteil zuerst, gehaltene
+Positionen vor allen anderen. `POST /api/reasoning/urteile/lauf?max=&minuten=`
+stößt es von Hand an, `GET /api/reasoning/urteile` zeigt Stand und
+Trefferquote, `POST …/bewerten` prüft Fälliges nach. Die Checkbox der Säule
+ist frei; ihr Gewicht steht auf null, bis jemand es hebt.
+
+**Was noch nicht gemessen ist:** die Trefferquote. Am 16.09.2026 gab es null
+Urteile — Ollama war auf dem Entwicklungsrechner defekt (halbfertiges Update
+ohne `llama-server.exe`). Bis zwanzig nachgeprüfte Urteile vorliegen, wirkt
+die Säule mit Verdienst 0,25 × Regler; danach entscheidet die Messung, ob sie
+mehr oder gar nichts bekommt.
 
 ## Werkzeuge statt Kontextblock
 

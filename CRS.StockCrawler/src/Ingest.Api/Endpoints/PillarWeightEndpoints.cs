@@ -21,7 +21,7 @@ public static class PillarWeightEndpoints
     /// in der Oberfläche wird.
     /// </summary>
     public static readonly string[] Saeulen =
-        ["learning", "math", "flow", "deep", "knowledge", "semantic"];
+        ["learning", "math", "flow", "deep", "knowledge", "semantic", "reasoning"];
 
     /// <summary>
     /// Liest die abgelegten Gewichte. Fehlende Säulen kommen mit null zurück —

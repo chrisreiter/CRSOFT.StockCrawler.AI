@@ -3037,6 +3037,7 @@ $('#pillar-tabs').addEventListener('click', e => {
   if (b.dataset.pillar === 'knowledge') loadKnowledge();
   if (b.dataset.pillar === 'reasoning') loadReasoning();
   if (b.dataset.pillar === 'semantic') loadSemantic();
+  if (b.dataset.pillar === 'reasoning' && !$('#rs-urteile-out').children.length) ladeUrteile();
 });
 
 $('#view-pillars').addEventListener('input', renderPillarWeights);
@@ -3748,6 +3749,64 @@ const HEUTE_ART = {
    verlorengeht. */
 
 let journalMarkdown = '';
+
+/* ------------------------------------------------- Reasoning: Urteile --- */
+
+async function ladeUrteile() {
+  const d = await guard(() => api('/api/reasoning/urteile?letzte=30'));
+  if (!d) return;
+
+  const raus = $('#rs-urteile-out');
+  const kennzahl = (was, wert, titel) =>
+    '<div class="nz-kennzahl"' + (titel ? ' title="' + esc(titel) + '"' : '') + '>'
+    + '<div class="w">' + esc(was) + '</div><div class="zahl">' + wert + '</div></div>';
+
+  const richtung = r => r > 0 ? '<span class="up">+' + r + '</span>'
+                   : r < 0 ? '<span class="down">' + r + '</span>' : '0';
+
+  raus.innerHTML =
+    '<div class="nz-kennzahlen">'
+    + kennzahl('Urteile', d.gesamt)
+    + kennzahl('aktuell', d.aktuell, 'jünger als drei Tage — nur diese gehen in die Prognose')
+    + kennzahl('offen', d.offen, 'noch nicht nachgeprüft')
+    + kennzahl('nachgeprüft', d.gerichtet, 'gerichtete Urteile mit Kurs fünf Handelstage später')
+    + kennzahl('Trefferquote', d.trefferquote == null ? '–' : fmtNum(d.trefferquote * 100, 1) + ' %',
+        'Vorzeichen des Urteils gegen die Rendite nach fünf Handelstagen')
+    + kennzahl('Verdienst', fmtNum(d.verdienst, 2), d.verdienstGrund)
+    + '</div>'
+    + '<p class="hint block">' + esc(d.verdienstGrund) + '.</p>'
+    + (d.letzte.length
+        ? '<div class="gs-roll"><table class="grid gs-tab"><thead><tr>'
+          + '<th>Wert</th><th class="num">wann</th><th class="num">Urteil</th><th class="num">Zuversicht</th>'
+          + '<th>Begründung</th><th>Werkzeuge</th><th class="num">Dauer</th>'
+          + '<th class="num" title="Log-Rendite fünf Handelstage nach dem Urteil">realisiert</th><th>Treffer</th></tr></thead><tbody>'
+          + d.letzte.map(u =>
+              '<tr><td>' + esc(u.symbol) + '</td><td class="num">' + fmtDate(u.madeAtUtc) + '</td>'
+              + '<td class="num">' + richtung(u.richtung) + '</td><td class="num">' + fmtNum(u.zuversicht * 100, 0) + ' %</td>'
+              + '<td class="wrap" style="max-width:38em;white-space:normal">' + esc(u.begruendung || '') + '</td>'
+              + '<td>' + esc(u.werkzeuge) + '</td><td class="num">' + fmtNum(u.sekunden, 0) + ' s</td>'
+              + '<td class="num">' + (u.realisiert == null ? '–' : fmtNum(u.realisiert * 100, 2) + ' %') + '</td>'
+              + '<td>' + (u.treffer == null ? (u.bewertetUtc ? 'neutral' : 'offen') : u.treffer ? 'ja' : 'nein') + '</td></tr>').join('')
+          + '</tbody></table></div>'
+        : '<p class="hint block">Noch kein Urteil. „Urteile bilden" fragt das Modell für die angegebene Zahl an Werten — '
+          + 'auf der CPU dauert ein Urteil mehrere Minuten.</p>');
+}
+
+$('#rs-urteile-lauf')?.addEventListener('click', async () => {
+  const max = parseInt($('#rs-urteile-max').value, 10) || 3;
+  const r = await guard(() => api('/api/reasoning/urteile/lauf?max=' + max + '&minuten=60', { method: 'POST' }));
+  if (!r) return;
+  setStatus(r.gebildet + ' Urteile gebildet, ' + r.verworfen + ' verworfen'
+    + (r.gruende.length ? ' — ' + r.gruende.slice(0, 2).join(' · ') : '') + '.', r.gebildet ? 'ok' : 'err');
+  await ladeUrteile();
+});
+
+$('#rs-urteile-bewerten')?.addEventListener('click', async () => {
+  const r = await guard(() => api('/api/reasoning/urteile/bewerten', { method: 'POST' }), 'Nachgeprüft.');
+  if (!r) return;
+  setStatus(r.bewertet + ' Urteile nachgeprüft.', 'ok');
+  await ladeUrteile();
+});
 
 $('#rs-journal').onclick = async () => {
   const q = new URLSearchParams();
