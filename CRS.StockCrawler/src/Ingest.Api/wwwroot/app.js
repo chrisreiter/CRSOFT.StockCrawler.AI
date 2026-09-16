@@ -6653,8 +6653,22 @@ async function depotKurve() {
 
     /* Vor dem ersten Tag eines Depots steht `null`, nicht null-Komma-null:
        Eine Linie, die bei 0 beginnt und dann springt, behauptet einen Verlust,
-       den es nie gab. `spanGaps` bleibt deshalb aus. */
-    return alle.map(t => (nach.has(t) ? nach.get(t) : null));
+       den es nie gab. `spanGaps` bleibt deshalb aus.
+
+       ZWISCHEN zwei eigenen Punkten gilt dagegen der letzte bekannte Wert.
+       Die Depots haben verschiedene Zeitstempel -- Buchungssekunden, Tages-
+       schluss, seit dem 13.9. Stundenbars --, und auf der gemeinsamen Achse
+       fehlte einem Depot an jedem fremden Stempel ein Punkt: Die Linie riss
+       dort ab, obwohl das Depot einen Wert hatte. Gemeldet als „der Graph ist
+       unterbrochen". Fortschreiben ist hier richtig, weil ein Vermoegens-
+       verlauf eine Addition ist, keine Messung (siehe CLAUDE.md zum
+       Gesamtvermoegen): Zwischen zwei Buchungen ist das Depot nicht wertlos,
+       es wird nur nicht neu bewertet.                                        */
+    let letzter = null;
+    return alle.map(t => {
+      if (nach.has(t)) letzter = nach.get(t);
+      return letzter;
+    });
   });
 
   host.innerHTML = '';
