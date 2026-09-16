@@ -164,6 +164,13 @@ des Bestands, Zeile 6.937 von 42.219.
 **`convert_to()` ist nur `STABLE`**, eine generierte Spalte verlangt
 `IMMUTABLE` — deshalb `dbo.utf8()` als Hülle für `origin_hash`.
 
+**`TINYINT` gegen `smallint`: derselbe Fehler in Gegenrichtung.** Eine
+Spalte, die in SQL Server `TINYINT` ist (→ `byte`) und in Postgres `smallint`
+(→ `short`), passt in keinen Konstruktor, der für die eine Seite geschrieben
+wurde. `freq_class.stimmen` lieferte gegen Postgres, und gegen SQL Server
+antwortete die Katalog-Übersicht mit 500 — der Lauf davor war längst fertig.
+Regel: kleine Ganzzahlen im SQL auf `INT` casten, im Datensatz `int`.
+
 **`date`-Spalten kommen als `DateOnly`**, und Dapper kennt `DateOnly` weder
 als Parameter noch als Ergebnis. Beim Lesen auf `{d.TypZeit}` casten.
 

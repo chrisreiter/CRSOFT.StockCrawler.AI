@@ -232,7 +232,7 @@ public sealed class GrundschwingungService(
                 + "1.064 Tagesbars und dauert gemessen rund zwei Minuten.");
 
         var klassen = (await conn.QueryAsync<KlasseRoh>(new CommandDefinition("""
-            SELECT class_id AS ClassId, nr AS Nr, stimmen AS Stimmen,
+            SELECT class_id AS ClassId, nr AS Nr, CAST(stimmen AS INT) AS Stimmen,
                    periode1 AS Periode1, periode2 AS Periode2, periode3 AS Periode3,
                    amp2 AS Amp2, amp3 AS Amp3, harmonik AS Harmonik,
                    akkorde AS Akkorde, werte AS Werte, epochen AS Epochen,
@@ -255,7 +255,7 @@ public sealed class GrundschwingungService(
         await using var conn = await factory.OpenAsync(ct);
 
         var roh = await conn.QuerySingleOrDefaultAsync<KlasseRoh>(new CommandDefinition("""
-            SELECT class_id AS ClassId, nr AS Nr, stimmen AS Stimmen,
+            SELECT class_id AS ClassId, nr AS Nr, CAST(stimmen AS INT) AS Stimmen,
                    periode1 AS Periode1, periode2 AS Periode2, periode3 AS Periode3,
                    amp2 AS Amp2, amp3 AS Amp3, harmonik AS Harmonik,
                    akkorde AS Akkorde, werte AS Werte, epochen AS Epochen,
@@ -389,7 +389,11 @@ public sealed class GrundschwingungService(
     private static object Db(double? v) => v.HasValue && !double.IsNaN(v.Value) ? v.Value : DBNull.Value;
     private static object Db(double v) => double.IsNaN(v) ? DBNull.Value : v;
 
-    private sealed record KlasseRoh(int ClassId, int Nr, short Stimmen, double Periode1, double? Periode2,
+    /*  stimmen ist in SQL Server TINYINT (byte), in Postgres smallint (short);
+        Dapper verlangt fuer den Konstruktor den exakten Typ. Deshalb im SQL auf
+        INT gecastet -- die Uebersicht antwortete sonst gegen SQL Server mit 500,
+        waehrend der Lauf selbst laengst fertig war.                            */
+    private sealed record KlasseRoh(int ClassId, int Nr, int Stimmen, double Periode1, double? Periode2,
         double? Periode3, double? Amp2, double? Amp3, string Harmonik, int Akkorde, int Werte, int Epochen,
         double Prominenz, double Stabilitaet, int Paare, int PaareBestaendig);
     private sealed record MitgliedRoh(int AssetId, string Symbol, string? Name, int Epochen,
