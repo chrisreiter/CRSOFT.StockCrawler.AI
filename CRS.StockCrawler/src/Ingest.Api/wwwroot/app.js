@@ -3037,7 +3037,6 @@ $('#pillar-tabs').addEventListener('click', e => {
   if (b.dataset.pillar === 'knowledge') loadKnowledge();
   if (b.dataset.pillar === 'reasoning') loadReasoning();
   if (b.dataset.pillar === 'semantic') loadSemantic();
-  if (b.dataset.pillar === 'reasoning' && !$('#rs-urteile-out').children.length) ladeUrteile();
 });
 
 $('#view-pillars').addEventListener('input', renderPillarWeights);
@@ -3367,6 +3366,8 @@ async function loadReasoning() {
   // sollen dastehen, nicht auf einen Klick warten.
   $('#rs-heute')?.click();
   $('#rs-journal')?.click();
+
+  if (!$('#rs-urteile-out').children.length) ladeUrteile();
 
   await loadReasoningHealth();
 }
