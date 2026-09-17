@@ -31,6 +31,14 @@ public static class StartEndpoints
     private static readonly TimeSpan Frist = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan Haltbar = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Den Zwischenspeicher verwerfen — nach allem, was die Kacheln sichtbar
+    /// aendert (Depot zuruecksetzen, Autopilot-Lauf, Prognoselauf). Fuenf Minuten
+    /// alte Zahlen sind nach einem Reset keine Verzoegerung, sondern eine falsche
+    /// Auskunft: „noch nicht weg", gemeldet vom Betreiber.
+    /// </summary>
+    public static void Verwerfen() => Cache.Clear();
+
     public static void MapStartEndpoints(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/start").WithTags("Start");

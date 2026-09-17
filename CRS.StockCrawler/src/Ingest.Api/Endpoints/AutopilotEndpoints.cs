@@ -58,6 +58,7 @@ public static class AutopilotEndpoints
                     error = "Ein negatives Startbudget ergibt keinen Sinn."
                 });
 
+            StartEndpoints.Verwerfen();
             var r = await svc.EinstellungSetzeAsync(e.Depot, e.Aktiv, e.Werte, e.MaxAnteil,
                                                     e.Hysterese, e.Takt, e.Waehrung,
                                                     e.Nemotron, e.Startkapital,
@@ -92,6 +93,7 @@ public static class AutopilotEndpoints
 
             foreach (var d in welche)
             {
+                StartEndpoints.Verwerfen();
                 var r = await svc.ZuruecksetzenAsync(d, ct);
 
                 if (r is null)
@@ -125,10 +127,12 @@ public static class AutopilotEndpoints
                                   CancellationToken ct = default) =>
         {
             if (string.IsNullOrWhiteSpace(depot))
+                StartEndpoints.Verwerfen();
                 return Results.Ok(new { laeufe = await svc.LaufeAlleAsync(ct) });
 
             try
             {
+                StartEndpoints.Verwerfen();
                 return Results.Ok(await svc.LaufeAsync(depot, erzwingen, ct));
             }
             catch (InvalidOperationException ex)
