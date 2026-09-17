@@ -1298,6 +1298,17 @@ griff das Datum am Ende von Binance-Titeln ab; Ankündigungen standen mit der
 Kennung `2026-08-30` in der Tabelle. Richtig ist: nur Grossbuchstaben und
 Ziffern, zwei bis zwölf Zeichen.
 
+**Die Startseite „Heute" ist die Vorgabe, nicht „Kurse".** Elf gleichrangige
+Reiter und eine leere Kursauswahl sagten einem Neuling weder, was heute
+wichtig ist, noch wo die Stärken der Anwendung liegen. `/api/start/` sammelt
+acht Quellen parallel, jede mit eigener Frist und eigenem `try` — fällt eine
+aus, zeigt es ihre Kachel, die übrigen stehen —, und hält das Ergebnis fünf
+Minuten. Die jüngsten Meldungen werden auf zwei je Quelle begrenzt: Im ersten
+Aufbau kamen alle sieben aus einem Feed. Der Zeitplanzustand lebt im Speicher
+und ist nach jedem Neustart leer; der letzte Lauf kommt deshalb aus
+`ingest_run`. Verweise mit `data-goto` plus `data-sub` springen in einen
+Unterreiter (Kurse → Investings, Säulen → Reasoning).
+
 **Ein zusätzlicher Reiter kann die Kopfzeile sprengen.** `.tabs` war
 `display: flex` ohne Umbruch. Mit dem elften Reiter wurde die Leiste bei 830 px
 Sichtbreite 882 px lang, schob den ganzen Rumpf waagrecht und liess die
