@@ -2486,4 +2486,12 @@
   <t k="Der Bestand: welche Werte verfolgt werden, nach Branche, Land und Börse.">Der Bestand: welche Werte verfolgt werden, nach Branche, Land und Börse.</t>
   <t k="Läufe, Zeitplan, Benutzer, Sprache, Ollama-Endpunkte.">Läufe, Zeitplan, Benutzer, Sprache, Ollama-Endpunkte.</t>
   <t k="Keine Lagemeldung — ist heute schon ein Lauf durch?">Keine Lagemeldung — ist heute schon ein Lauf durch?</t>
+  <t k="Gast">Gast</t>
+  <t k="Open Lab Demo">Open Lab Demo</t>
+  <t k="Replikat">Replikat</t>
+  <t k="Diese Instanz zeigt den Stand der Hauptinstanz. Läufe, Änderungen und Modellabfragen sind hier nicht möglich.">Diese Instanz zeigt den Stand der Hauptinstanz. Läufe, Änderungen und Modellabfragen sind hier nicht möglich.</t>
+  <t k="Als Gast ansehen">Als Gast ansehen</t>
+  <t k="oder">oder</t>
+  <t k="Diese Instanz ist ein Replikat: nur lesend, ohne Modelle.">Diese Instanz ist ein Replikat: nur lesend, ohne Modelle.</t>
+  <t k="Gastzugang nicht möglich.">Gastzugang nicht möglich.</t>
 </sprache>

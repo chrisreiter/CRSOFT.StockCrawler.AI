@@ -190,7 +190,14 @@ function emptyRow(tbody, colspan, text) {
    erneut auf dem Server geprueft. Wer den Schleier hier im Browser wegraeumt,
    sieht eine Anwendung, deren Abfragen alle mit 401 antworten.             */
 
-let wer = null;          // { login, rolle, istAdmin } oder null
+let wer = null;          // { login, rolle, istAdmin, istGast } oder null
+let betrieb = null;      // { istSlave, gastZugang, gastHinweis, gastKurz, slaveKurz, schreibbar }
+
+/* Darf diese Sitzung auf dieser Instanz schreiben? Master UND kein Gast UND
+   Verwalter. Alles, was schreibt oder ein Modell ruft, fragt hier -- sonst
+   schickt die Oberflaeche Anfragen, die der Server korrekt mit 403 abweist,
+   und der Besucher sieht Fehler fuer etwas, das er nie ausgeloest hat. */
+const darfSchreiben = () => !!(wer?.istAdmin && betrieb?.schreibbar !== false);
 let musseingerichtet = false;
 
 /* Die Sitzung ist weg -- neu laden.
@@ -229,12 +236,43 @@ function zeigeRolle() {
 
   if (leiste) {
     leiste.hidden = false;
-    $('#wer-name').textContent =
-      (wer.anzeigename || wer.login) + ' · ' + (wer.istAdmin ? 'Verwalter' : 'Nutzer');
+    $('#wer-name').innerHTML =
+      (wer.istGast ? 'Gast' : esc(wer.anzeigename || wer.login) + ' · ' + (wer.istAdmin ? 'Verwalter' : 'Nutzer'))
+      + (wer.istGast ? '<span id="wer-kennung">Open Lab Demo</span>' : '')
+      + (betrieb?.istSlave ? '<span id="wer-kennung">Replikat</span>' : '');
   }
 
-  // Das Band steht dauerhaft -- die Einschraenkung gilt ja auch dauerhaft.
-  if (band) band.hidden = wer.istAdmin;
+  /* Die Baender stehen dauerhaft -- die Einschraenkung gilt ja auch dauerhaft.
+     Gast: der Demo-Hinweis. Slave: die Instanz ist nur lesend, fuer jeden.
+     Nutzer ohne beides: das bisherige Band. */
+  const gastBand = $('#gast-band');
+  const slaveBand = $('#slave-band');
+  if (gastBand) {
+    gastBand.hidden = !wer.istGast;
+    if (wer.istGast) gastBand.innerHTML = '<b>' + esc(betrieb?.gastKurz || 'Open Lab Demo') + '</b> '
+      + esc(betrieb?.gastHinweis || '');
+  }
+  if (slaveBand) {
+    slaveBand.hidden = !betrieb?.istSlave;
+    if (betrieb?.istSlave) slaveBand.innerHTML = '<b>' + esc(betrieb.slaveKurz || 'Replikat') + '</b> '
+      + 'Diese Instanz zeigt den Stand der Hauptinstanz. Läufe, Änderungen und Modellabfragen '
+      + 'sind hier nicht möglich.';
+  }
+  if (band) band.hidden = wer.istAdmin || wer.istGast || !!betrieb?.istSlave;
+
+  /* Bedienelemente, die schreiben oder ein Modell rufen, fuer Gaeste und auf
+     dem Slave ausblenden -- die Server-Sperre bleibt die eigentliche Grenze,
+     das hier erspart nur den Klick ins Leere. Erkannt an der Klasse .primary
+     in Werkzeugleisten und an den Reasoning-/Suchfeldern. */
+  const gesperrt = wer.istGast || !!betrieb?.istSlave;
+  $$('.toolbar button, .toolbar .primary, button.primary').forEach(b => {
+    if (b.closest('#tabs, #pillar-tabs, #view-switch, .depot-schalter')) return;
+    if (gesperrt) b.setAttribute('disabled', '');
+  });
+  ['#rs-input', '#rs-send', '#kn-query', '#kn-search'].forEach(sel => {
+    const el = $(sel); if (!el) return;
+    if (gesperrt) el.setAttribute('disabled', '');
+  });
 
   // Die Benutzerverwaltung ist auch LESEND nur fuer Verwalter.
   if (verwaltung) verwaltung.hidden = !wer.istAdmin;
@@ -248,7 +286,8 @@ async function pruefeAnmeldung() {
     musseingerichtet = !!d.eingerichtet;
 
     if (d.angemeldet) {
-      wer = { login: d.login, anzeigename: d.anzeigename, rolle: d.rolle, istAdmin: d.istAdmin };
+      wer = { login: d.login, anzeigename: d.anzeigename, rolle: d.rolle, istAdmin: d.istAdmin, istGast: !!d.istGast };
+      betrieb = d.betrieb || null;
       sessionStorage.removeItem('sc_neuladen');   // Schleifensperre lösen
       zeigeRolle();
       return true;
@@ -2962,7 +3001,7 @@ function schreibeGewichte() {
      Nutzer sieht eine Fehlermeldung fuer etwas, das er nie ausgeloest hat. Die
      Regler selbst bleiben bedienbar; sie wirken dann nur auf die eigene
      Sitzung. */
-  if (wer && !wer.istAdmin) return;
+  if (!darfSchreiben()) return;
 
   clearTimeout(gewichtSchreibZeit);
   gewichtSchreibZeit = setTimeout(async () => {
@@ -8584,6 +8623,11 @@ function applyUiState(areas) {
    Bereiche erneut in die Datenbank. */
 const saveUiState = debounce(() => {
   if (!stateReady) return;
+
+  /* Gast und Slave haben keinen gespeicherten Zustand: Der Gast hat keine
+     Datenbankzeile, das Replikat nimmt keine Schreibvorgaenge an. Die
+     Oberflaeche merkt sich alles in der Sitzung, nur nicht darueber hinaus. */
+  if (wer?.istGast || betrieb?.istSlave) return;
 
   const now = collectUiState();
 

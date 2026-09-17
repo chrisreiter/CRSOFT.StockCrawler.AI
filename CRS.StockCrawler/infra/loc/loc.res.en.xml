@@ -2478,4 +2478,12 @@
   <t k="Der Bestand: welche Werte verfolgt werden, nach Branche, Land und Börse.">The universe: which instruments are tracked, by sector, country and exchange.</t>
   <t k="Läufe, Zeitplan, Benutzer, Sprache, Ollama-Endpunkte.">Runs, schedule, users, language, Ollama endpoints.</t>
   <t k="Keine Lagemeldung — ist heute schon ein Lauf durch?">No situation report — has a run completed today?</t>
+  <t k="Gast">Guest</t>
+  <t k="Open Lab Demo">Open Lab Demo</t>
+  <t k="Replikat">Replica</t>
+  <t k="Diese Instanz zeigt den Stand der Hauptinstanz. Läufe, Änderungen und Modellabfragen sind hier nicht möglich.">This instance shows the state of the main instance. Runs, changes and model queries are not possible here.</t>
+  <t k="Als Gast ansehen">View as guest</t>
+  <t k="oder">or</t>
+  <t k="Diese Instanz ist ein Replikat: nur lesend, ohne Modelle.">This instance is a replica: read-only, without models.</t>
+  <t k="Gastzugang nicht möglich.">Guest access not possible.</t>
 </sprache>

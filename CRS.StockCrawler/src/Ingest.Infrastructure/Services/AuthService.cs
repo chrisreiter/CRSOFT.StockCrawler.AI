@@ -5,12 +5,19 @@ using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.Logging;
 using Ingest.Infrastructure.Datenbank;
 
+using Ingest.Infrastructure.Options;
+
 namespace Ingest.Infrastructure.Services;
 
 /// <summary>Ein angemeldeter Benutzer, so wie ihn die Anwendung braucht.</summary>
 public sealed record Angemeldet(int UserId, string Login, string? Anzeigename, string Rolle)
 {
     public bool IstAdmin => string.Equals(Rolle, "admin", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Der Gast: ohne Kennwort, ohne Datenbankzeile, nur lesend, ohne Modelle.</summary>
+    public bool IstGast => string.Equals(Rolle, "guest", StringComparison.OrdinalIgnoreCase);
+
+    public static readonly Angemeldet Gast = new(0, "gast", "Gast", "guest");
 }
 
 public sealed record BenutzerZeile(
@@ -21,6 +28,12 @@ public interface IAuthService
 {
     /// <summary>Gibt es überhaupt schon einen Benutzer?</summary>
     Task<bool> IstEingerichtetAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Meldet die Sitzung als Gast an — ohne Kennwort, ohne Datenbankzeile. Nur
+    /// wenn <c>Betrieb:GastZugang</c> es erlaubt; sonst <c>null</c>.
+    /// </summary>
+    Angemeldet? GastAnmelden(Guid sitzung);
 
     /// <summary>Legt den ersten Verwalter an — nur solange keiner existiert.</summary>
     Task<(bool Ok, string? Fehler)> EinrichtenAsync(
@@ -122,8 +135,20 @@ public sealed class AuthService : IAuthService
 
     public string? Einrichtungswort { get; private set; }
 
-    public AuthService(ISqlConnectionFactory factory, ILogger<AuthService> log)
+    private readonly BetriebOptions _betrieb;
+
+    /*  Sitzungen im Speicher: fuer Gaeste immer (sie haben keine Zeile in
+        app_user, und ein Gast soll keine Spur in der Datenbank hinterlassen),
+        auf einem Slave fuer ALLE -- dort ist app_session Teil des Replikats und
+        nicht beschreibbar. Der Dienst ist Singleton, der Speicher lebt so lange
+        wie der Prozess; ein Neustart meldet alle ab, und das ist auf einem
+        Replikat hinnehmbar.                                                   */
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, (Angemeldet Wer, DateTime Bis)> _imSpeicher = new();
+
+    public AuthService(ISqlConnectionFactory factory, ILogger<AuthService> log,
+                       Microsoft.Extensions.Options.IOptions<BetriebOptions>? betrieb = null)
     {
+        _betrieb = betrieb?.Value ?? new BetriebOptions();
         _factory = factory;
         _log = log;
 
@@ -199,9 +224,32 @@ public sealed class AuthService : IAuthService
 
     // -------------------------------------------------------------- Anmelden
 
+    public Angemeldet? GastAnmelden(Guid sitzung)
+    {
+        if (!_betrieb.GastZugang) return null;
+        Aufraeumen();
+        _imSpeicher[sitzung] = (Angemeldet.Gast, DateTime.UtcNow + Sitzungsdauer);
+        _log.LogInformation("Gast angemeldet");
+        return Angemeldet.Gast;
+    }
+
+    private void Aufraeumen()
+    {
+        var jetzt = DateTime.UtcNow;
+        foreach (var (k, v) in _imSpeicher)
+            if (v.Bis < jetzt) _imSpeicher.TryRemove(k, out _);
+    }
+
     public async Task<(Angemeldet? Benutzer, string? Fehler)> AnmeldenAsync(
         Guid sitzung, string login, string kennwort, CancellationToken ct = default)
     {
+        // Ein Gast, der sich mit Kennwort anmeldet, ist keiner: der Name ist reserviert.
+        if (string.Equals((login ?? "").Trim(), "gast", StringComparison.OrdinalIgnoreCase)
+            || string.Equals((login ?? "").Trim(), "guest", StringComparison.OrdinalIgnoreCase))
+            return (null, _betrieb.GastZugang
+                ? "Der Gastzugang braucht kein Kennwort — bitte „Als Gast ansehen“ benutzen."
+                : "Anmeldename oder Kennwort stimmt nicht.");
+
         await using var conn = await _factory.OpenAsync(ct);
 
         /*  LOWER auf beiden Seiten: SQL Server vergleicht in der Standardkollation
@@ -237,6 +285,13 @@ public sealed class AuthService : IAuthService
         {
             var neu = u.Fehlversuche + 1;
 
+            /*  Auf dem Slave laesst sich der Fehlversuch nicht zaehlen -- die
+                Tabelle ist ein Replikat. Die Sperre des Masters gilt dort
+                trotzdem, sie wird ja mitrepliziert.                          */
+            if (_betrieb.IstSlave)
+                return (null, "Anmeldename oder Kennwort stimmt nicht.");
+
+
             await conn.ExecuteAsync(new CommandDefinition(
                 $"""
                 UPDATE dbo.app_user
@@ -257,6 +312,15 @@ public sealed class AuthService : IAuthService
         }
 
         // Erfolg: Zähler zurück, Sitzung binden, Hash bei Bedarf erneuern.
+        if (_betrieb.IstSlave)
+        {
+            Aufraeumen();
+            var wer = new Angemeldet(u.UserId, u.Login, u.Anzeigename, u.Rolle);
+            _imSpeicher[sitzung] = (wer, DateTime.UtcNow + Sitzungsdauer);
+            _log.LogInformation("Angemeldet am Replikat: {Login} ({Rolle}), Sitzung im Speicher", u.Login, u.Rolle);
+            return (wer, null);
+        }
+
         await conn.ExecuteAsync(new CommandDefinition(
             $"""
             UPDATE dbo.app_user
@@ -288,6 +352,8 @@ public sealed class AuthService : IAuthService
 
     public async Task AbmeldenAsync(Guid sitzung, CancellationToken ct = default)
     {
+        if (_imSpeicher.TryRemove(sitzung, out _) || _betrieb.IstSlave) return;
+
         await using var conn = await _factory.OpenAsync(ct);
 
         /* Die Sitzung wird gelöst, nicht gelöscht: Der Oberflächenzustand
@@ -299,6 +365,18 @@ public sealed class AuthService : IAuthService
 
     public async Task<Angemeldet?> WerIstDasAsync(Guid sitzung, CancellationToken ct = default)
     {
+        if (_imSpeicher.TryGetValue(sitzung, out var im))
+        {
+            if (im.Bis > DateTime.UtcNow)
+            {
+                // Gleitender Ablauf wie bei der Datenbanksitzung.
+                _imSpeicher[sitzung] = (im.Wer, DateTime.UtcNow + Sitzungsdauer);
+                return im.Wer;
+            }
+            _imSpeicher.TryRemove(sitzung, out _);
+        }
+        if (_betrieb.IstSlave) return null;
+
         await using var conn = await _factory.OpenAsync(ct);
 
         var u = await conn.QuerySingleOrDefaultAsync<Angemeldet>(new CommandDefinition(
