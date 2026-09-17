@@ -15,7 +15,7 @@ public static class ForecastEndpoints
         var g = app.MapGroup("/api/forecast").WithTags("Prognose");
 
         g.MapPost("/run", async (IForecastService svc, CancellationToken ct) =>
-            Results.Ok(await svc.RunAsync(ct)));
+            { StartEndpoints.Verwerfen(); return Results.Ok(await svc.RunAsync(ct)); });
 
         g.MapPost("/run/{assetId:int}", async (IForecastService svc, int assetId, CancellationToken ct) =>
             Results.Ok(await svc.RunForAssetAsync(assetId, ct)));
