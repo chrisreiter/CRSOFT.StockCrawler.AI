@@ -61,6 +61,7 @@ public static class DependencyInjection
         services.Configure<TwelveDataOptions>(config.GetSection("Sources:TwelveData"));
         services.Configure<CoinGeckoOptions>(config.GetSection("Sources:CoinGecko"));
         services.Configure<IngestOptions>(config.GetSection("Ingest"));
+        services.Configure<BetriebOptions>(config.GetSection("Betrieb"));
 
         services.AddSingleton<ISqlConnectionFactory>(_ => VerbindungAusKonfiguration(config));
 

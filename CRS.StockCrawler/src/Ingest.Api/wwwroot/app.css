@@ -1347,6 +1347,16 @@ pre.antwort.dim { color: var(--muted); font-family: ui-monospace, monospace; fon
 
 .u-tip-mehr { color: var(--muted); font-size: 11px; margin-top: 2px; }
 
+/* ============================================================ Gast / Slave ===  */
+/*  Gesperrte Knoepfe sichtbar sperren. Ohne diese Regel sah ein Gast lauter
+    blaue Knoepfe, die nichts taten -- das Attribut war gesetzt, die Optik nicht. */
+button:disabled, button.primary:disabled { opacity: .45; cursor: not-allowed; }
+.gast-band { border-left: 3px solid var(--accent); }
+.slave-band { border-left: 3px solid var(--muted); }
+.gast-band b, .slave-band b { margin-right: 6px; }
+#wer-kennung { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 9px;
+               border: 1px solid var(--accent); color: var(--accent); margin-left: 6px; vertical-align: middle; }
+
 /* ================================================================ Heute ===  */
 /*  Kachelraster: 1 bis 4 Spalten je nach Breite. auto-fit mit minmax fuellt die
     Zeile, die Obergrenze von vier kommt ueber die Hoechstbreite der Kacheln in

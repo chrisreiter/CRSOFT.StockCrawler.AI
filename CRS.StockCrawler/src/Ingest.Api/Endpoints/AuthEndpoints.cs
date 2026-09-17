@@ -1,4 +1,6 @@
+using Ingest.Infrastructure.Options;
 using Ingest.Infrastructure.Services;
+using Microsoft.Extensions.Options;
 
 namespace Ingest.Api.Endpoints;
 
@@ -14,7 +16,7 @@ public static class AuthEndpoints
 {
     private const string CookieName = "sc_session";
 
-    public sealed record AnmeldeEingabe(string Login, string Kennwort);
+    public sealed record AnmeldeEingabe(string? Login, string? Kennwort, bool? Gast = null);
     public sealed record EinrichtenEingabe(string Token, string Login, string Kennwort);
     public sealed record BenutzerEingabe(string Login, string Kennwort, string Rolle, string? Anzeigename);
     public sealed record AenderungEingabe(string? Kennwort, string? Rolle, bool? Aktiv, string? Anzeigename);
@@ -26,9 +28,11 @@ public static class AuthEndpoints
 
         /* ------------------------------------------------------- Zustand -- */
 
-        g.MapGet("/status", async (HttpContext ctx, IAuthService auth, CancellationToken ct) =>
+        g.MapGet("/status", async (HttpContext ctx, IAuthService auth,
+                                   IOptions<BetriebOptions> betrieb, CancellationToken ct) =>
         {
             var eingerichtet = await auth.IstEingerichtetAsync(ct);
+            var b = betrieb.Value;
 
             var benutzer = ctx.Request.Cookies.TryGetValue(CookieName, out var roh)
                            && Guid.TryParse(roh, out var key)
@@ -43,6 +47,22 @@ public static class AuthEndpoints
                 anzeigename = benutzer?.Anzeigename,
                 rolle = benutzer?.Rolle,
                 istAdmin = benutzer?.IstAdmin ?? false,
+                istGast = benutzer?.IstGast ?? false,
+
+                /*  Die Instanz sagt, was sie ist. Die Oberflaeche richtet danach
+                    Kopfzeile und Bedienelemente aus, die Anmeldeseite den
+                    Gast-Knopf. Ein Slave ist fuer JEDEN nur lesend; schreibbar
+                    heisst: Master und kein Gast.                              */
+                betrieb = new
+                {
+                    rolle = b.IstSlave ? "slave" : "master",
+                    istSlave = b.IstSlave,
+                    gastZugang = b.GastZugang,
+                    gastHinweis = b.GastZugang ? b.GastHinweis : null,
+                    gastKurz = b.GastKurz,
+                    slaveKurz = b.SlaveKurz,
+                    schreibbar = !b.IstSlave && benutzer is not null && !benutzer.IstGast
+                },
 
                 hinweis = eingerichtet
                     ? null
@@ -70,6 +90,18 @@ public static class AuthEndpoints
                                    AnmeldeEingabe e, CancellationToken ct) =>
         {
             var key = SitzungHolen(ctx);
+
+            /*  Gast: kein Kennwort, keine Datenbankzeile. Nur wenn die Instanz es
+                erlaubt -- sonst dieselbe Antwort wie bei falschem Kennwort, damit
+                sich aus der Meldung nicht ablesen laesst, ob es den Weg gibt.   */
+            if (e.Gast == true)
+            {
+                var gast = auth.GastAnmelden(key);
+                if (gast is null)
+                    return Results.Json(new { error = "Anmeldename oder Kennwort stimmt nicht." },
+                                        statusCode: StatusCodes.Status401Unauthorized);
+                return Results.Ok(new { gast.Login, gast.Anzeigename, gast.Rolle, gast.IstAdmin, gast.IstGast });
+            }
 
             var (benutzer, fehler) = await auth.AnmeldenAsync(key, e.Login, e.Kennwort, ct);
 

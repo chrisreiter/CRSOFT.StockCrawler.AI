@@ -27,10 +27,14 @@ public sealed class CronScheduler : BackgroundService
     private readonly SchedulerState _state;
     private readonly ILogger<CronScheduler> _log;
 
+    private readonly BetriebOptions _betrieb;
+
     public CronScheduler(IServiceScopeFactory scopes, IOptions<IngestOptions> opt,
-                         SchedulerState state, ILogger<CronScheduler> log)
+                         SchedulerState state, ILogger<CronScheduler> log,
+                         IOptions<BetriebOptions>? betrieb = null)
     {
         _scopes = scopes;
+        _betrieb = betrieb?.Value ?? new BetriebOptions();
         _opt = opt.Value;
         _state = state;
         _log = log;
@@ -38,6 +42,17 @@ public sealed class CronScheduler : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
+        /*  Auf einem Slave gibt es keinen Zeitplan: Kursabruf, Prognose,
+            Bewertung, Analyse -- alles schreibt, und die Datenbank ist dort ein
+            Replikat. Der Master rechnet, der Slave zeigt, was ankommt.        */
+        if (_betrieb.IstSlave)
+        {
+            _state.Enabled = false;
+            _state.SetResult("Replikat: kein Zeitplan auf dieser Instanz");
+            _log.LogInformation("Betrieb als Slave: Zeitplan aus, keine Läufe auf dieser Instanz");
+            return;
+        }
+
         var hourly = Parse(_opt.HourlyCronUtc, "8 * * * *");
         var daily = Parse(_opt.DailyCronUtc, "20 2 * * *");
 

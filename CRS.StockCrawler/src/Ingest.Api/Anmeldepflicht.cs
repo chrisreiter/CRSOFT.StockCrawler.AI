@@ -1,4 +1,6 @@
+using Ingest.Infrastructure.Options;
 using Ingest.Infrastructure.Services;
+using Microsoft.Extensions.Options;
 
 namespace Ingest.Api;
 
@@ -100,6 +102,32 @@ public static class Anmeldepflicht
         "/api/auth/passwort"
     ];
 
+    /// <summary>
+    /// Lesende Pfade, die trotzdem ein Modell aufrufen — für Gäste und auf dem
+    /// Slave gesperrt. Die Methodenregel reicht hier nicht: Eine Wissenssuche
+    /// ist ein GET und bettet die Frage mit bge-m3 ein; der Agent antwortet auf
+    /// POST, aber sein Protokoll enthält die Fragen des Verwalters.
+    ///
+    /// <para>Kurz gehalten mit Absicht — jeder Eintrag ist eine Ausnahme von der
+    /// Regel, und Ausnahmen muss man pflegen. Das Tagesjournal bleibt offen: Es
+    /// bettet zwar eine Frage ein, ist aber der Kern dessen, was ein Besucher
+    /// sehen soll, und kostet drei Sekunden bge-m3, keine Minute Nemotron.</para>
+    /// </summary>
+    private static readonly string[] Modellaufrufe =
+    [
+        "/api/reasoning/ask",
+        "/api/reasoning/log",
+        "/api/reasoning/urteile/lauf",
+        "/api/knowledge/search",
+        "/api/vlm"
+    ];
+
+    /// <summary>Was ein Slave trotz Lesemodus schreibend zulässt: an- und abmelden.</summary>
+    private static readonly string[] SlaveSchreibenErlaubt =
+    [
+        "/api/auth/logout"
+    ];
+
     public static IApplicationBuilder UseAnmeldepflicht(this IApplicationBuilder app)
         => app.Use(async (ctx, next) =>
         {
@@ -156,6 +184,58 @@ public static class Anmeldepflicht
 
             // Ab hier steht der Benutzer allen Endpunkten zur Verfügung.
             ctx.Items["benutzer"] = benutzer;
+
+            var betrieb = ctx.RequestServices.GetRequiredService<IOptions<BetriebOptions>>().Value;
+
+            /*  Slave: die Instanz selbst ist nur lesend -- fuer jeden, auch den
+                Verwalter. Die Datenbank ist ein Replikat, Schreiben scheitert
+                dort ohnehin; besser eine klare Antwort als ein Datenbankfehler.
+                Modelle gibt es auf dem Live-Server nicht (keine GPU).          */
+            if (betrieb.IstSlave)
+            {
+                var lesendS = HttpMethods.IsGet(ctx.Request.Method)
+                              || HttpMethods.IsHead(ctx.Request.Method)
+                              || HttpMethods.IsOptions(ctx.Request.Method);
+                var modell = Modellaufrufe.Any(p => pfad.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+                var erlaubtS = (lesendS && !modell)
+                               || SlaveSchreibenErlaubt.Any(p => pfad.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+                if (!erlaubtS)
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    await ctx.Response.WriteAsJsonAsync(new
+                    {
+                        error = modell ? "Auf dieser Instanz stehen keine Modelle bereit."
+                                       : "Diese Instanz ist ein Replikat und nur lesend.",
+                        hinweis = "Läufe, Änderungen und Modellabfragen sind auf der Hauptinstanz "
+                                + "möglich; dieser Server zeigt deren Ergebnis."
+                    }, ctx.RequestAborted);
+                    return;
+                }
+            }
+
+            /*  Gast: wie Nutzer, aber ohne die zwei Schreibpfade, die dem Nutzer
+                selbst gehoeren (Zustand, Kennwort) -- ein Gast HAT keinen -- und
+                ohne Modellaufrufe.                                             */
+            if (benutzer.IstGast)
+            {
+                var lesendG = HttpMethods.IsGet(ctx.Request.Method)
+                              || HttpMethods.IsHead(ctx.Request.Method)
+                              || HttpMethods.IsOptions(ctx.Request.Method);
+                var modell = Modellaufrufe.Any(p => pfad.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+                var erlaubtG = (lesendG && !modell)
+                               || pfad.StartsWith("/api/auth/logout", StringComparison.OrdinalIgnoreCase);
+                if (!erlaubtG)
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    await ctx.Response.WriteAsJsonAsync(new
+                    {
+                        error = modell ? "Modellabfragen sind im Gastzugang nicht möglich."
+                                       : "Der Gastzugang ist nur lesend.",
+                        hinweis = betrieb.GastHinweis
+                    }, ctx.RequestAborted);
+                    return;
+                }
+            }
 
             if (!benutzer.IstAdmin)
             {

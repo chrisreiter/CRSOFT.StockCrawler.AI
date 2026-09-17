@@ -454,6 +454,15 @@ aus dem Protokoll fischen, bevor man überhaupt etwas sieht.
 
 ---
 
+### Gastzugang und zweite Instanz
+
+`Betrieb:GastZugang` in `appsettings.json` schaltet „Als Gast ansehen" auf der
+Anmeldeseite frei — ohne Kennwort, nur lesend, ohne Modellabfragen, mit
+dauerhaftem Hinweis „Open Lab Demo". Für einen Live-Server auf einem
+Datenbank-Replikat ohne GPU: `Betrieb__Rolle=slave` — dann kein Zeitplan,
+kein Schreiben, keine Modelle, für niemanden. Einzelheiten in
+[`CRS.StockCrawler/docs/BETRIEB-MASTER-SLAVE.md`](CRS.StockCrawler/docs/BETRIEB-MASTER-SLAVE.md).
+
 ## 9 · Daten holen
 
 Ohne Kurse ist die Oberfläche leer. Der erste Lauf dauert je nach Umfang

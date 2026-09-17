@@ -627,6 +627,18 @@ Zustand ist, wenn wirklich keines da ist. Zwei Ursachen, dieselbe Meldung.
 `Ablage` sucht der Reihe nach: Umgebungsvariable, neben der Anwendung,
 Entwicklungspfad.
 
+**Master, Slave und Gast: Der Betriebsmodus ist eine Eigenschaft der Instanz,
+nicht des Benutzers.** `Betrieb:Rolle=slave` läuft gegen ein Datenbank-Replikat
+ohne GPU: kein Zeitplan, kein Schreiben für niemanden (auch nicht den
+Verwalter), keine Modellaufrufe, Sitzungen im Speicher, weil `app_session`
+dort nicht beschreibbar ist. `Betrieb:GastZugang=true` erlaubt „Als Gast
+ansehen" ohne Kennwort: Sitzung im Speicher ohne `app_user`-Zeile, nur lesend,
+ohne Modelle, mit dauerhaftem Band. Beides sitzt in `Anmeldepflicht.cs` vor
+der Rollenregel; die einzige Pfadliste ist die der Modellaufrufe (GETs, die
+ein Modell rufen — die Methodenregel reicht dort nicht). Unbekannte `Rolle`
+gilt als master: Ein Slave aus Versehen wäre schwerer zu finden als ein
+Master aus Versehen. Siehe [docs/BETRIEB-MASTER-SLAVE.md](docs/BETRIEB-MASTER-SLAVE.md).
+
 **Die Rollentrennung hängt an der HTTP-Methode, nicht an einer Liste.**
 „Nutzer dürfen lesen, aber keine Läufe anstoßen" liesse sich auch mit einer
 Liste erlaubter Endpunkte umsetzen — die müsste jemand bei jedem neuen
