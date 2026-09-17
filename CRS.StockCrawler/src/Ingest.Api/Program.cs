@@ -152,6 +152,7 @@ app.MapInvestEndpoints();
 app.MapAutopilotEndpoints();
 app.MapNeuzugangEndpoints();
 app.MapGrundschwingungEndpoints();
+app.MapStartEndpoints();
 app.MapLocEndpoints();
 app.MapDayTradingEndpoints();
 app.MapLangfristEndpoints();

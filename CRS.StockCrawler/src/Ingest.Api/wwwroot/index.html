@@ -47,7 +47,8 @@
   </div>
 
   <nav class="tabs" id="tabs">
-    <button data-view="charts" class="active">Kurse</button>
+    <button data-view="start" class="active">Heute</button>
+    <button data-view="charts">Kurse</button>
     <button data-view="select">Auswahl</button>
     <button data-view="analysis">Analyse</button>
     <button data-view="forecast">Prognose</button>
@@ -60,7 +61,7 @@
     <button data-view="pillars">Säulen</button>
     <button data-view="system">System</button>
   </nav>
-  <div class="viewswitch" id="view-switch">
+  <div class="viewswitch" id="view-switch" style="display:none">
     <button data-cview="line" class="active" title="Kursverlauf, mehrere Werte überlagert">Linie</button>
     <button data-cview="invest" title="Virtuelles Depot: was aus einem heute eingesetzten Betrag würde">Investings</button>
     <button data-cview="candle" title="Eröffnung, Hoch, Tief, Schluss je Bar">Kerzen</button>
@@ -68,7 +69,7 @@
     <button data-cview="matrix" title="Korrelation aller gewählten Werte untereinander">Korrelation</button>
     <button data-cview="flow" title="Kapitalfluss: wohin das Geld wandert">Fluss</button>
   </div>
-  <div class="autofind" id="autofind">
+  <div class="autofind" id="autofind" style="display:none">
     <select id="autofind-mode" title="Wonach im gesamten Bestand gesucht wird">
       <option value="negative">gegenläufigste Paare</option>
       <option value="crossings">meiste Kreuzungen</option>
@@ -101,7 +102,29 @@
 
 
 <!-- ======================================================== Kurse -->
-<main id="view-charts" class="view active">
+<!-- ================================================== Heute (Start) -->
+<main id="view-start" class="view active">
+  <section class="content">
+    <div id="st-kopf" class="st-kopf">
+      <div>
+        <h2 class="st-titel">Heute</h2>
+        <p id="st-lage" class="hint">wird geladen …</p>
+      </div>
+      <div class="st-stand hint" id="st-stand"></div>
+    </div>
+
+    <div id="st-heute" class="st-grid"></div>
+
+    <h3 class="st-abschnitt">Funktionen</h3>
+    <p class="hint block">
+      Jede Kachel führt zu einer Ansicht. Die Zahl darauf ist ein Lebenszeichen —
+      sie sagt, dass dort etwas steht, nicht, was es wert ist.
+    </p>
+    <div id="st-funktionen" class="st-grid"></div>
+  </section>
+</main>
+
+<main id="view-charts" class="view">
   <aside class="sidebar">
     <div class="field">
       <label for="chart-search">Suche</label>

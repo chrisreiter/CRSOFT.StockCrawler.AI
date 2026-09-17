@@ -292,10 +292,17 @@ $('#tabs').addEventListener('click', e => {
    Zuhörer am Dokument genügt: Die Hinweise werden beim Aufbau der Seite
    erzeugt, einzeln gesetzte Handler waeren dann weg.                        */
 document.addEventListener('click', e => {
-  const a = e.target.closest('a[data-goto]');
+  const a = e.target.closest('[data-goto]');
   if (!a) return;
-  e.preventDefault();
+  if (a.tagName === 'A') e.preventDefault();
   $(`#tabs button[data-view="${a.dataset.goto}"]`)?.click();
+
+  /* Ein Unterreiter dazu: der Ansichtsumschalter der Kurse (data-cview) oder
+     ein Saeulen-Reiter (data-pillar). Erst nach dem Wechsel der Hauptansicht,
+     sonst klickt man auf etwas Unsichtbares.                                */
+  const sub = a.dataset.sub;
+  if (!sub) return;
+  ($(`#view-switch button[data-cview="${sub}"]`) || $(`#pillar-tabs button[data-pillar="${sub}"]`))?.click();
 });
 
 // =============================================================== Kurse ===
@@ -8204,7 +8211,192 @@ $('#gs-lauf')?.addEventListener('click', async () => {
   await ladeGrundschwingungen();
 });
 
+/* ================================================================== Heute === */
+
+/*  Die Funktionskacheln: Reihenfolge nach dem, was ein Neuling zuerst braucht.
+    `sub` waehlt einen Unterreiter, `zahl` holt ein Lebenszeichen aus den
+    geladenen Daten -- nicht mehr als eine Zahl, sonst wird aus der Kachel eine
+    zweite Ansicht.                                                          */
+const ST_FUNKTIONEN = [
+  { view: 'charts', titel: 'Kurse', text: 'Linien, Kerzen, Volumen, Korrelation und Kapitalfluss für beliebig viele Werte — und das virtuelle Depot.',
+    zahl: d => d.markt?.werte != null ? [d.markt.werte, 'Werte mit Kurs von heute'] : null },
+  { view: 'charts', sub: 'invest', titel: 'Investings', text: 'Was aus einem heute eingesetzten Betrag würde: vier Depots, Konto, Gebühren, Vermögensverlauf.',
+    zahl: d => d.depot?.vermoegen != null ? [fmtNum(d.depot.vermoegen, 0) + ' ' + d.depot.waehrung, 'Gesamtvermögen'] : null },
+  { view: 'forecast', titel: 'Prognose', text: 'Die Mischung aller Säulen je Wert und Horizont — mit dem gemessenen Rückhalt jeder Säule daneben.',
+    zahl: d => d.prognose?.zeilen != null ? [d.prognose.zeilen, 'Prognosen im letzten Lauf'] : null },
+  { view: 'analysis', titel: 'Analyse', text: 'Korrelationen, Kreuzungen, Vorläufer: welche Werte sich gemeinsam bewegen — und welche nur so aussehen.' },
+  { view: 'daytrading', titel: 'Day Trading', text: 'Trägt der Markt heute einen Handel innerhalb des Tages — nach Gebühren? Meist lautet die Antwort nein, und sie ist gemessen.' },
+  { view: 'swap', titel: 'Tausch', text: 'Umschichtungen aus dem Bestand: welches gehaltene Papier gegen welches, und was der Tausch kostet.' },
+  { view: 'langfrist', titel: 'Langfrist', text: 'Die Drift als ehrlichste Zahl: Rendite und Streuung über Jahre, für einzelne Werte und Körbe.' },
+  { view: 'herde', titel: 'Bot-Herde', text: 'Was die öffentlich bekannten Auslöser — RSI, Bollinger, Goldenes Kreuz — am Kurs hinterlassen. Gemessen, nicht geglaubt.' },
+  { view: 'grundschwingung', titel: 'Grundschwingungen', text: 'Fourier-Zerlegung jedes Kursverlaufs: Katalog der Zyklen, wer welches Muster teilt, mit Phasenversatz.',
+    zahl: d => d.grundschwingungen?.lauf ? [d.grundschwingungen.klassen, 'Klassen im Katalog'] : null },
+  { view: 'neuzugang', titel: 'Neuzugänge', text: 'Erstnotizen und neue Listings, bevor sie handelbar sind — die vollständige Kohorte, Fehlschläge eingeschlossen.',
+    zahl: d => d.neuzugaenge?.angekuendigt != null ? [d.neuzugaenge.angekuendigt, 'angekündigt'] : null },
+  { view: 'pillars', sub: 'reasoning', titel: 'Reasoning', text: 'Fragen an den Agenten über alles, was das System weiß — jede Zahl aus einem Werkzeugaufruf, der mitgeliefert wird.',
+    zahl: d => d.prognose?.urteile ? [d.prognose.urteile.gesamt, 'Urteile'] : null },
+  { view: 'pillars', sub: 'knowledge', titel: 'Wissen & Semantik', text: 'Fachliteratur und Nachrichten, eingebettet und durchsuchbar — mit Fundstelle, nicht als Behauptung.',
+    zahl: d => d.nachrichten?.neueSeitGestern != null ? [d.nachrichten.neueSeitGestern, 'Meldungen seit gestern'] : null },
+  { view: 'pillars', titel: 'Säulen', text: 'Die sieben Säulen der Prognose, jede einzeln zuschaltbar und gewichtet — und was jede davon gemessen wert ist.' },
+  { view: 'select', titel: 'Auswahl', text: 'Der Bestand: welche Werte verfolgt werden, nach Branche, Land und Börse.' },
+  { view: 'system', titel: 'System', text: 'Läufe, Zeitplan, Benutzer, Sprache, Ollama-Endpunkte.' },
+];
+
+let stGeladen = false;
+
+function stKachel(titel, inhalt, goto, sub, fuss) {
+  const mehr = goto
+    ? '<a class="st-mehr" href="#" data-goto="' + goto + '"' + (sub ? ' data-sub="' + sub + '"' : '') + '>öffnen ›</a>'
+    : '';
+  return '<div class="st-kachel"><h4>' + esc(titel) + mehr + '</h4>' + inhalt
+    + (fuss ? '<div class="st-fuss">' + fuss + '</div>' : '') + '</div>';
+}
+
+const stFehler = t => '<div class="st-fehler">' + esc(t?.fehler || 'nicht verfügbar') + '</div>';
+const stPct = v => '<span class="r ' + (v > 0 ? 'up' : v < 0 ? 'down' : '') + '">' + (v > 0 ? '+' : '') + fmtNum(v, 2) + ' %</span>';
+const stZeit = iso => iso ? fmtDate(iso) : '–';
+
+function stRelativ(iso) {
+  if (!iso) return '–';
+  const min = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (min < 1) return 'gerade eben';
+  if (min < 60) return 'vor ' + min + ' min';
+  const h = Math.round(min / 60);
+  if (h < 36) return 'vor ' + h + ' h';
+  return 'vor ' + Math.round(h / 24) + ' Tagen';
+}
+
+async function ladeStart(frisch = false) {
+  const d = await guard(() => api('/api/start/' + (frisch ? '?frisch=true' : '')));
+  if (!d) return;
+  stGeladen = true;
+
+  $('#st-lage').textContent = d.lage?.zusammenfassung || d.lage?.fehler || 'Keine Lagemeldung — ist heute schon ein Lauf durch?';
+  $('#st-stand').innerHTML = 'Stand ' + esc(fmtDate(d.standUtc)) + ' · <a href="#" id="st-neu">neu laden</a>';
+  $('#st-neu').onclick = e => { e.preventDefault(); ladeStart(true); };
+
+  const k = [];
+
+  // --- Tagesübersicht
+  {
+    const l = d.lage;
+    const inhalt = l?.fehler ? stFehler(l)
+      : !l?.punkte?.length ? '<div class="st-fehler">Heute nichts Auffälliges.</div>'
+      : l.punkte.map(p =>
+          '<div class="st-punkt"><span class="k ' + esc(p.kind) + '">' + esc(p.kind) + '</span><b>'
+          + (p.symbol ? esc(p.symbol) + ' · ' : '') + esc(p.title) + '</b> — ' + esc(p.detail) + '</div>').join('');
+    k.push(stKachel('Tagesübersicht', inhalt, 'pillars', 'reasoning',
+      l?.anzahl ? l.anzahl + ' Punkte, die ' + Math.min(6, l.anzahl) + ' gewichtigsten' : ''));
+  }
+
+  // --- Markt heute
+  {
+    const m = d.markt;
+    const inhalt = m?.fehler ? stFehler(m)
+      : !m?.werte ? '<div class="st-fehler">Keine Kurse von heute.</div>'
+      : '<div class="st-zahl">' + (m.mittel > 0 ? '+' : '') + fmtNum(m.mittel, 2) + ' %'
+        + '<small>Ø über ' + m.werte + ' Werte · ' + m.anteilPlus + ' % im Plus</small></div>'
+        + '<ul class="st-liste">'
+        + m.gewinner.map(x => '<li><span class="l">' + esc(x.symbol) + ' <span class="dim">' + esc(x.name || '') + '</span></span>' + stPct(x.pct) + '</li>').join('')
+        + m.verlierer.map(x => '<li><span class="l">' + esc(x.symbol) + ' <span class="dim">' + esc(x.name || '') + '</span></span>' + stPct(x.pct) + '</li>').join('')
+        + '</ul>';
+    k.push(stKachel('Markt heute', inhalt, 'charts', null, m?.standUtc ? 'letzter Tagesschluss ' + esc(fmtDate(m.standUtc, false)) : ''));
+  }
+
+  // --- Nachrichten
+  {
+    const n = d.nachrichten;
+    const inhalt = n?.fehler ? stFehler(n)
+      : !n?.meldungen?.length ? '<div class="st-fehler">Noch keine eingebetteten Meldungen.</div>'
+      : '<div class="st-news">' + n.meldungen.slice(0, 7).map(x =>
+          '<a href="' + esc(x.url) + '" target="_blank" rel="noopener">' + esc(x.titel)
+          + '<div class="q">' + esc(x.quelle || '') + ' · ' + esc(stRelativ(x.zeitUtc)) + '</div></a>').join('') + '</div>';
+    k.push(stKachel('Nachrichten', inhalt, 'pillars', 'semantic', n?.neueSeitGestern != null ? n.neueSeitGestern + ' neue Meldungen seit gestern' : ''));
+  }
+
+  // --- Depot
+  {
+    const p = d.depot;
+    const inhalt = p?.fehler ? stFehler(p)
+      : p?.vermoegen == null ? '<div class="st-fehler">Kein Depot.</div>'
+      : '<div class="st-zahl">' + fmtNum(p.vermoegen, 2) + ' ' + esc(p.waehrung)
+        + '<small>' + (p.renditePct == null ? '' : (p.renditePct > 0 ? '+' : '') + fmtNum(p.renditePct, 2) + ' % seit Einzahlung')
+        + (p.seitVortagPct == null ? '' : ' · ' + (p.seitVortagPct > 0 ? '+' : '') + fmtNum(p.seitVortagPct, 2) + ' % seit Vortag') + '</small></div>'
+        + '<ul class="st-liste">' + (p.depots || []).map(x =>
+            '<li><span class="l">' + esc(x.depot) + (x.zaehlt ? '' : ' <span class="dim">(Vergleich)</span>') + '</span>'
+            + '<span class="r">' + fmtNum(x.vermoegen, 2) + (x.renditePct == null ? '' : ' · ' + stPct(x.renditePct)) + '</span></li>').join('') + '</ul>';
+    k.push(stKachel('Depot', inhalt, 'charts', 'invest', 'Gegenrechnungen werden nicht addiert'));
+  }
+
+  // --- Prognose & Urteile
+  {
+    const p = d.prognose;
+    const inhalt = p?.fehler ? stFehler(p)
+      : '<div class="st-zahl">' + (p.trefferquote30Tage == null ? '–' : fmtNum(p.trefferquote30Tage * 100, 1) + ' %')
+        + '<small>Richtung getroffen, ' + (p.bewertet30Tage || 0) + ' bewertete Live-Prognosen, 30 Tage</small></div>'
+        + '<ul class="st-liste">'
+        + '<li><span class="l">letzter Prognoselauf</span><span class="r">' + esc(stRelativ(p.zuletztGestelltUtc)) + (p.veraltet ? ' · <span class="down">veraltet</span>' : '') + '</span></li>'
+        + '<li><span class="l">Urteile des Agenten</span><span class="r">' + (p.urteile?.gesamt ?? 0) + ' · ' + (p.urteile?.aktuell ?? 0) + ' aktuell</span></li>'
+        + '<li><span class="l">Trefferquote der Urteile</span><span class="r">' + (p.urteile?.trefferquote == null ? 'noch nicht nachgeprüft' : fmtNum(p.urteile.trefferquote * 100, 1) + ' %') + '</span></li>'
+        + '</ul>';
+    k.push(stKachel('Prognose & Urteile', inhalt, 'forecast', null, '0,523 wäre der Münzwurf — darunter ist ein Vorzeichen nichts wert'));
+  }
+
+  // --- Neuzugänge
+  {
+    const n = d.neuzugaenge;
+    const inhalt = n?.fehler ? stFehler(n)
+      : '<div class="st-zahl">' + (n.angekuendigt ?? 0) + '<small>angekündigt · ' + (n.gehandelt ?? 0) + ' gestartet · ' + (n.ausgefallen ?? 0) + ' ausgefallen</small></div>'
+        + (n.naechste?.length
+            ? '<ul class="st-liste">' + n.naechste.map(x =>
+                '<li><span class="l">' + esc(x.symbol) + ' <span class="dim">' + esc(x.name || x.markt || '') + '</span></span>'
+                + '<span class="r">' + (x.erwartetAm ? esc(fmtDate(x.erwartetAm, false)) : 'offen') + '</span></li>').join('') + '</ul>'
+            : '<div class="st-fehler">Nichts angekündigt.</div>');
+    k.push(stKachel('Neuzugänge', inhalt, 'neuzugang', null, 'eingetragen bei der Ankündigung, nicht wenn etwas auffällt'));
+  }
+
+  // --- Grundschwingungen
+  {
+    const g = d.grundschwingungen;
+    const inhalt = g?.fehler ? stFehler(g)
+      : !g?.lauf ? '<div class="st-fehler">Noch kein Lauf.</div>'
+      : '<div class="st-zahl">' + g.klassen + '<small>Klassen · ' + g.paare + ' Paare · ' + g.paareBestaendig + ' beständig</small></div>'
+        + '<ul class="st-liste">' + (g.groesste || []).map(x =>
+            '<li><span class="l">#' + x.nr + ' · ' + x.perioden.map(p => fmtNum(p, 1)).join(' + ') + ' Bars <span class="dim">' + esc(x.harmonik) + '</span></span>'
+            + '<span class="r">' + x.werte + ' Werte</span></li>').join('') + '</ul>';
+    k.push(stKachel('Grundschwingungen', inhalt, 'grundschwingung', null, g?.standUtc ? 'Lauf ' + esc(stRelativ(g.standUtc)) + ' über ' + g.werte + ' Werte' : ''));
+  }
+
+  // --- System
+  {
+    const sy = d.system;
+    const w = sy?.wissen || {};
+    const ampel = ok => ok == null ? '<span class="dim">unbekannt</span>' : ok ? '<span class="up">erreichbar</span>' : '<span class="down">nicht erreichbar</span>';
+    const inhalt = sy?.fehler ? stFehler(sy)
+      : '<ul class="st-liste">'
+        + '<li><span class="l">Datenbank</span><span class="r">' + esc(sy.datenbank || '–') + '</span></li>'
+        + '<li><span class="l">Ollama · ' + esc(w.modell || 'bge-m3') + '</span><span class="r">' + ampel(w.ollama) + '</span></li>'
+        + '<li><span class="l">Qdrant</span><span class="r">' + ampel(w.qdrant) + (w.vektorenWissen ? ' · ' + fmtNum(w.vektorenWissen + (w.vektorenSemantik || 0), 0) + ' Vektoren' : '') + '</span></li>'
+        + '<li><span class="l">letzter Stundenlauf</span><span class="r">' + esc(stRelativ(sy.letzterStundenlaufUtc)) + '</span></li>'
+        + '<li><span class="l">letzter Tageslauf</span><span class="r">' + esc(stRelativ(sy.letzterTageslaufUtc)) + '</span></li>'
+        + '</ul>';
+    k.push(stKachel('System', inhalt, 'system', null, sy?.letztesErgebnis ? esc(String(sy.letztesErgebnis).slice(0, 90)) : ''));
+  }
+
+  $('#st-heute').innerHTML = k.join('');
+
+  $('#st-funktionen').innerHTML = ST_FUNKTIONEN.map(f => {
+    const z = f.zahl ? f.zahl(d) : null;
+    return '<div class="st-kachel st-fn" data-goto="' + f.view + '"' + (f.sub ? ' data-sub="' + f.sub + '"' : '') + '>'
+      + '<div class="st-fn-titel">' + esc(f.titel) + '</div>'
+      + '<div class="st-fn-text">' + esc(f.text) + '</div>'
+      + (z ? '<div class="st-fn-zahl"><b>' + esc(String(z[0])) + '</b>' + esc(z[1]) + '</div>' : '')
+      + '</div>';
+  }).join('');
+}
+
 const VIEW_INIT = {
+  start: () => { if (!stGeladen) ladeStart(); },
   grundschwingung: () => { if (!$('#gs-out').children.length) ladeGrundschwingungen(); },
   neuzugang: () => { if (!$('#nz-out').children.length) ladeNeuzugaenge(); },
   charts: () => { if (!chartState.available.length) loadAvailable(); },
@@ -8293,7 +8485,7 @@ function setActiveButton(container, key, value) {
 function collectUiState() {
   return {
     nav: {
-      tab: $('#tabs button.active')?.dataset.view || 'charts'
+      tab: $('#tabs button.active')?.dataset.view || 'start'
     },
     pillars: pillarConfig(),
     charts: {
@@ -8448,8 +8640,11 @@ async function startUp() {
   // Erst jetzt zeichnen: vorher stuende die wiederhergestellte Auswahl noch nicht.
   if (chartState.selected.length || chartState.view === 'flow') drawCharts();
 
+  /* Die Startseite ist die Vorgabe. Der gemerkte Reiter gewinnt -- auch
+     „Kurse", das frueher die Vorgabe war und deshalb nicht geklickt wurde. */
   const tab = areas?.nav?.tab;
-  if (tab && tab !== 'charts') $(`#tabs button[data-view="${tab}"]`)?.click();
+  if (tab && tab !== 'start') $(`#tabs button[data-view="${tab}"]`)?.click();
+  else ladeStart();
 
   stateReady = true;
 

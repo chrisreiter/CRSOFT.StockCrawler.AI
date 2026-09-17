@@ -177,6 +177,10 @@ nicht aus der Einstellung.
   geglättet, mit Verknüpfung gleichzeitiger Ereignisse
 - **Weltbestand und Zeitzonen** — Tokio, Europa, New York, mit sauberer
   Trennung von Vorlauf und blosser Überlappung
+- **Heute** — die Startseite: Tagesübersicht, Markt, Nachrichten, Depot,
+  Prognose und Urteile, Neuzugänge, Grundschwingungen und Systemzustand als
+  Kacheln, darunter grosse Verweise zu jeder Funktion (1 bis 4 Spalten je
+  nach Breite, ein Sammel-Endpunkt `/api/start/`)
 - **Grundschwingungen** — Fourier-Zerlegung jedes Kursverlaufs in Jahres-Epochen,
   Akkorde aus den stärksten Perioden, Katalog gleicher Muster mit Skizze, Paare
   mit gemessenem Phasenversatz; fliesst mit Rückhalteprüfung in die Prognose
