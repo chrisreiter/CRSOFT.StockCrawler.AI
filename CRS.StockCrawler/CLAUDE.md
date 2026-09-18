@@ -1493,6 +1493,11 @@ Die Sprachumstellung der Oberfläche samt ihrer Grenzen steht in
 Vorankündigungen neuer Werte samt ihrer Quellen stehen in
 [docs/NEUZUGAENGE.md](docs/NEUZUGAENGE.md).
 
+Die Anwendung aus Anwendersicht — Funktionen, Nutzen je Zielgruppe,
+zitierbare Zahlen und Bausteine für Blog- und LinkedIn-Beiträge — steht in
+[docs/ANWENDERSICHT.md](docs/ANWENDERSICHT.md). Vor einem Beitrag die Zahlen
+dort gegen die Startseite „Heute" prüfen; sie tragen ein Datum.
+
 Der Katalog der Grundschwingungen (Fourier-Akkorde je Epoche, Klassen,
 Paare mit Phasenversatz, Beitrag zur Prognose samt Rückhalt) steht in
 [docs/GRUNDSCHWINGUNGEN.md](docs/GRUNDSCHWINGUNGEN.md).
