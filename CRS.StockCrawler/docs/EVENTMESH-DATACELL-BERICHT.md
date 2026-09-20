@@ -1,182 +1,171 @@
 # EventMesh DataCell als Datenbank für CRSOFT.StockCrawler — Verträglichkeitsbericht
 
-**Stand 20.09.2026, 11:50.** Ziel: `Host=localhost;Port=55531;Database=stockcrawler`
-(meldet sich als „PostgreSQL 14.0 (EventMesh DataCell backend)"). Client:
-Npgsql 8, Extended Protocol, Binärformat — genau so spricht die Anwendung.
-Jede Prüfung ist eine einzelne Abfrage auf einer frischen Verbindung mit
-25 s Frist; nach einem Verbindungsabbruch wurde gewartet, bis das Backend
-wieder annahm. Der Wortlaut jeder Abfrage steht am Ende.
-
-Schema und Daten sind vollständig vorhanden (47 Tabellen, 702 Werte,
-3,99 Mio Kursbars, aktueller Stand der SQL-Server-Datenbank).
+**Stand 20.09.2026, 13:10** (zweiter Bericht; der erste vom Vormittag ist in
+der Git-Geschichte). Ziel: `Host=localhost;Port=55531;Database=stockcrawler`,
+meldet sich als „PostgreSQL 14.0 (EventMesh DataCell backend)". Client:
+Npgsql 8, Extended Protocol, Binärformat — so spricht die Anwendung. Jede
+Prüfung ist eine einzelne Abfrage auf einer frischen Verbindung mit 25 s
+Frist; danach der Routenlauf der Anwendung (86 lesende Endpunkte, 45 s Frist).
 
 ---
 
-## Was die Anwendung derzeit blockiert — nach Wirkung sortiert
+## Seit dem Vormittag behoben
 
-### 1. Jeder Zugriff auf `price_bar` läuft in den Timeout (Kurscharts → 500)
+| | |
+| --- | --- |
+| NULL-`timestamp` aus Tabellenspalte im Binärformat | ✓ — **Anmeldung mit Kennwort geht** |
+| `expires_utc > TIMESTAMP '2026-01-01'` | ✓ (vorher NULL) |
+| `UPDATE … SET x = now()` | ✓ (vorher Verbindungsabbruch) |
+| `ROW_NUMBER() OVER (PARTITION BY … ORDER BY …)` auf `price_bar` | ✓ |
+| `STDDEV_SAMP`, `AVG/MIN/MAX`, `GROUP BY` auf `price_bar` (6 k Zeilen) | ✓ (0,3–0,4 s) |
+| Korreliertes Subselect `(SELECT MAX(ts_utc) … WHERE p.asset_id = a.asset_id)` | ✓ (0,85 s) |
+| `CREATE TEMP TABLE … AS SELECT` | ✓, 61 ms statt 6,6 s |
 
-Auch die kleinste Abfrage antwortet nicht innerhalb von 29–55 Sekunden:
+---
 
-```sql
-SELECT MAX(ts_utc) FROM price_bar WHERE asset_id = 101;                      -- Timeout
-SELECT asset_id, ts_utc, "close" FROM price_bar
- WHERE asset_id = ANY('{101,1}') AND interval_code = '1d'
- ORDER BY asset_id, ts_utc DESC LIMIT 50;                                    -- Timeout
-SELECT interval_code, COUNT(*) FROM price_bar WHERE asset_id = 101
- GROUP BY interval_code;                                                     -- Timeout
-```
+## Was die Anwendung jetzt blockiert — nach Wirkung
 
-Auf demselben Datenbestand in PostgreSQL 18 kosten diese Abfragen 1–20 ms
-(Index `(asset_id, interval_code, ts_utc)`). Nach mehreren solcher Abfragen
-war das Backend 57 bis 167 s nicht erreichbar. Vermutung: kein nutzbarer
-Index auf `price_bar`, Vollscan über 4 Mio Zeilen je Abfrage, und der Scan
-kippt den Prozess. **Alle** Fenster- und Aggregatfunktionen (LAG, STDDEV,
-PERCENTILE, AVG/MIN/MAX, LATERAL, korreliertes Subselect) wurden auf
-`price_bar` geprüft und sind deshalb unten als Timeout eingetragen — ob sie
-funktionieren, lässt sich erst sagen, wenn der Tabellenzugriff steht.
-
-Betroffen in der App: Kurscharts, Depot, Prognose, Analyse, Startseite —
-praktisch alles.
-
-### 2. NULL-`timestamp` aus einer Tabellenspalte im Binärformat (Anmeldung → 500)
+### 1. `MERGE INTO` schreibt nicht (→ nach der Anmeldung überall 401)
 
 ```sql
-SELECT failed_logins, locked_until_utc FROM app_user WHERE login = 'chris';
+MERGE INTO app_session t
+USING (SELECT 'aaaaaaaa-0000-0000-0000-000000000001'::uuid AS session_key) s
+   ON t.session_key = s.session_key
+WHEN MATCHED THEN UPDATE SET user_id = 1
+WHEN NOT MATCHED THEN INSERT (session_key, user_id, expires_utc)
+     VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 1, now() + interval '1 day');
+-- Antwort: SELECT 0. Danach: SELECT … WHERE session_key = '…' -> 0 Zeilen.
 ```
 
-`locked_until_utc` ist NULL. Npgsql liest `failed_logins = 0` korrekt und
-bricht bei der nächsten Spalte ab: *„Buffer requirement is larger than the
-remaining length of the value"*. Im Binärformat muss ein NULL als Länge
-`-1` ohne Nutzbytes kommen; hier kommt offenbar eine Länge ≥ 0 mit weniger
-als 8 Bytes. Bemerkenswert: `SELECT CAST(NULL AS timestamp)` als Ausdruck
-ist korrekt, NULL in `text`- und `numeric`-Spalten ebenfalls (`display_name`,
-`expires_utc` in `app_session` ging sogar). Der Fehler hängt also an der
-konkreten Spalte/Zeile — möglicherweise am gespeicherten Repräsentanten
-eines NULL-Timestamps aus der Replikation (SQL-Server-`DATETIME2` → NULL).
+Die Anmeldung meldet 200, bindet die Sitzung aber per `MERGE` an den
+Benutzer — die Zeile kommt nie an, der nächste Aufruf ist wieder „Nicht
+angemeldet". **Routenlauf: 2 von 86 Endpunkten 200 (`/api/health`,
+`/api/auth/status`), 84 × 401.** `MERGE` steht ausserdem hinter Kursen
+schreiben, Gewichten, Konten, Einstellungen.
 
-Betroffen: jede Anmeldung mit Kennwort. Der Gastzugang (ohne Datenbank)
-funktioniert.
+Zum Abgleich mit dem Standard: `MERGE` ist seit PostgreSQL 15 Teil des
+Kerns; die Anwendung benutzt die Form mit `USING (SELECT …) s ON … WHEN
+MATCHED THEN UPDATE … WHEN NOT MATCHED THEN INSERT …`.
 
-### 3. `INSERT … RETURNING` liefert keinen Wert
+### 2. Timestamp-**Parameter** im Vergleich → Timeout (→ Kurscharts 500)
 
 ```sql
-INSERT INTO freq_run (interval_code) VALUES ('zz') RETURNING run_id;        -- NULL
+-- Literal: OK (4 ms)          -- Parameter: Timeout nach 29 s
+SELECT COUNT(*) FROM price_bar WHERE asset_id = 101 AND interval_code = '1d' AND ts_utc >= $1
+-- $1 als binärer timestamp (OID 1114), Wert 2026-08-01 00:00:00
 ```
 
-Die App holt so jeden neu vergebenen Schlüssel (Läufe, Klassen, Benutzer,
-Buchungen). Ohne Rückgabe bricht jeder Schreibpfad nach dem ersten INSERT ab.
+Die Kursreihen-Abfrage der Anwendung hat zwei davon (`ts_utc >= $3 AND
+ts_utc <= $4`). Mit Literalen wäre sie schnell — es hängt am gebundenen
+`timestamp`-Parameter im Binärformat.
 
-### 4. `UPDATE … SET spalte = now()` schließt die Verbindung
+### 3. Weitere Zugriffe auf `price_bar` → Timeout oder Abbruch
 
-```sql
-BEGIN; UPDATE app_user SET last_login_utc = now() WHERE login = 'chris'; ROLLBACK;
-```
+`SELECT … WHERE asset_id = ANY($1) AND interval_code = $2 ORDER BY … LIMIT 50`,
+`SELECT MAX(ts_utc) FROM price_bar WHERE asset_id = 101` (Timeout),
+`SELECT CAST(MAX(ts_utc) AS DATE) …` (Verbindungsabbruch, Backend 8 s weg).
+Widersprüchlich dazu läuft dieselbe `MAX`-Abfrage als korreliertes Subselect
+in 0,85 s — siehe Beobachtung unten.
 
-Nach 48 s Verbindungsabbruch, Backend 32 s weg. Die App schreibt Zeitstempel
-in jeder Anmeldung, jedem Lauf, jeder Bewertung.
+### 4. Still falsch (schnell, aber NULL)
 
-### 5. Vergleich mit `TIMESTAMP`-Literal liefert NULL statt Zahl
+| Abfrage | Ergebnis |
+| --- | --- |
+| `"close" - lag("close") OVER (ORDER BY ts_utc)` | NULL |
+| `LN(CAST("close" AS DOUBLE PRECISION))` | NULL |
+| `percentile_cont(0.5) WITHIN GROUP (ORDER BY "close")` | NULL |
+| `current_timestamp` | NULL (`now()` ist korrekt) |
+| `INSERT … RETURNING run_id` | kein Wert |
 
-```sql
-SELECT COUNT(*) FROM app_session WHERE expires_utc > TIMESTAMP '2026-01-01';  -- NULL
-SELECT COUNT(*) FROM app_session WHERE expires_utc > '2026-01-01';            -- 20 (richtig)
-```
+Stille Fehler sind für die Anwendung gefährlicher als Abbrüche: Ein NULL
+aus `LAG` wird zu einer Rendite von null, ein fehlendes `RETURNING` zu einem
+Lauf ohne Schlüssel.
 
-Stiller Fehler — keine Meldung, falsches Ergebnis.
-
-### 6. Die zwölf Routinen aus `infra/pgsql/011_routinen.sql` fehlen
+### 5. Routinen fehlen
 
 `information_schema.routines` ist leer; `SELECT * FROM dbo.letzter_kurs(101)`
-liefert 0 Zeilen statt eines Fehlers. Die App ruft sie für Depotbewertung,
-Autopilot, Bewertung, Kurvendiskussion. Ob PL/pgSQL unterstützt wird, ist
-noch offen — die Datei lässt sich einspielen, sobald 1–4 stehen.
-
-### 7. Kleinere Punkte
-
-- `current_timestamp` liefert NULL (`now()` und `now() AT TIME ZONE 'utc'` sind seit heute korrekt).
-- `MERGE INTO … WHEN MATCHED THEN UPDATE` liefert kein Ergebnis; ob geschrieben wurde, ist unklar.
-- `CREATE TEMP TABLE … AS SELECT` funktioniert, braucht aber 6,6 s für 4 Zeilen.
+liefert 0 Zeilen statt eines Fehlers. Die zwölf Funktionen aus
+`infra/pgsql/011_routinen.sql` (PL/pgSQL) müssten eingespielt werden — ob
+PL/pgSQL unterstützt wird, ist offen.
 
 ---
 
-## Seit dem letzten Stand behoben (Vergleich zu 19.09.)
+## Beobachtung zur Lastisolation
 
-`now() AT TIME ZONE 'utc'` als Wert und im Vergleich, `INTERVAL '1 day'` und
-Arithmetik damit, Text-Literal im Zeitvergleich, `= ANY(array)`, CTE mit
-Aggregat, `sha256`, `ORDER BY` mit `CASE`, `ROW_NUMBER() OVER (ORDER BY)`.
-
-## Was funktioniert
-
-Extended Protocol mit `int`-, `text`-, `int[]`-Parametern; `COUNT`, `CAST`,
-`SUM(CASE …)`, `GROUP BY` auf kleinen Tabellen, `JOIN`, `CTE`, `OFFSET/FETCH`
-mit Parameter, `COALESCE`/`CASE`, `LOWER()`, `sha256`, Transaktionen,
-`CREATE TEMP TABLE`.
+Während die Konstruktprüfung auf `price_bar` lief, beantwortete das Backend
+in einer **zweiten Verbindung** nicht einmal die Anmeldeabfrage
+(`SELECT … FROM app_user WHERE LOWER(login) = LOWER($1)`, sonst 0,1 s):
+*Timeout during reading attempt*. Eine lange Abfrage blockiert offenbar
+alle anderen Sitzungen. Dazu passt: Direkt nach einem Timeout scheitern
+auch einfache Folgeabfragen, als würde die abgebrochene Abfrage
+weiterlaufen. Die Timeout-Zeilen in der Tabelle unten können deshalb
+Nachwirkungen der jeweils vorigen sein — bei der Bewertung nicht jede
+einzeln als eigener Fehler nehmen, sondern nach dem Fix von Punkt 2 und 3
+erneut messen.
 
 ---
 
-## Vollständige Tabelle
+## Vollständige Tabelle (Konstruktprüfung, 58 Fälle)
 
 | Gruppe | Prüfung | Ergebnis |
 | --- | --- | --- |
-| A Grundlagen | SELECT 1 | OK: 1 · 31 ms |
-| A Grundlagen | COUNT über asset | OK: 702 · 15 ms |
-| A Grundlagen | int-Parameter | OK: NVDA · 98 ms |
-| A Grundlagen | text-Parameter | OK: 101 · 18 ms |
-| A Grundlagen | int[]-Parameter = ANY | OK: 3 · 43 ms |
-| B NULL binär | NULL timestamp aus Tabelle (locked_until_utc) | FEHLER InvalidOperationException: The reader is closed |
-| B NULL binär | NULL timestamp neben Wert (2 Spalten) | 1 Zeilen; erste: 0 | LESEFEHLER:ArgumentOutOfRangeException · 3 ms |
+| A Grundlagen | SELECT 1 | OK: 1 · 51 ms |
+| A Grundlagen | COUNT über asset | OK: 702 · 5 ms |
+| A Grundlagen | int-Parameter | OK: NVDA · 209 ms |
+| A Grundlagen | text-Parameter | OK: 101 · 38 ms |
+| A Grundlagen | int[]-Parameter = ANY | OK: 3 · 59 ms |
+| B NULL binär | NULL timestamp aus Tabelle (locked_until_utc) | 1 Zeilen; erste: NULL · 2 ms |
+| B NULL binär | NULL timestamp neben Wert (2 Spalten) | 1 Zeilen; erste: 0 | NULL · 4 ms |
 | B NULL binär | CAST(NULL AS timestamp) | 1 Zeilen; erste: NULL · 0 ms |
-| B NULL binär | CAST(NULL AS int) | 1 Zeilen; erste: NULL · 0 ms |
+| B NULL binär | CAST(NULL AS int) | 1 Zeilen; erste: NULL · 1 ms |
 | B NULL binär | CAST(NULL AS text) | 1 Zeilen; erste: NULL · 0 ms |
 | B NULL binär | CAST(NULL AS numeric) | 1 Zeilen; erste: NULL · 0 ms |
-| B NULL binär | CAST(NULL AS boolean) | 1 Zeilen; erste: NULL · 0 ms |
-| B NULL binär | NULL numeric aus Tabelle (adj_close/volume) | TIMEOUT nach 29 s (keine Antwort) |
-| B NULL binär | NULL text aus Tabelle (display_name) | 1 Zeilen; erste: chris | NULL · 4 ms |
-| B NULL binär | NULL timestamp in app_session (expires_utc) | 1 Zeilen; erste: 6e6038c4-2625-44ec-b433-1120ddc449e8 | NULL · 6 ms |
-| C Zeit | now() | OK: 20/09/2026 09:46:56 · 2 ms |
-| C Zeit | now() AT TIME ZONE 'utc' | OK: 20/09/2026 09:46:56 · 0 ms |
+| B NULL binär | CAST(NULL AS boolean) | 1 Zeilen; erste: NULL · 5 ms |
+| B NULL binär | NULL numeric aus Tabelle (adj_close/volume) | 1 Zeilen; erste: 213,89999390 | 213,89999390 | 96079300,00000000 · 1909 ms |
+| B NULL binär | NULL text aus Tabelle (display_name) | 1 Zeilen; erste: chris | NULL · 1243 ms |
+| B NULL binär | NULL timestamp in app_session (expires_utc) | 1 Zeilen; erste: 6e6038c4-2625-44ec-b433-1120ddc449e8 | NULL · 19 ms |
+| C Zeit | now() | OK: 20/09/2026 11:00:27 · 7 ms |
+| C Zeit | now() AT TIME ZONE 'utc' | OK: 20/09/2026 11:00:27 · 0 ms |
 | C Zeit | current_timestamp | NULL/LEER · 0 ms |
-| C Zeit | CAST(now() AS timestamp) | OK: 20/09/2026 09:46:56 · 0 ms |
-| C Zeit | INTERVAL '1 day' | OK: ivl:86400 · 0 ms |
-| C Zeit | now() + INTERVAL | OK: 2026-09-21T09:46:56.1173140Z · 0 ms |
-| C Zeit | now() + (-3) * INTERVAL '1 day' | OK: 2026-09-17T09:46:56.1177655Z · 0 ms |
-| C Zeit | Vergleich Spalte > now() | OK: 17 · 1 ms |
-| C Zeit | Vergleich Spalte > now() AT TIME ZONE 'utc' | OK: 17 · 2 ms |
-| C Zeit | Vergleich Spalte > TIMESTAMP-Literal | NULL/LEER · 11 ms |
-| C Zeit | Vergleich Spalte > '2026-01-01' (Text-Literal) | OK: 20 · 1 ms |
+| C Zeit | CAST(now() AS timestamp) | OK: 20/09/2026 11:00:27 · 0 ms |
+| C Zeit | INTERVAL '1 day' | OK: ivl:86400 · 2 ms |
+| C Zeit | now() + INTERVAL | OK: 2026-09-21T11:00:27.5925242Z · 1 ms |
+| C Zeit | now() + (-3) * INTERVAL '1 day' | OK: 2026-09-17T11:00:27.5939525Z · 1 ms |
+| C Zeit | Vergleich Spalte > now() | OK: 17 · 9 ms |
+| C Zeit | Vergleich Spalte > now() AT TIME ZONE 'utc' | OK: 17 · 3 ms |
+| C Zeit | Vergleich Spalte > TIMESTAMP-Literal | OK: 20 · 4 ms |
+| C Zeit | Vergleich Spalte > '2026-01-01' (Text-Literal) | OK: 20 · 8 ms |
 | C Zeit | Vergleich Spalte >= timestamp-PARAMETER | TIMEOUT nach 29 s (keine Antwort) |
 | C Zeit | Zwei timestamp-Parameter (Kursreihe, wie die App) | TIMEOUT nach 29 s (keine Antwort) |
 | C Zeit | Kursreihe OHNE Zeitfilter (nur ids, LIMIT) | TIMEOUT nach 29 s (keine Antwort) |
 | C Zeit | MAX(ts_utc) | TIMEOUT nach 29 s (keine Antwort) |
-| C Zeit | CAST(ts AS DATE) | TIMEOUT nach 29 s (keine Antwort) |
-| D Fenster/Aggregate | ROW_NUMBER() OVER (ORDER BY) | OK: 1 · 10 ms |
-| D Fenster/Aggregate | ROW_NUMBER() OVER (PARTITION BY … ORDER BY) | TIMEOUT nach 33 s (keine Antwort) |
-| | *(Backend war weg, zurück nach 57 s)* | |
-| D Fenster/Aggregate | LAG() OVER | TIMEOUT nach 29 s (keine Antwort) |
-| D Fenster/Aggregate | STDDEV_SAMP (30 Zeilen) | TIMEOUT nach 29 s (keine Antwort) |
-| D Fenster/Aggregate | AVG / MIN / MAX | TIMEOUT nach 29 s (keine Antwort) |
-| D Fenster/Aggregate | LN() | TIMEOUT nach 29 s (keine Antwort) |
-| D Fenster/Aggregate | PERCENTILE_CONT WITHIN GROUP | TIMEOUT nach 29 s (keine Antwort) |
-| D Fenster/Aggregate | GROUP BY klein (asset) | 2 Zeilen; erste: True | 645 · 110 ms |
-| D Fenster/Aggregate | GROUP BY ein Wert (price_bar, 6k Zeilen) | TIMEOUT nach 29 s (keine Antwort) |
-| D Fenster/Aggregate | SUM(CASE …) | OK: 645 · 11 ms |
-| E Struktur | JOIN zwei Tabellen | OK: 18 · 10 ms |
+| C Zeit | CAST(ts AS DATE) | VERBINDUNG GESCHLOSSEN nach 26,0 s (Exception while reading from stream); Backend wieder da nach 8 s |
+| D Fenster/Aggregate | ROW_NUMBER() OVER (ORDER BY) | OK: 1 · 2499 ms |
+| D Fenster/Aggregate | ROW_NUMBER() OVER (PARTITION BY … ORDER BY) | 2 Zeilen; erste: 101 | NULL · 466 ms |
+| D Fenster/Aggregate | LAG() OVER | NULL/LEER · 331 ms |
+| D Fenster/Aggregate | STDDEV_SAMP (30 Zeilen) | OK: 0.0542678450869469 · 379 ms |
+| D Fenster/Aggregate | AVG / MIN / MAX | 1 Zeilen; erste: 20,215674150149106 | 0,06141700 | 235,74000549 · 351 ms |
+| D Fenster/Aggregate | LN() | NULL/LEER · 263 ms |
+| D Fenster/Aggregate | PERCENTILE_CONT WITHIN GROUP | NULL/LEER · 508 ms |
+| D Fenster/Aggregate | GROUP BY klein (asset) | 2 Zeilen; erste: True | 645 · 37 ms |
+| D Fenster/Aggregate | GROUP BY ein Wert (price_bar, 6k Zeilen) | 2 Zeilen; erste: 1d | 6304 · 365 ms |
+| D Fenster/Aggregate | SUM(CASE …) | OK: 645 · 7 ms |
+| E Struktur | JOIN zwei Tabellen | OK: 18 · 9 ms |
 | E Struktur | LEFT JOIN LATERAL | TIMEOUT nach 29 s (keine Antwort) |
-| E Struktur | Korreliertes Subselect | TIMEOUT nach 29 s (keine Antwort) |
-| E Struktur | CTE + COUNT | OK: 4 · 54 ms |
-| E Struktur | ORDER BY mit CASE (wie /api/assets/tracked) | 5 Zeilen; erste: 1 · 28 ms |
-| E Struktur | ORDER BY ohne CASE | 5 Zeilen; erste: 1 · 27 ms |
-| E Struktur | OFFSET/FETCH mit Parameter | 2 Zeilen; erste: BTC-USD · 9 ms |
-| E Struktur | COALESCE / CASE | 1 Zeilen; erste: 1 | ja · 18 ms |
+| E Struktur | Korreliertes Subselect | OK: 17/09/2026 20:00:00 · 849 ms |
+| E Struktur | CTE + COUNT | OK: 4 · 30 ms |
+| E Struktur | ORDER BY mit CASE (wie /api/assets/tracked) | 5 Zeilen; erste: 1 · 56 ms |
+| E Struktur | ORDER BY ohne CASE | 5 Zeilen; erste: 1 · 20 ms |
+| E Struktur | OFFSET/FETCH mit Parameter | 2 Zeilen; erste: BTC-USD · 16 ms |
+| E Struktur | COALESCE / CASE | 1 Zeilen; erste: 1 | ja · 22 ms |
 | E Struktur | LOWER() im WHERE | OK: 1 · 1 ms |
-| E Struktur | sha256(bytea) | OK: ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f200… · 3 ms |
-| F Schreiben | INSERT … RETURNING (Rollback) | NULL/LEER · 109 ms |
-| F Schreiben | UPDATE mit now() (Rollback) | VERBINDUNG GESCHLOSSEN nach 48,5 s (Exception while reading from stream); Backend wieder da nach 32 s |
-| F Schreiben | MERGE INTO (Rollback) | NULL/LEER · 10 ms |
-| F Schreiben | CREATE TEMP TABLE AS SELECT | OK: 4 · 6642 ms |
+| E Struktur | sha256(bytea) | OK: ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f200… · 2 ms |
+| F Schreiben | INSERT … RETURNING (Rollback) | NULL/LEER · 38 ms |
+| F Schreiben | UPDATE mit now() (Rollback) | NULL/LEER · 351 ms |
+| F Schreiben | MERGE INTO (Rollback) | NULL/LEER · 1 ms |
+| F Schreiben | CREATE TEMP TABLE AS SELECT | OK: 4 · 61 ms |
 | G Routinen | Anzahl Funktionen in public/dbo | OK: 0 · 1 ms |
-| G Routinen | dbo.letzter_kurs(101) | LEER (0 Zeilen) · 7 ms |
+| G Routinen | dbo.letzter_kurs(101) | LEER (0 Zeilen) · 1 ms |
 
 ## Abfragen im Wortlaut
 
@@ -245,18 +234,16 @@ mit Parameter, `COALESCE`/`CASE`, `LOWER()`, `sha256`, Transaktionen,
 
 ```
 psql -h localhost -p 55531 -U cire -d stockcrawler
--- 1  	iming on
-SELECT MAX(ts_utc) FROM price_bar WHERE asset_id = 101;
--- 2  (Binärformat: über PREPARE/EXECUTE mit einem Treiber, z. B. Npgsql, psycopg mit binary cursors)
-SELECT failed_logins, locked_until_utc FROM app_user WHERE login = 'chris';
--- 3
-BEGIN; INSERT INTO freq_run (interval_code) VALUES ('zz') RETURNING run_id; ROLLBACK;
--- 4
-BEGIN; UPDATE app_user SET last_login_utc = now() WHERE login = 'chris'; ROLLBACK;
--- 5
-SELECT COUNT(*) FROM app_session WHERE expires_utc > TIMESTAMP '2026-01-01';
+-- 1  MERGE (siehe oben) und danach SELECT auf den Schluessel
+-- 2  nur mit gebundenem Parameter reproduzierbar (Npgsql, psycopg binary, JDBC):
+--    SELECT COUNT(*) FROM price_bar WHERE asset_id = 101 AND interval_code = '1d' AND ts_utc >= $1
+-- 3  SELECT MAX(ts_utc) FROM price_bar WHERE asset_id = 101;
+-- 4  SELECT "close" - lag("close") OVER (ORDER BY ts_utc) FROM price_bar
+--      WHERE asset_id = 101 AND interval_code = '1d' ORDER BY ts_utc DESC LIMIT 1;
+--    SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY "close") FROM price_bar WHERE asset_id = 101;
+--    BEGIN; INSERT INTO freq_run (interval_code) VALUES ('zz') RETURNING run_id; ROLLBACK;
 ```
 
-Das Prüfprogramm (C#, Npgsql) liegt unter `%TEMP%\sc-port\Probe\Program.cs`
-auf dem Entwicklungsrechner und lässt sich nach jedem Backend-Stand in einer
-Minute wiederholen.
+Prüfprogramm (C#, Npgsql): `%TEMP%\sc-port\Probe\Program.cs` auf dem
+Entwicklungsrechner; Routenlauf: `%TEMP%\sc-portauchtest_em2.py`. Beide
+lassen sich nach jedem Backend-Stand in wenigen Minuten wiederholen.
