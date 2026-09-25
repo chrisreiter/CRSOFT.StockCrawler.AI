@@ -2769,7 +2769,171 @@ $('#fc-score').onclick = async () => {
 
 // ============================================================== System ===
 
+/* ================================================================ Hausmeister === */
+
+/*  Zahlen mit Tausenderpunkt und ohne Nachkomma -- Zeilenzahlen sind ganze
+    Dinge, und bei sechs Millionen zaehlt die Lesbarkeit mehr als die Stelle. */
+const hkZahl = n => (n == null ? '–' : fmtNum(n, 0));
+
+function hkLaufTabelle(lauf) {
+  if (!lauf) return '<p class="hint block">Noch kein Lauf. „Probelauf" zeigt, was ein Aufräumen '
+    + 'heute fände, ohne etwas zu löschen.</p>';
+
+  const zeilen = (lauf.ergebnisse || []).map(e => {
+    const klasse = e.abgeschaltet ? 'aus' : e.zeilen === 0 ? 'leer' : '';
+    const zahl = e.abgeschaltet ? 'abgeschaltet'
+      : e.zeilen === 0 ? 'nichts gefunden'
+      : '<b>' + hkZahl(e.zeilen) + '</b> Zeilen';
+
+    return '<tr class="' + klasse + ' kopf"><td><b>' + esc(e.titel) + '</b>'
+      + '<div class="tab">' + esc(e.tabelle) + '</div></td>'
+      + '<td class="num">' + (e.abgeschaltet ? '–' : e.fristTage + ' T') + '</td>'
+      + '<td class="num">' + zahl + '</td>'
+      + '<td class="num">' + (e.abgeschaltet || !e.sekunden ? '' : fmtNum(e.sekunden, 1) + ' s') + '</td>'
+      + '</tr>'
+      + '<tr class="' + klasse + ' warum-zeile"><td colspan="4"><div class="warum">'
+      + esc(e.begruendung)
+      + (e.verlust ? ' <b>Verloren geht:</b> ' + esc(e.verlust) : '')
+      + (e.fehler ? '<br><span class="down">' + esc(e.fehler) + '</span>' : '')
+      + '</div></td></tr>';
+  }).join('');
+
+  return '<p class="hint block">'
+    + (lauf.probe ? '<b>Probelauf</b> vom ' : '<b>Aufgeräumt</b> am ')
+    + esc(fmtDate(lauf.gestartetUtc)) + ' · ' + hkZahl(lauf.zeilen) + ' Zeilen über '
+    + lauf.regeln + ' Regeln · ' + fmtNum(lauf.dauerSekunden || 0, 1) + ' s'
+    + (lauf.probe ? ' — <b>nichts gelöscht</b>.' : '.')
+    + (lauf.note ? ' ' + esc(lauf.note) : '')
+    + (lauf.probe ? ' Überschneiden sich zwei Regeln, zählt der Probelauf dieselbe '
+        + 'Zeile zweimal — gelöscht wird sie einmal.' : '')
+    + '</p>'
+    + '<table class="grid hk-tab"><tbody>' + zeilen + '</tbody></table>';
+}
+
+async function ladeHausmeister() {
+  const d = await guard(() => api('/api/housekeeping/'));
+  if (!d) return;
+
+  const raus = $('#hk-out');
+  if (!raus) return;
+
+  /*  Die Groessen zuerst: Ohne sie ist „3,2 Millionen Zeilen" eine Zahl ohne
+      Bezug. Der Balken zeigt, wovon der Bestand lebt.                       */
+  const g = d.groessen || [];
+  const summe = d.summeMegabyte || g.reduce((a, x) => a + x.megabyte, 0);
+  const farben = ['#4c9aff', '#5ec2a8', '#c9a227', '#c96c6c', '#8b7fd4', '#6c8ec9'];
+
+  const balken = g.length
+    ? '<div class="hk-balken">' + g.slice(0, 6).map((x, i) =>
+        '<span style="width:' + (x.megabyte / summe * 100).toFixed(1) + '%;background:'
+        + farben[i % farben.length] + '" title="' + esc(x.tabelle) + ': '
+        + fmtNum(x.megabyte, 0) + ' MB"></span>').join('') + '</div>'
+      + '<div class="hk-gross">' + g.slice(0, 8).map(x =>
+          '<span>' + esc(x.tabelle) + ' <b>' + fmtNum(x.megabyte, 0) + ' MB</b> · '
+          + hkZahl(x.zeilen) + '</span>').join('') + '</div>'
+    : '';
+
+  const e = d.einstellungen || {};
+  const fuss = '<p class="hint block">Im Tageslauf: <b>'
+    + (e.aktiv ? (e.imTageslaufLoeschen ? 'löscht' : 'nur Probelauf') : 'abgeschaltet')
+    + '</b> · Zeitbudget ' + (e.budgetMinuten ?? '–') + ' min · Blöcke à '
+    + hkZahl(e.blockgroesse) + ' Zeilen. Die Fristen stehen in <code>appsettings.json</code> '
+    + 'unter <code>Housekeeping</code>; 0 schaltet eine Regel ab.</p>';
+
+  raus.innerHTML = balken + hkLaufTabelle(d.letzterLauf) + fuss;
+  hkLosZustand();
+}
+
+/*  Zweistufige Freigabe statt confirm().
+
+    Der Knopf „Jetzt aufräumen" stand zuerst allein da und fragte über
+    `confirm()` nach. Am 25.09.2026 lief daraufhin ein Löschlauf, den niemand
+    bewusst ausgelöst hatte -- ein confirm() beantwortet sich in
+    Automatisierungen, Browser-Erweiterungen und Prüfwerkzeugen von selbst, und
+    ein Klick daneben genügt. Für eine Funktion, die Millionen Zeilen löscht,
+    ist das zu wenig.
+
+    Jetzt gilt: Der Knopf ist gesperrt, bis in DIESER Sitzung ein Probelauf
+    gelaufen ist -- man muss also gesehen haben, was betroffen wäre. Danach
+    verlangt er einen zweiten Klick binnen zehn Sekunden auf sich selbst, und
+    er sagt dabei, um wie viele Zeilen es geht. Kein Dialog, den etwas anderes
+    wegklicken kann.                                                          */
+/*  Zwei getrennte Dinge: OB ein Probelauf lief und WAS er fand. Sie in einer
+    Zahl zu führen war der erste Entwurf -- und nach dem ersten erfolgreichen
+    Aufräumen findet der Probelauf null Zeilen, was in JavaScript falsch ist:
+    Der Knopf blieb für immer gesperrt, als hätte nie einer stattgefunden.    */
+let hkProbeGelaufen = false;
+let hkProbeErgebnis = 0;
+let hkScharf = null;          // Zeitpunkt, ab dem der zweite Klick zählt
+
+function hkLosZustand() {
+  const b = $('#hk-los');
+  if (!b) return;
+
+  if (!hkProbeGelaufen) {
+    b.disabled = true;
+    b.textContent = 'Jetzt aufräumen';
+    b.title = 'Erst den Probelauf ansehen — er zeigt, was betroffen wäre.';
+    return;
+  }
+
+  if (hkProbeErgebnis === 0) {
+    b.disabled = true;
+    b.textContent = 'Nichts aufzuräumen';
+    b.title = 'Der Probelauf hat keine Zeile gefunden, die eine Regel betrifft.';
+    b.classList.remove('warnen');
+    return;
+  }
+
+  b.disabled = false;
+  b.title = '';
+  b.textContent = hkScharf
+    ? 'Wirklich ' + hkZahl(hkProbeErgebnis) + ' Zeilen löschen?'
+    : 'Jetzt aufräumen (' + hkZahl(hkProbeErgebnis) + ' Zeilen)';
+  b.classList.toggle('warnen', !!hkScharf);
+}
+
+async function hausmeisterLauf(probe) {
+  const knopf = probe ? $('#hk-probe') : $('#hk-los');
+
+  if (!probe) {
+    if (!hkProbeGelaufen || hkProbeErgebnis === 0) return;   // ohne Probelauf gar nicht erst
+
+    if (!hkScharf || Date.now() - hkScharf > 10000) {
+      hkScharf = Date.now();
+      hkLosZustand();
+      setStatus('Zum Bestätigen noch einmal klicken — dann wird gelöscht.', 'ok');
+      setTimeout(() => { if (hkScharf && Date.now() - hkScharf >= 10000) { hkScharf = null; hkLosZustand(); } }, 10500);
+      return;
+    }
+    hkScharf = null;
+  }
+
+  knopf.disabled = true;
+  try {
+    const r = await guard(() => api('/api/housekeeping/lauf?probe=' + (probe ? 'true' : 'false'),
+                                    { method: 'POST' }));
+    if (!r) return;
+
+    if (probe) { hkProbeGelaufen = true; hkProbeErgebnis = r.zeilen; }
+    else { hkProbeGelaufen = false; hkProbeErgebnis = 0; }   // nach dem Löschen wieder von vorn
+
+    setStatus((probe ? 'Probelauf: ' : 'Aufgeräumt: ') + hkZahl(r.zeilen) + ' Zeilen über '
+      + r.regeln + ' Regeln' + (probe ? ' — nichts gelöscht.' : '.'), 'ok');
+    $('#hk-out').innerHTML = hkLaufTabelle(r);
+    await ladeHausmeister();
+  } finally {
+    knopf.disabled = false;
+    hkLosZustand();
+  }
+}
+
+$('#hk-probe')?.addEventListener('click', () => hausmeisterLauf(true));
+$('#hk-los')?.addEventListener('click', () => hausmeisterLauf(false));
+hkLosZustand();
+
 async function loadSystem() {
+  ladeHausmeister();
   const [stats, providers, runs] = await Promise.all([
     guard(() => api('/api/health/stats')),
     guard(() => api('/api/health/providers')),

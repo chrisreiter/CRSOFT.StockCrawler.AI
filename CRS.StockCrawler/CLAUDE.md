@@ -1310,6 +1310,20 @@ griff das Datum am Ende von Binance-Titeln ab; Ankündigungen standen mit der
 Kennung `2026-08-30` in der Tabelle. Richtig ist: nur Grossbuchstaben und
 Ziffern, zwei bis zwölf Zeichen.
 
+**Der Hausmeister löscht, was niemand mehr liest — und `confirm()` ist kein
+Schutz dafür.** Gemessen am 25.09.2026 lagen 8,4 Mio entbehrliche Zeilen im
+Bestand, davon 1,84 Mio in ACHT überholten Kurvendiskussions-Läufen: Gelesen
+wird nur `MAX(run_id)` je Intervall und Glättungsart. Jede Regel nennt, wer
+die Zeilen las und was verloren geht; Kurse, Depot, Benutzer, Säulen- und
+Modellgewichte sowie offene Prognosen kommen in keiner Regel vor. Zwei
+Lehren: **Der Probelauf zählt je Regel — überschneiden sich zwei, ist seine
+Summe zu hoch** (8.385.078 gezählt, 8.256.953 gelöscht). Und der erste
+Entwurf fragte über `confirm()` nach; daraufhin lief ein Löschlauf, den
+niemand bewusst ausgelöst hatte — ein `confirm()` beantwortet sich in
+Automatisierungen und Prüfwerkzeugen von selbst. Jetzt: Knopf gesperrt bis
+zum Probelauf, danach zwei Klicks auf denselben Knopf mit Zahl im Text.
+Siehe [docs/HAUSMEISTER.md](docs/HAUSMEISTER.md).
+
 **Die Startseite „Heute" ist die Vorgabe, nicht „Kurse".** Elf gleichrangige
 Reiter und eine leere Kursauswahl sagten einem Neuling weder, was heute
 wichtig ist, noch wo die Stärken der Anwendung liegen. `/api/start/` sammelt

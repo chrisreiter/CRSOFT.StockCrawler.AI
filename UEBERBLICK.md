@@ -177,6 +177,9 @@ nicht aus der Einstellung.
   geglättet, mit Verknüpfung gleichzeitiger Ereignisse
 - **Weltbestand und Zeitzonen** — Tokio, Europa, New York, mit sauberer
   Trennung von Vorlauf und blosser Überlappung
+- **Hausmeister** (System) — löscht täglich, was keine Ansicht und keine
+  Messung mehr liest; jede Regel mit Begründung und Verlustangabe, Probelauf
+  vor jedem Löschen
 - **Heute** — die Startseite: Tagesübersicht, Markt, Nachrichten, Depot,
   Prognose und Urteile, Neuzugänge, Grundschwingungen und Systemzustand als
   Kacheln, darunter grosse Verweise zu jeder Funktion (1 bis 4 Spalten je

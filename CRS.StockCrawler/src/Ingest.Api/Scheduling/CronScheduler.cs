@@ -328,6 +328,28 @@ public sealed class CronScheduler : BackgroundService
             _log.LogError(ex, "Reasoning-Urteile übersprungen");
         }
 
+        /*  Der Hausmeister zuletzt: Er loescht, was keine Ansicht mehr liest,
+            und soll nichts aufhalten, was noch rechnet. Eigenes try/catch aus
+            demselben Grund wie oben -- ein Aufraeumlauf, der scheitert, darf
+            den Tageslauf nicht als gescheitert erscheinen lassen.            */
+        try
+        {
+            var hk = sp.GetRequiredService<IHousekeepingService>();
+            var opt = sp.GetRequiredService<IOptions<HousekeepingOptions>>().Value;
+
+            if (opt.Aktiv)
+            {
+                var lauf = await hk.LaufeAsync(!opt.ImTageslaufLoeschen, "tageslauf", ct);
+                _log.LogInformation("Hausmeister: {Zeilen} Zeilen über {Regeln} Regeln in {S:F0} s{Probe}",
+                    lauf.Zeilen, lauf.Regeln, lauf.DauerSekunden ?? 0,
+                    lauf.Probe ? " (Probelauf)" : "");
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Hausmeister übersprungen");
+        }
+
         try
         {
             var laeufe = await sp.GetRequiredService<IAutopilotService>().LaufeAlleAsync(ct);
