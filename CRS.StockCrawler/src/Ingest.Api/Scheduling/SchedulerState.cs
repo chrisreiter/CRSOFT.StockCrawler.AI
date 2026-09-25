@@ -36,6 +36,13 @@ public sealed class SchedulerState
 
     public DateTime? LaufendSeitUtc { get; private set; }
 
+    /// <summary>
+    /// Was beim Start als versäumt erkannt wurde, in einem Satz — damit ein
+    /// nachgeholter Lauf in der Oberfläche erklärt ist und nicht als
+    /// unbestellter Lauf zur falschen Uhrzeit erscheint.
+    /// </summary>
+    public string? Nachgeholt { get; set; }
+
     public DateTime? NextHourlyUtc { get; set; }
     public DateTime? NextDailyUtc { get; set; }
 

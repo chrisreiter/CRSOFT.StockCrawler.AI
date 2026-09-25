@@ -67,6 +67,23 @@ public sealed class CronScheduler : BackgroundService
             "Scheduler {Status}. Nächster Stundenlauf {H:u}, nächster Tageslauf {D:u}",
             _state.Enabled ? "aktiv" : "angehalten", nextHourly, nextDaily);
 
+        /*  Erst nachholen, dann in den Takt.
+
+            Ein nachgeholter Tageslauf dauert eine halbe Stunde; danach ist der
+            vorhin errechnete Stundentermin meist verstrichen. Deshalb werden
+            beide Termine hinterher neu bestimmt -- sonst liefe direkt hinterher
+            noch ein Stundenlauf, der dieselben Kurse holt.                     */
+        if (_state.Enabled && _opt.NachholenNachAusfall)
+        {
+            await NachholenAsync(daily, hourly, ct);
+            if (ct.IsCancellationRequested) return;
+
+            nextHourly = hourly.GetNextOccurrence(DateTime.UtcNow);
+            nextDaily = daily.GetNextOccurrence(DateTime.UtcNow);
+            _state.NextHourlyUtc = nextHourly;
+            _state.NextDailyUtc = nextDaily;
+        }
+
         while (!ct.IsCancellationRequested)
         {
             var next = Min(nextHourly, nextDaily);
@@ -99,6 +116,125 @@ public sealed class CronScheduler : BackgroundService
                 _state.NextDailyUtc = nextDaily;
             }
         }
+    }
+
+    /// <summary>
+    /// Holt nach, was während eines Ausfalls fällig war.
+    ///
+    /// <para><b>Woran erkannt wird, dass etwas fehlt.</b> Nicht am
+    /// Zeitplanzustand — der lebt im Speicher und ist nach jedem Neustart leer.
+    /// Sondern an <c>ingest_run</c>: Wann hat der Kursabruf zuletzt tatsächlich
+    /// begonnen? Liegt dieser Zeitpunkt vor dem letzten fälligen Termin, ist ein
+    /// Lauf ausgefallen. Die Prüfung meldet sich nur nach einem echten Ausfall:
+    /// Wer die Anwendung mittags neu startet, nachdem der Lauf um 02:20
+    /// durchlief, löst nichts aus.</para>
+    ///
+    /// <para><b>Nachgeholt wird einmal, nicht je versäumter Termin.</b> Der
+    /// Kursabruf lädt je Wert ab dessen letzter Bar bis jetzt
+    /// (<c>IngestService.UpdateIncrementalAsync</c>) — ein Lauf schliesst die
+    /// ganze Lücke, fünf Läufe hintereinander holten fünfmal dasselbe.</para>
+    ///
+    /// <para>Der Stundenlauf ist mit erfasst, obwohl sein Termin binnen einer
+    /// Stunde wiederkehrt: Wer die Anwendung um 09:10 startet, bekäme seine
+    /// Kurse sonst erst um 10:08.</para>
+    /// </summary>
+    private async Task NachholenAsync(CronExpression daily, CronExpression hourly,
+                                      CancellationToken ct)
+    {
+        bool tagFehlt;
+
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            await using var conn = await scope.ServiceProvider
+                .GetRequiredService<ISqlConnectionFactory>().OpenAsync(ct);
+
+            /*  Nur abgeschlossene Laeufe zaehlen.
+
+                `MAX(started_utc)` allein genuegt nicht: Ein Lauf, den ein
+                Neustart mitten in der Arbeit abgeschnitten hat, behaelt
+                `finished_utc IS NULL` fuer immer -- niemand raeumt ihn nach.
+                Genau das passierte beim ersten Versuch: Der nachgeholte
+                Tageslauf begann um 11:21:32, wurde fuenf Sekunden spaeter
+                mitsamt seinem Prozess beendet, und die naechste Instanz sah
+                einen frischen Zeitstempel und hielt alles fuer erledigt --
+                ohne dass eine einzige Bar geschrieben war. Ein angefangener
+                Lauf ist kein erledigter.                                       */
+            async Task<DateTime?> LetzterLauf(string job) =>
+                await conn.ExecuteScalarAsync<DateTime?>(new CommandDefinition(
+                    """
+                    SELECT MAX(started_utc) FROM dbo.ingest_run
+                     WHERE job_name = @job AND finished_utc IS NOT NULL
+                    """, new { job }, cancellationToken: ct));
+
+            var letzterTag = await LetzterLauf("update:" + BarInterval.Daily);
+            var letzteStunde = await LetzterLauf("update:" + BarInterval.Hourly);
+
+            var jetzt = DateTime.UtcNow;
+
+            /*  Der letzte faellige Termin. Cronos kennt nur den naechsten, also
+                wird ein Fenster zurueck abgefragt und daraus der letzte genommen. */
+            static DateTime? Vorheriger(CronExpression c, DateTime jetzt, TimeSpan fenster)
+                => c.GetOccurrences(jetzt - fenster, jetzt).Cast<DateTime?>().LastOrDefault();
+
+            var faelligTag = Vorheriger(daily, jetzt, TimeSpan.FromDays(40));
+            var faelligStunde = Vorheriger(hourly, jetzt, TimeSpan.FromDays(3));
+
+            /*  Ohne jeden Lauf im Protokoll wird nachgeholt: eine frische oder
+                vom Hausmeister geleerte Anlage holt damit einmal zu viel statt
+                nie.                                                            */
+            tagFehlt = faelligTag is not null
+                    && (letzterTag is null || letzterTag < faelligTag);
+            var stundeFehlt = faelligStunde is not null
+                           && (letzteStunde is null || letzteStunde < faelligStunde);
+
+            if (!tagFehlt && !stundeFehlt)
+            {
+                _log.LogInformation("Nachholen: nichts versäumt (letzter Kursabruf "
+                    + "Tag {Tag:u}, Stunde {Std:u})", letzterTag, letzteStunde);
+                return;
+            }
+
+            /*  Wie alt der Bestand tatsaechlich ist -- die Zahl, die man im
+                Diagramm sieht. Sie steht in der Meldung, damit "nachgeholt"
+                belegt und nicht behauptet ist.                                 */
+            var juengste = await conn.ExecuteScalarAsync<DateTime?>(new CommandDefinition(
+                "SELECT MAX(ts_utc) FROM dbo.price_bar WHERE interval_code = @iv",
+                new { iv = tagFehlt ? BarInterval.Daily : BarInterval.Hourly },
+                cancellationToken: ct));
+
+            var faellig = tagFehlt ? faelligTag : faelligStunde;
+            var was = tagFehlt && stundeFehlt ? "Tages- und Stundenlauf"
+                    : tagFehlt ? "Tageslauf" : "Stundenlauf";
+            var stand = juengste is null ? "kein Kurs im Bestand"
+                      : $"jüngste Bar {juengste:yyyy-MM-dd HH:mm} UTC";
+
+            _state.Nachgeholt = $"{was} war seit {faellig:yyyy-MM-dd HH:mm} UTC fällig "
+                              + $"({stand}) — wird jetzt nachgeholt.";
+
+            _log.LogWarning("Nachholen: {Was} versäumt, fällig seit {Faellig:u}, {Stand}. "
+                + "Start in {S} s.", was, faellig, stand, _opt.NachholVerzoegerungSekunden);
+        }
+        catch (Exception ex)
+        {
+            // Ein missglückter Blick ins Protokoll darf den Zeitplan nicht verhindern.
+            _log.LogError(ex, "Nachholen übersprungen — Protokoll nicht lesbar");
+            return;
+        }
+
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(
+                Math.Clamp(_opt.NachholVerzoegerungSekunden, 0, 600)), ct);
+        }
+        catch (OperationCanceledException) { return; }
+
+        /*  Der Tageslauf holt beide Intervalle -- er beginnt mit Universum und
+            Tagesbars, die Diagramme stimmen also nach wenigen Minuten, noch
+            bevor Analyse und Prognose hinterherkommen. Zusaetzlich den
+            Stundenlauf zu starten hiesse, dieselben Kurse zweimal zu holen.    */
+        if (tagFehlt) await SafeRun("Tageslauf (nachgeholt)", RunDailyAsync, ct);
+        else await SafeRun("Stundenlauf (nachgeholt)", RunHourlyAsync, ct);
     }
 
     /// <summary>Erlaubt der Schnittstelle, einen Lauf von Hand anzustoßen.</summary>

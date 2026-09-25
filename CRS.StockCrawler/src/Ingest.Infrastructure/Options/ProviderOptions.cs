@@ -42,6 +42,27 @@ public sealed class IngestOptions
     public string DailyCronUtc { get; set; } = "20 2 * * *";
 
     /// <summary>
+    /// Holt der Zeitplan beim Start nach, was während eines Ausfalls fällig war?
+    ///
+    /// <para><b>Warum das nötig ist.</b> Cronos beantwortet nur die Frage, wann
+    /// der nächste Termin ist; ein Termin, der während eines Ausfalls
+    /// verstrichen ist, war damit verloren. Beim Stundenlauf fällt das nicht
+    /// auf — sein Termin kehrt binnen einer Stunde wieder. Beim Tageslauf
+    /// schon: Nach einem Ausfall vom 19. bis 25.09.2026 standen die Tagesbars
+    /// noch auf dem 18.09., während die Stundenbars aktuell waren. Jede
+    /// Tageslinie im Diagramm endete in der Vergangenheit, und der nächste
+    /// Abruf wäre erst am folgenden Morgen um 02:20 UTC gekommen.</para>
+    /// </summary>
+    public bool NachholenNachAusfall { get; set; } = true;
+
+    /// <summary>
+    /// Wie lange der Zeitplan nach dem Start wartet, bevor er nachholt. Der
+    /// Start soll zuerst fertig werden — ein Kursabruf über 600 Werte, der
+    /// gleichzeitig mit dem ersten Seitenaufruf beginnt, macht beide langsam.
+    /// </summary>
+    public int NachholVerzoegerungSekunden { get; set; } = 30;
+
+    /// <summary>
     /// Wie viele Reasoning-Urteile der Tageslauf höchstens bildet und wie viel
     /// Zeit er sich dafür nimmt. Auf der CPU kostet ein Urteil mit dem
     /// 33-Milliarden-Modell mehrere Minuten; zwölf Werte in einer Stunde sind

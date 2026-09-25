@@ -91,6 +91,7 @@ public static class SchedulerEndpoints
                     inSekunden = (int)Math.Max(0, (naechsterZeit.Value - jetzt).TotalSeconds)
                 },
 
+                nachgeholt = state.Nachgeholt,
                 nextHourlyUtc = state.NextHourlyUtc,
                 nextDailyUtc = state.NextDailyUtc,
                 lastHourlyUtc = state.LastHourlyUtc,
