@@ -2476,6 +2476,33 @@
       </div>
       <div id="sched-status"></div>
     </div>
+    <div class="card" id="hk-card">
+      <h3>Hausmeister</h3>
+
+      <p class="hint block">
+        Löscht täglich, was <b>keine Ansicht und keine Messung mehr liest</b> —
+        nicht, was bloss alt ist. Zu jeder Regel steht, wer die Zeilen las und
+        was mit ihnen verloren geht. <b>Nicht angetastet</b> werden Kurse,
+        Werte, Depot, Benutzer, Säulen- und Modellgewichte sowie jede Prognose,
+        deren Zielzeitpunkt noch aussteht; diese Tabellen kommen in keiner
+        Regel vor.
+      </p>
+
+      <p class="hint block">
+        <b>Der Probelauf zählt mit denselben Bedingungen, mit denen später
+        gelöscht wird</b> — nicht mit ähnlichen. Wer wissen will, was ein
+        Aufräumen kostet, sieht es vorher.
+      </p>
+
+      <div class="toolbar">
+        <button id="hk-probe" class="primary">Probelauf</button>
+        <button id="hk-los" disabled title="Erst den Probelauf ansehen.">Jetzt aufräumen</button>
+        <span class="hint">Läuft sonst einmal täglich am Ende des Tageslaufs.</span>
+      </div>
+
+      <div id="hk-out"></div>
+    </div>
+
     <div class="card">
       <h3>Letzte Läufe</h3>
       <table class="grid" id="sys-runs">

@@ -62,6 +62,7 @@ public static class DependencyInjection
         services.Configure<CoinGeckoOptions>(config.GetSection("Sources:CoinGecko"));
         services.Configure<IngestOptions>(config.GetSection("Ingest"));
         services.Configure<BetriebOptions>(config.GetSection("Betrieb"));
+        services.Configure<HousekeepingOptions>(config.GetSection("Housekeeping"));
 
         services.AddSingleton<ISqlConnectionFactory>(_ => VerbindungAusKonfiguration(config));
 
@@ -85,6 +86,7 @@ public static class DependencyInjection
         services.AddScoped<INeuzugangService, NeuzugangService>();
         services.AddScoped<IGrundschwingungService, GrundschwingungService>();
         services.AddScoped<IReasoningUrteilService, ReasoningUrteilService>();
+        services.AddScoped<IHousekeepingService, HousekeepingService>();
 
         /*  Singleton, nicht Scoped: Die Sprachdateien werden beim Start gelesen
             und aendern sich nicht je Anfrage. Scoped hiesse, 1.711 Eintraege je

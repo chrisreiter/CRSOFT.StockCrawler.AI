@@ -1347,6 +1347,27 @@ pre.antwort.dim { color: var(--muted); font-family: ui-monospace, monospace; fon
 
 .u-tip-mehr { color: var(--muted); font-size: 11px; margin-top: 2px; }
 
+/* ============================================================ Hausmeister ===  */
+#hk-card { grid-column: 1 / -1; }
+/*  Je Regel zwei Zeilen: Zahlen kompakt, Begruendung darunter ueber die volle
+    Breite. Die Systemseite stellt zwei Abschnitte nebeneinander, die Kachel hat
+    also nur die halbe Fensterbreite -- sieben Spalten nebeneinander waren dort
+    nicht lesbar, der Text brach auf drei Woerter je Zeile um.                */
+.hk-tab td { vertical-align: top; }
+.hk-tab tr.kopf td { border-bottom: none; padding-bottom: 2px; }
+.hk-tab tr.warum-zeile td { padding-top: 0; }
+.hk-tab .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hk-tab .tab { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
+.hk-tab .warum { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.hk-tab .warum b { color: var(--fg); font-weight: 600; }
+.hk-tab tr.leer td { color: var(--muted); }
+.hk-tab tr.aus td { opacity: .5; }
+button.warnen { background: var(--down); border-color: var(--down); color: #fff; }
+.hk-balken { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--line); margin: 2px 0 10px; }
+.hk-balken span { display: block; height: 100%; }
+.hk-gross { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+.hk-gross b { color: var(--fg); font-variant-numeric: tabular-nums; }
+
 /* ============================================================ Gast / Slave ===  */
 /*  Gesperrte Knoepfe sichtbar sperren. Ohne diese Regel sah ein Gast lauter
     blaue Knoepfe, die nichts taten -- das Attribut war gesetzt, die Optik nicht. */

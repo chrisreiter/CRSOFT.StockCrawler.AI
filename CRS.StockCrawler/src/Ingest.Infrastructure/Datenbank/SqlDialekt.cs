@@ -86,6 +86,24 @@ public abstract class SqlDialekt
     public abstract string In(string ausdruck, string parameter);
 
     /// <summary>
+    /// Ein Loeschschritt mit Obergrenze — die Form dafuer ist in beiden
+    /// Systemen eine andere, nicht nur ein anderer Name.
+    ///
+    /// <para><b>Warum blockweise geloescht wird.</b> Ein einziges DELETE ueber
+    /// sechs Millionen Zeilen sperrt die Tabelle fuer die Dauer des Vorgangs
+    /// und laesst das Transaktionsprotokoll auf ein Vielfaches der geloeschten
+    /// Datenmenge anwachsen. Waehrenddessen steht der stuendliche Kursabruf.
+    /// In Bloecken laeuft es laenger und stoert niemanden.</para>
+    /// </summary>
+    /// <param name="tabelle">Voll qualifiziert, z. B. <c>dbo.forecast_component</c>.</param>
+    /// <param name="schluessel">Die Schluesselspalte, ueber die Postgres die
+    /// Auswahl begrenzt. In SQL Server ungenutzt — dort gibt es <c>DELETE TOP</c>.</param>
+    /// <param name="bedingung">Der WHERE-Teil ohne das Wort WHERE.</param>
+    /// <param name="parameter">Name des Zahlparameters ohne <c>@</c>.</param>
+    public abstract string LoescheBlock(string tabelle, string schluessel,
+                                        string bedingung, string parameter);
+
+    /// <summary>
     /// Median je Gruppe. In SQL Server ist <c>PERCENTILE_CONT</c> eine
     /// Fensterfunktion (<c>DISTINCT … OVER (PARTITION BY)</c>), in Postgres ein
     /// geordnetes Aggregat (<c>GROUP BY</c>) — die Abfrage hat also eine andere
@@ -221,6 +239,8 @@ public sealed class SqlServerDialekt : SqlDialekt
     public override string Runden(string x, string stellen) => $"ROUND({x}, {stellen})";
     public override string Stdabw(string x) => $"STDEV({x})";
     public override string In(string ausdruck, string parameter) => $"{ausdruck} IN @{parameter}";
+    public override string LoescheBlock(string tabelle, string schluessel, string bedingung, string parameter)
+        => $"DELETE TOP (@{parameter}) FROM {tabelle} WHERE {bedingung}";
     public override string UpdateZiel(string tabelle, string alias)   => $"UPDATE {alias}";
     public override string UpdateQuelle(string tabelle, string alias) => $"FROM {tabelle} {alias},";
     public override string MedianSelect(string gruppe, string spalte, string alias)
@@ -282,6 +302,14 @@ public sealed class PostgresDialekt : SqlDialekt
     public override string Runden(string x, string stellen) => $"CAST(ROUND(CAST({x} AS NUMERIC), {stellen}) AS DOUBLE PRECISION)";
     public override string Stdabw(string x) => $"STDDEV_SAMP(CAST({x} AS DOUBLE PRECISION))";
     public override string In(string ausdruck, string parameter) => $"{ausdruck} = ANY(@{parameter})";
+
+    /*  Postgres kennt kein DELETE TOP. Die Auswahl wird ueber den Schluessel
+        begrenzt; ein CTID-Trick waere schneller, haengt aber an der physischen
+        Zeilenlage und ueberlebt kein VACUUM zwischen den Bloecken.          */
+    public override string LoescheBlock(string tabelle, string schluessel, string bedingung, string parameter)
+        => $"DELETE FROM {tabelle} WHERE {schluessel} IN "
+         + $"(SELECT {schluessel} FROM {tabelle} WHERE {bedingung} LIMIT @{parameter})";
+
     public override string UpdateZiel(string tabelle, string alias)   => $"UPDATE {tabelle} {alias}";
     public override string UpdateQuelle(string tabelle, string alias) => "FROM";
     public override string MedianSelect(string gruppe, string spalte, string alias)
