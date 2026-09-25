@@ -1275,6 +1275,52 @@ auf, und um 08:00:47 waren die Prognosen fertig, um 08:00:49 lief der Autopilot.
 „Täglich" heisst auf einer Arbeitsmaschine also „täglich, sobald sie das nächste
 Mal läuft".
 
+**Das galt für den Schlafmodus — nicht über einen Neustart, und der Unterschied
+kostete sieben Tage Tagesbars.** Schläft der Rechner, bleibt der errechnete
+Termin als Variable im Speicher stehen; beim Aufwachen liegt er in der
+Vergangenheit, `Task.Delay` kehrt sofort zurück, der Lauf beginnt. Startet die
+Anwendung dagegen neu, wird derselbe Termin mit
+`GetNextOccurrence(DateTime.UtcNow)` **neu** berechnet — und der versäumte
+Termin existiert nicht mehr. Am 25.09.2026 stand die jüngste Tagesbar deshalb
+auf dem **18.09.**, während die Stundenbars auf 11:00 desselben Tages standen:
+Der Stundentermin kehrt binnen einer Stunde wieder und heilt sich selbst, der
+Tagestermin kommt erst am nächsten Morgen um 02:20 wieder. In jedem Diagramm
+endete die Tageslinie eine Woche in der Vergangenheit — als flache Linie, nicht
+als Fehler, und genau das macht es schwer zu bemerken.
+
+**Woran der Ausfall erkannt wird: an `ingest_run`, nicht am Zeitplanzustand.**
+`SchedulerState` lebt im Speicher und ist nach jedem Neustart leer — er kann per
+Bauart nicht wissen, was vorher geschah. Die Datenbank kann es:
+`MAX(started_utc)` für `update:1d`, verglichen mit dem letzten fälligen
+Cron-Termin (`CronScheduler.NachholenAsync`). Liegt der letzte Lauf davor, war
+einer versäumt. Die Prüfung meldet sich nur nach einem echten Ausfall — wer
+mittags neu startet, nachdem der Lauf um 02:20 durchlief, löst nichts aus.
+Fehlt jeder Lauf im Protokoll, wird nachgeholt: Eine frische oder vom
+Hausmeister geleerte Anlage holt damit einmal zu viel statt nie. Genau dieser
+Fall trat ein — der Test des Hausmeisters hatte `ingest_run` geleert.
+
+**Nachgeholt wird einmal, nicht je versäumter Termin.** `UpdateIncrementalAsync`
+lädt je Wert ab dessen letzter Bar minus fünf Tagen bis jetzt; ein Lauf schliesst
+die ganze Lücke, ob sie einen Tag oder eine Woche breit ist. Fünf Läufe für fünf
+versäumte Tage holten fünfmal dasselbe. Der Tageslauf beginnt mit Universum und
+Kursen, die Diagramme stimmen also nach Minuten — Analyse, Prognose und
+Bewertung kommen hinterher.
+
+**Danach werden beide Termine neu bestimmt.** Ein nachgeholter Tageslauf dauert
+eine halbe Stunde; der vorhin errechnete Stundentermin ist dann verstrichen, und
+ohne Neuberechnung liefe direkt hinterher ein Stundenlauf, der dieselben Kurse
+holt.
+
+**Ein angefangener Lauf ist kein erledigter — `finished_utc IS NOT NULL` gehört
+in die Bedingung.** Der erste Versuch fragte nur `MAX(started_utc)`. Beim Test
+startete der nachgeholte Tageslauf um 11:21:32, fünf Sekunden später wurde sein
+Prozess beendet, und `ingest_run` behielt die Zeile mit `finished_utc = NULL` —
+niemand räumt sie nach. Die nächste Instanz sah einen Zeitstempel von vor einer
+Minute und hielt alles für erledigt, während keine einzige Bar geschrieben war.
+Der Fehler ist heimtückisch, weil er das Symptom des Ausfalls genau reproduziert,
+den er beheben soll: flache Tageslinien und ein Zeitplan, der meldet, es sei
+nichts zu tun.
+
 **Wer im Protokoll steht, muss darin richtig stehen.** Der Autopilot schrieb für
 jeden gehaltenen Wert, der im Zielkorb blieb, „nicht unter den besten N" — auch
 für den mit der HÖCHSTEN Erwartung des Laufs (MNST, 7,226 %), der in Wahrheit

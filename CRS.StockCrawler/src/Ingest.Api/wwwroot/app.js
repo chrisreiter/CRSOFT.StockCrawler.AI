@@ -3024,6 +3024,12 @@ async function loadScheduler() {
     parts.push(`<dt>Übersprungen</dt><dd>${d.skippedWhileDisabled} Termine, ` +
       `während der Scheduler angehalten war</dd>`);
 
+  /*  Ein nachgeholter Lauf beginnt zu einer Uhrzeit, die in keinem Cron-Ausdruck
+      steht. Ohne diesen Satz sieht das aus wie ein unbestellter Lauf -- und wer
+      ihn fuer einen Fehler haelt, haelt die Kurse fuer falsch.                */
+  if (d.nachgeholt)
+    parts.push(`<dt>Nachgeholt</dt><dd>${esc(d.nachgeholt)}</dd>`);
+
   parts.push('</dl>');
   $('#sched-status').innerHTML = parts.join('');
 }
