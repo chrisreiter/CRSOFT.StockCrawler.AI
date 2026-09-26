@@ -63,15 +63,19 @@ public sealed class AppStateRepository : IAppStateRepository
     {
         await using var conn = await _factory.OpenAsync(ct);
 
-        await conn.ExecuteAsync(new CommandDefinition($"""
+        /*  Der Zeitstempel kommt von hier, nicht aus der Datenbank: Auf dem
+            EventMesh-DataCell-Backend wird ein berechneter Ausdruck in einem
+            Schreibvorgang still verworfen (siehe AuthService.AnmeldenAsync).
+            Ein gebundener Wert wird zuverlaessig gespeichert.                  */
+        await conn.ExecuteAsync(new CommandDefinition("""
             MERGE INTO dbo.app_session AS t
             USING (SELECT @key AS session_key) AS s
               ON t.session_key = s.session_key
             WHEN MATCHED THEN
-              UPDATE SET last_seen_utc = {d.Jetzt}
+              UPDATE SET last_seen_utc = @jetzt
             WHEN NOT MATCHED THEN
               INSERT (session_key) VALUES (s.session_key);
-            """, new { key = sessionKey }, cancellationToken: ct));
+            """, new { key = sessionKey, jetzt = DateTime.UtcNow }, cancellationToken: ct));
     }
 
     public async Task<int?> GetSessionUserAsync(Guid sessionKey, CancellationToken ct = default)

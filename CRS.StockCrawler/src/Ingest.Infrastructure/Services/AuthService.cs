@@ -321,23 +321,45 @@ public sealed class AuthService : IAuthService
             return (wer, null);
         }
 
+        /*  Ablauf und Zeitstempel werden HIER gerechnet, nicht in der Datenbank.
+
+            Nicht aus Geschmack. Auf dem EventMesh-DataCell-Backend wird ein
+            berechneter Ausdruck in einem Schreibvorgang nicht gespeichert: Ein
+            `expires_utc = jetzt + 14 Tage` legt `jetzt` ab, die Intervall-
+            addition faellt weg -- ohne Fehler, ohne Warnung. Derselbe Ausdruck
+            in einem SELECT rechnet richtig; nur beim Schreiben verschwindet er.
+            Gemessen am 26.09.2026 ueber Npgsql, sowohl mit Literal-Intervall als
+            auch mit gebundenem Faktor, im INSERT wie im MERGE.
+
+            Die Folge war nicht etwa eine falsche Anzeige, sondern: Anmelden
+            unmoeglich. Der Sitzungslesevorgang weiter unten verlangt
+            `expires_utc > jetzt`; steht dort der Entstehungszeitpunkt, ist jede
+            Sitzung im Moment ihrer Entstehung abgelaufen. Der Login antwortete
+            mit 200 und der richtigen Rolle, die naechste Anfrage kannte
+            niemanden mehr, und die Oberflaeche fiel wortlos aufs Formular
+            zurueck -- sah also aus wie ein falsches Kennwort.
+
+            Ein fertiger Zeitstempel als Parameter wird korrekt gespeichert.
+            Das gilt auf beiden Backends, kostet nichts und macht den
+            Schreibvorgang unabhaengig davon, welche Uhr die Datenbank fuehrt.  */
+        var jetzt = DateTime.UtcNow;
+
         await conn.ExecuteAsync(new CommandDefinition(
             $"""
             UPDATE dbo.app_user
                SET failed_logins = 0, locked_until_utc = NULL,
-                   last_login_utc = {d.Jetzt}
+                   last_login_utc = @jetzt
              WHERE user_id = @id;
 
             MERGE INTO dbo.app_session {d.MergeSperre} AS t
             USING (SELECT @key AS session_key) AS s ON t.session_key = s.session_key
             WHEN MATCHED THEN UPDATE SET
-                 user_id = @id, last_seen_utc = {d.Jetzt},
-                 expires_utc = {d.PlusTage("@tage", d.Jetzt)}
+                 user_id = @id, last_seen_utc = @jetzt, expires_utc = @ablauf
             WHEN NOT MATCHED THEN
                  INSERT (session_key, user_id, expires_utc)
-                 VALUES (@key, @id, {d.PlusTage("@tage", d.Jetzt)});
+                 VALUES (@key, @id, @ablauf);
             """,
-            new { id = u.UserId, key = sitzung, tage = (int)Sitzungsdauer.TotalDays },
+            new { id = u.UserId, key = sitzung, jetzt, ablauf = jetzt + Sitzungsdauer },
             cancellationToken: ct));
 
         if (Kennwort.VeraltetSich(u.Hash))
@@ -391,15 +413,24 @@ public sealed class AuthService : IAuthService
             """, new { key = sitzung }, cancellationToken: ct));
 
         if (u is not null)
-            // Gleitender Ablauf: Wer die Anwendung benutzt, bleibt angemeldet.
+        {
+            /*  Gleitender Ablauf: Wer die Anwendung benutzt, bleibt angemeldet.
+
+                Auch hier der fertige Zeitstempel statt der Rechnung in der
+                Datenbank -- aus demselben Grund wie beim Anmelden. Ein
+                berechneter Ausdruck verschwindet auf dem DataCell-Backend
+                still, und dann verlaengert sich nichts, sondern die Sitzung
+                laeuft bei jedem Zugriff aufs Neue sofort ab.                   */
+            var jetzt = DateTime.UtcNow;
+
             await conn.ExecuteAsync(new CommandDefinition(
-                $"""
+                """
                 UPDATE dbo.app_session
-                   SET last_seen_utc = {d.Jetzt},
-                       expires_utc = {d.PlusTage("@tage", d.Jetzt)}
+                   SET last_seen_utc = @jetzt, expires_utc = @ablauf
                  WHERE session_key = @key
-                """, new { key = sitzung, tage = (int)Sitzungsdauer.TotalDays },
+                """, new { key = sitzung, jetzt, ablauf = jetzt + Sitzungsdauer },
                 cancellationToken: ct));
+        }
 
         return u;
     }
