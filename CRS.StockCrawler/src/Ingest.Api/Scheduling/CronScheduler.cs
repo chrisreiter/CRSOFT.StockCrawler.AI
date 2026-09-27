@@ -67,14 +67,21 @@ public sealed class CronScheduler : BackgroundService
             "Scheduler {Status}. Nächster Stundenlauf {H:u}, nächster Tageslauf {D:u}",
             _state.Enabled ? "aktiv" : "angehalten", nextHourly, nextDaily);
 
-        /*  Die Guetetafel vorwaermen -- im Hintergrund, ohne jemanden aufzuhalten.
+        /*  Wert und Horizont an den Bewertungen nachtragen -- im Hintergrund,
+            ohne jemanden aufzuhalten.
 
-            Sie entsteht aus einem vollen Durchlauf ueber Prognosen und
-            Bewertungen und kostet rund 25 Sekunden. Wer sie nicht vorwaermt,
-            laedt sie beim ersten Oeffnen einer Kursansicht mit eingeblendeter
-            Prognose -- und dann wartet ein Mensch darauf. Hier wartet niemand;
-            wer in den ersten Sekunden nach dem Start zugreift, wartet
-            hoechstens den Rest.                                               */
+            Migration 047 legt die beiden Spalten an, fuellt sie aber nicht:
+            Ein Migrationsskript, das 484.000 Zeilen ueber einen Verbund
+            nachzieht, scheitert auf diesem Backend an genau dem Verbund,
+            dessentwegen die Spalten entstehen. Der Lauf kostet einmalig rund
+            eine halbe Minute und faellt danach nie wieder an -- er meldet
+            null, sobald nichts offen ist.
+
+            Hier und nicht im Tageslauf, weil eine frisch eingespielte
+            Migration sonst bis zum naechsten Morgen unwirksam bliebe und die
+            Treffsicherheit so lange leer aussaehe. Eine Spalte, die still
+            leer bleibt, ist von einer Spalte ohne Daten nicht zu
+            unterscheiden.                                                     */
         _ = Task.Run(async () =>
         {
             try
@@ -83,15 +90,16 @@ public sealed class CronScheduler : BackgroundService
                 var prognosen = vorlauf.ServiceProvider.GetRequiredService<IForecastRepository>();
 
                 var uhr = System.Diagnostics.Stopwatch.StartNew();
-                var tafel = await prognosen.GetAccuracyAsync(null, ct);
+                var zeilen = await prognosen.NachtragenAsync(ct);
 
-                _log.LogInformation(
-                    "Guetetafel vorgewaermt: {Zahl} Horizonte in {Ms} ms",
-                    tafel.Count, uhr.ElapsedMilliseconds);
+                if (zeilen > 0)
+                    _log.LogInformation(
+                        "Bewertungen nachgetragen: {Zahl} Zeilen in {Ms} ms",
+                        zeilen, uhr.ElapsedMilliseconds);
             }
             catch (Exception ex)
             {
-                _log.LogWarning(ex, "Guetetafel konnte nicht vorgewaermt werden");
+                _log.LogWarning(ex, "Bewertungen konnten nicht nachgetragen werden");
             }
         }, ct);
 

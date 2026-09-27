@@ -194,8 +194,10 @@ public sealed class ForecastRepository : IForecastRepository
         // Bereits bewertete Prognosen dürfen nicht doppelt einfließen.
         await conn.ExecuteAsync(new CommandDefinition("""
             INSERT INTO dbo.forecast_score
-              (forecast_id, actual_close, actual_return, abs_pct_error, direction_correct)
-            SELECT @ForecastId, @ActualClose, @ActualReturn, @AbsPctError, @DirectionCorrect
+              (forecast_id, actual_close, actual_return, abs_pct_error, direction_correct,
+               asset_id, horizon_hours)
+            SELECT @ForecastId, @ActualClose, @ActualReturn, @AbsPctError, @DirectionCorrect,
+                   @AssetId, @HorizonHours
              WHERE NOT EXISTS (SELECT 1 FROM dbo.forecast_score WHERE forecast_id = @ForecastId)
             """, list, cancellationToken: ct));
     }
@@ -244,32 +246,83 @@ public sealed class ForecastRepository : IForecastRepository
     {
         await using var conn = await _factory.OpenAsync(ct);
 
-        /* Zu einem Zielzeitpunkt kann es mehrere Prognosen geben — etwa eine
-           aus dem Backtest und eine aus dem Livebetrieb. Es zählt die zuletzt
-           erstellte: sie kannte den meisten Kontext. */
-        var rows = await conn.QueryAsync<ForecastVsActual>(new CommandDefinition("""
-            WITH ranked AS (
-              SELECT f.forecast_id, f.made_at_utc, f.target_ts_utc, f.base_close,
-                     f.predicted_close, f.confidence,
-                     s.actual_close, s.abs_pct_error, s.direction_correct,
-                     ROW_NUMBER() OVER (PARTITION BY f.target_ts_utc
-                                        ORDER BY f.made_at_utc DESC) AS rn
-                FROM dbo.forecast f
-                LEFT JOIN dbo.forecast_score s ON s.forecast_id = f.forecast_id
-               WHERE f.asset_id = @assetId AND f.horizon_hours = @horizonHours
-                 AND f.target_ts_utc >= @fromUtc AND f.target_ts_utc <= @toUtc
-            )
+        /*  Zwei eingeschraenkte Lesevorgaenge statt eines Verbunds mit
+            Fensterfunktion.
+
+            Hier stand ein `WITH ranked AS (… LEFT JOIN dbo.forecast_score …
+            ROW_NUMBER() OVER (PARTITION BY target_ts_utc …))`. Das ist die
+            Lehrbuchform und auf dem DataCell-Backend die teuerste Variante,
+            die man waehlen kann: Der Verbund materialisiert `forecast_score`
+            vollstaendig (gemessen 14,1 s fuer einen einzigen Wert), und eine
+            Bedingung INNERHALB eines CTE zaehlt dort nicht als Einschraenkung
+            der Tabelle. Der Rueckblick im Diagramm kostete dadurch 34
+            Sekunden, wovon das Diagramm selbst 211 bis 449 ms braucht.
+
+            Beide Abfragen unten greifen jetzt auf einen Index: die erste auf
+            `UX_forecast (asset_id, horizon_hours, made_at_utc)`, die zweite
+            auf `IX_forecast_score_wert (asset_id, horizon_hours)` aus
+            Migration 047. Je Wert und Horizont sind das einige hundert
+            Zeilen, nicht 484.000.
+
+            Die Zuordnung und das Entdoppeln geschehen in C#. Das ist nicht
+            nur schneller, es ist auch die Stelle, an der man es nachlesen
+            kann: „je Zielzeitpunkt die zuletzt erstellte Prognose" ist eine
+            Regel ueber die Daten, keine Eigenschaft der Datenbank.            */
+        var prognosen = await conn.QueryAsync<ForecastVsActual>(new CommandDefinition("""
             SELECT forecast_id AS ForecastId, made_at_utc AS MadeAtUtc,
                    target_ts_utc AS TargetTsUtc, base_close AS BaseClose,
-                   predicted_close AS PredictedClose, confidence AS Confidence,
-                   actual_close AS ActualClose, abs_pct_error AS AbsPctError,
-                   direction_correct AS DirectionCorrect
-              FROM ranked WHERE rn = 1
-             ORDER BY target_ts_utc
+                   predicted_close AS PredictedClose, confidence AS Confidence
+              FROM dbo.forecast
+             WHERE asset_id = @assetId
+               AND horizon_hours = @horizonHours
+               AND target_ts_utc >= @fromUtc
+               AND target_ts_utc <= @toUtc
             """, new { assetId, horizonHours, fromUtc, toUtc },
             commandTimeout: 120, cancellationToken: ct));
 
-        return rows.ToList();
+        /*  Zu einem Zielzeitpunkt kann es mehrere Prognosen geben -- etwa eine
+            aus dem Backtest und eine aus dem Livebetrieb. Es zaehlt die
+            zuletzt erstellte: sie kannte den meisten Kontext.                 */
+        var jeZiel = prognosen
+            .GroupBy(f => f.TargetTsUtc)
+            .Select(g => g.OrderByDescending(f => f.MadeAtUtc).First())
+            .OrderBy(f => f.TargetTsUtc)
+            .ToList();
+
+        if (jeZiel.Count == 0) return jeZiel;
+
+        /*  Die Bewertungen dieses Wertes und Horizonts -- ohne Zeitfenster,
+            denn das kostet hier nichts und spart eine Bedingung, die der
+            Index nicht traegt.
+
+            Bewertungen, die Wert und Horizont noch nicht tragen, fehlen hier.
+            Das ist der Zustand zwischen dem Einspielen von Migration 047 und
+            dem Ende des Nachtragens beim Start; sichtbar wird er als
+            Rueckblick ohne Treffsicherheit, nicht als Fehler. Er heilt sich
+            mit dem Nachtragelauf, und der meldet, wie viele Zeilen er
+            gefuellt hat.                                                      */
+        var bewertung = new Dictionary<long, (decimal? Ist, double? Fehler, bool? Treffer)>();
+
+        var rohe = await conn.QueryAsync<(long ForecastId, decimal? Ist, double? Fehler, bool? Treffer)>(
+            new CommandDefinition("""
+            SELECT forecast_id, actual_close, abs_pct_error, direction_correct
+              FROM dbo.forecast_score
+             WHERE asset_id = @assetId AND horizon_hours = @horizonHours
+            """, new { assetId, horizonHours },
+            commandTimeout: 120, cancellationToken: ct));
+
+        foreach (var b in rohe) bewertung[b.ForecastId] = (b.Ist, b.Fehler, b.Treffer);
+
+        foreach (var f in jeZiel)
+        {
+            if (!bewertung.TryGetValue(f.ForecastId, out var b)) continue;
+
+            f.ActualClose = b.Ist;
+            f.AbsPctError = b.Fehler;
+            f.DirectionCorrect = b.Treffer;
+        }
+
+        return jeZiel;
     }
 
     public async Task<IReadOnlyList<int>> GetAvailableHorizonsAsync(
@@ -322,177 +375,142 @@ public sealed class ForecastRepository : IForecastRepository
             """, list, cancellationToken: ct));
     }
 
-    /*  Die Guetetafel: EINMAL fuer alle Werte, nicht je Wert.
+    /*  Treffsicherheit: eine GROUP-BY-Abfrage ueber EINE Tabelle.
 
-        Das EventMesh-DataCell-Backend loest den Verbund `forecast JOIN
-        forecast_score` nicht ueber den Primaerschluessel auf, sondern als
-        Kreuzprodukt. Gemessen am 27.09.2026 auf einem unbelasteten Node:
+        Hier stand bis zum 27.09.2026 ein Verbund `forecast JOIN
+        forecast_score`, und danach eine prozessweite Tafel, die den Verbund
+        umging, indem sie beide Tabellen einmal ganz las. Beides ist weg, weil
+        beides denselben Denkfehler hatte: Es liess die Datenbank bei jeder
+        Frage neu herleiten, was seit dem Schreiben der Bewertung feststeht.
+        Seit Migration 047 traegt `forecast_score` Wert und Horizont selbst.
 
-          Einzelzugriff `WHERE forecast_id = 100000`             1,8 ms
-          `SELECT count(*) FROM forecast_score` (483.588)      916 ms
-          der Verbund, eingeschraenkt auf EINEN Wert            17,6 s
-          derselbe Verbund als `IN (…)` mit 2.399 Kennungen    168,4 s
-          als `IN (SELECT …)` -> Abbruch nach 278 s: „Query erzeugt ueber
-                                 1.500.000 (Zwischen-)Zeilen“
+        Was der Umweg gekostet hat, gemessen auf einem ruhigen Node:
 
-        Der letzte Punkt benennt die Ursache: Es wird gekreuzt, nicht
-        nachgeschlagen -- 2.399 mal 483.588 sind 1,16 Milliarden Paare fuer
-        997 Treffer. Das ist ein Mangel des Backends und dort gemeldet.
+          der Verbund, eingeschraenkt auf EINEN Wert (997 Treffer)   14,1 s
+          dieselben 2.124 Kennungen als IN-Liste                    138,6 s
+          beide Tabellen ganz lesen (1,75 Mio Zeilen)                35   s
 
-        Hier zaehlt die Folge. `GetAccuracyAsync` hat fuenf Aufrufer, und zwei
-        davon -- `ForecastService` und `CombinedForecastService` -- rufen es JE
-        WERT. Bei rund 600 verfolgten Werten sind das 600 mal 17,6 Sekunden,
-        knapp drei Stunden fuer eine Kennzahl, die sich stuendlich einmal
-        aendert. Dieselbe Abfrage kostete die Kursansicht die 16,8 Sekunden,
-        wegen derer der Betreiber gefragt hat, warum ein Diagramm so lange
-        laedt: Das Diagramm selbst braucht 211 bis 449 ms.
+        Der Node filtert die linke Seite korrekt und materialisiert die rechte
+        vollstaendig: 2.124 mal 483.588 Paare fuer 997 Treffer. Das ist dort
+        gemeldet und wird dort behoben -- aber selbst ein schneller Verbund
+        waere hier der Umweg geblieben. Diese Abfrage liest jetzt einen Index
+        und liefert sieben Zeilen.
 
-        Statt des Verbunds zwei schlichte Lesevorgaenge und die Zuordnung in
-        C# -- gemessen 24,6 s fuer den grossen Lauf, und zwar EINMAL fuer alle
-        Werte statt je Wert.
-
-        Gehalten wird prozessweit. Der Dienst ist Scoped, die Tafel gehoert
-        aber keinem Aufruf; sie ist abgeleitete, nur lesbare Kenntnis ueber den
-        ganzen Bestand, und die Verbindungsfabrik ist Singleton -- ein
-        Hintergrundlauf ueberlebt also den Aufruf, der ihn angestossen hat.
-
-        Waehrend einer Erneuerung wird die ALTE Tafel weitergegeben. Eine
-        Kennzahl, die eine halbe Minute alt ist, ist richtig; eine Kursansicht,
-        die eine halbe Minute steht, ist es nicht.                           */
-    private static readonly TimeSpan Guetefrist = TimeSpan.FromMinutes(30);
-    private static readonly SemaphoreSlim GueteSperre = new(1, 1);
-    private static Dictionary<int, Dictionary<int, Gueteposten>>? _guetetafel;
-    private static DateTime _guetetafelStand = DateTime.MinValue;
-    private static Task? _gueteLaeuft;
-
-    /// <summary>
-    /// Summen statt Mittelwerte. Ein Mittelwert je Wert liesse sich ueber
-    /// Werte hinweg nicht mehr zusammenfassen — der Mittelwert von
-    /// Mittelwerten ist nicht der Mittelwert.
-    /// </summary>
-    private sealed class Gueteposten
-    {
-        public int N;
-        public double SummeFehler;
-        public int Treffer;
-    }
-
+        `GetAccuracyAsync` hat fuenf Aufrufer, zwei davon (`ForecastService`,
+        `CombinedForecastService`) rufen sie JE WERT. Bei rund 600 verfolgten
+        Werten waren das 600 mal 14 Sekunden.                                  */
     public async Task<IReadOnlyList<(int HorizonHours, int N, double Mape, double HitRate)>>
         GetAccuracyAsync(int? assetId, CancellationToken ct = default)
     {
-        var tafel = await GuetetafelAsync(ct);
+        await using var conn = await _factory.OpenAsync(ct);
 
-        var summe = new Dictionary<int, Gueteposten>();
+        /*  Der Wertefilter steht nur drin, wenn einer gemeint ist -- kein
+            `(asset_id = @a OR @a IS NULL)`. Ein Sammelfilter zwingt den Planer
+            zu einem Plan, der fuer beide Faelle gilt, also zum vollen
+            Durchlauf; dieselbe Falle wie an vier anderen Stellen.
 
-        if (assetId is not null)
-        {
-            if (tafel.TryGetValue(assetId.Value, out var jeHorizont))
-                foreach (var eintrag in jeHorizont) summe[eintrag.Key] = eintrag.Value;
-        }
-        else
-        {
-            foreach (var jeHorizont in tafel.Values)
-                foreach (var eintrag in jeHorizont)
-                {
-                    if (!summe.TryGetValue(eintrag.Key, out var z))
-                        summe[eintrag.Key] = z = new Gueteposten();
+            `asset_id IS NOT NULL` gehoert in BEIDE Zweige: Solange das
+            Nachtragen der Altzeilen laeuft, gibt es Bewertungen ohne Wert, und
+            die duerfen sich nicht als eigene Gruppe in die Statistik legen.   */
+        var wertefilter = assetId is not null
+            ? "WHERE asset_id = @assetId"
+            : "WHERE asset_id IS NOT NULL";
 
-                    z.N += eintrag.Value.N;
-                    z.SummeFehler += eintrag.Value.SummeFehler;
-                    z.Treffer += eintrag.Value.Treffer;
-                }
-        }
+        var rows = await conn.QueryAsync<(int, int, double, double)>(new CommandDefinition($"""
+            SELECT horizon_hours,
+                   CAST(COUNT(*) AS INT)                                            AS n,
+                   AVG(abs_pct_error)                                               AS mape,
+                   AVG(CASE WHEN direction_correct = {d.Wahr} THEN 1.0 ELSE 0.0 END) AS hit_rate
+              FROM dbo.forecast_score
+             {wertefilter}
+             GROUP BY horizon_hours
+             ORDER BY horizon_hours
+            """, new { assetId }, commandTimeout: 60, cancellationToken: ct));
 
-        return summe
-            .Where(e => e.Value.N > 0)
-            .OrderBy(e => e.Key)
-            .Select(e => (e.Key, e.Value.N,
-                          e.Value.SummeFehler / e.Value.N,
-                          (double)e.Value.Treffer / e.Value.N))
-            .ToList();
+        return rows.ToList();
     }
 
-    private async Task<Dictionary<int, Dictionary<int, Gueteposten>>> GuetetafelAsync(
-        CancellationToken ct)
-    {
-        var tafel = _guetetafel;
+    /*  Wert und Horizont an den Altzeilen nachtragen.
 
-        if (tafel is not null)
+        Migration 047 legt die Spalten an, fuellt sie aber nicht: Ein
+        Migrationsskript, das 484.000 Zeilen ueber einen Verbund nachzieht,
+        scheitert auf diesem Backend an genau dem Verbund, dessentwegen die
+        Spalten ueberhaupt entstehen. Also hier, und zwar so, wie die
+        Anwendung ohnehin schreibt -- Massenkopie in eine Stufe, dann ein
+        MERGE.
+
+        Gelesen wird ungepuffert. Auf dem DataCell-Backend kostet jede
+        ZURUECKGEGEBENE Zeile rund 15 Mikrosekunden Kernzeit (gemessen: der
+        Aufwand haengt an der Zeilenzahl, nicht an der Spaltenzahl und nicht
+        an den gescannten Zeilen), 1,26 Millionen Prognosen also gut zwanzig
+        Sekunden. Das ist der Preis fuer EINEN Lauf, der danach nie wieder
+        anfaellt -- gegen 14 Sekunden je Wert und Aufruf.
+
+        Der Lauf meldet, wie viele Zeilen er gefuellt hat. Eine Migration, die
+        still nichts tut, sieht aus wie eine, die alles getan hat.             */
+    public async Task<int> NachtragenAsync(CancellationToken ct = default)
+    {
+        await using var conn = await _factory.OpenAsync(ct);
+
+        var offen = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
+            "SELECT CAST(COUNT(*) AS INT) FROM dbo.forecast_score WHERE asset_id IS NULL",
+            commandTimeout: 120, cancellationToken: ct));
+
+        if (offen == 0) return 0;
+
+        /*  Erst die offenen Kennungen, dann die Prognosen daruebergelegt. Die
+            kleinere Menge gehoert gehalten, die groessere durchgereicht.      */
+        var offeneIds = new HashSet<long>(offen);
+
+        await foreach (var id in conn.QueryUnbufferedAsync<long>(
+                           "SELECT forecast_id FROM dbo.forecast_score WHERE asset_id IS NULL",
+                           commandTimeout: 300).WithCancellation(ct))
+            offeneIds.Add(id);
+
+        var tabelle = new DataTable();
+        tabelle.Columns.Add("forecast_id", typeof(long));
+        tabelle.Columns.Add("asset_id", typeof(int));
+        tabelle.Columns.Add("horizon_hours", typeof(int));
+
+        await foreach (var f in conn.QueryUnbufferedAsync<(long ForecastId, int AssetId, int HorizonHours)>(
+                           "SELECT forecast_id, asset_id, horizon_hours FROM dbo.forecast",
+                           commandTimeout: 300).WithCancellation(ct))
         {
-            /* Veraltet, aber vorhanden: im Hintergrund erneuern und sofort
-               antworten. Wer eine Kursansicht oeffnet, wartet nicht auf eine
-               Statistik, die er nur als Beschriftung sieht. */
-            if (DateTime.UtcNow - _guetetafelStand >= Guetefrist) StosseErneuerungAn();
-            return tafel;
+            if (!offeneIds.Contains(f.ForecastId)) continue;
+            tabelle.Rows.Add(f.ForecastId, f.AssetId, f.HorizonHours);
         }
 
-        await ErneuereGuetetafelAsync(ct);
-        return _guetetafel ?? new Dictionary<int, Dictionary<int, Gueteposten>>();
-    }
+        if (tabelle.Rows.Count == 0) return 0;
 
-    private void StosseErneuerungAn()
-    {
-        if (_gueteLaeuft is { IsCompleted: false }) return;
+        // Eindeutiger Name je Aufruf -- siehe SqlDialekt.EindeutigerTempName.
+        var stufe = SqlDialekt.EindeutigerTempName("fsnach");
 
-        _gueteLaeuft = Task.Run(async () =>
-        {
-            // Eine Beschriftung darf nichts mitreissen, was sie nicht betrifft.
-            try { await ErneuereGuetetafelAsync(CancellationToken.None); }
-            catch { /* Beim naechsten Mal wieder. */ }
-        });
-    }
+        await conn.ExecuteAsync(new CommandDefinition($"""
+            {d.CreateTemp(stufe)} (
+              forecast_id BIGINT NOT NULL PRIMARY KEY,
+              asset_id INT NOT NULL,
+              horizon_hours INT NOT NULL);
+            """, cancellationToken: ct));
 
-    private async Task ErneuereGuetetafelAsync(CancellationToken ct)
-    {
-        await GueteSperre.WaitAsync(ct);
         try
         {
-            // Inzwischen von einem anderen Aufruf gefuellt?
-            if (_guetetafel is not null && DateTime.UtcNow - _guetetafelStand < Guetefrist) return;
+            await Massenkopie.SchreibeAsync(conn, tabelle, d.Temp(stufe), 300, ct);
 
-            await using var conn = await _factory.OpenAsync(ct);
-
-            /*  Erst die Bewertungen ins Woerterbuch, dann die Prognosen
-                UNGEPUFFERT daruebergelegt: So liegen nie 1,26 Millionen
-                Zeilen gleichzeitig als Objekte im Speicher. Die kleinere
-                Menge gehoert gehalten, die groessere durchgereicht.          */
-            var bewertung = new Dictionary<long, (double Fehler, bool Treffer)>(600_000);
-
-            var bewertungen = await conn.QueryAsync<(long ForecastId, double? Fehler, bool? Treffer)>(
-                new CommandDefinition(
-                    "SELECT forecast_id, abs_pct_error, direction_correct FROM dbo.forecast_score",
-                    commandTimeout: 300, cancellationToken: ct));
-
-            foreach (var b in bewertungen)
-            {
-                if (b.Fehler is null || b.Treffer is null) continue;
-                bewertung[b.ForecastId] = (b.Fehler.Value, b.Treffer.Value);
-            }
-
-            var neu = new Dictionary<int, Dictionary<int, Gueteposten>>();
-
-            var prognosen = conn.QueryUnbufferedAsync<(long ForecastId, int AssetId, int HorizonHours)>(
-                "SELECT forecast_id, asset_id, horizon_hours FROM dbo.forecast",
-                commandTimeout: 300);
-
-            await foreach (var f in prognosen.WithCancellation(ct))
-            {
-                if (!bewertung.TryGetValue(f.ForecastId, out var b)) continue;
-
-                if (!neu.TryGetValue(f.AssetId, out var jeHorizont))
-                    neu[f.AssetId] = jeHorizont = new Dictionary<int, Gueteposten>();
-
-                if (!jeHorizont.TryGetValue(f.HorizonHours, out var posten))
-                    jeHorizont[f.HorizonHours] = posten = new Gueteposten();
-
-                posten.N++;
-                posten.SummeFehler += b.Fehler;
-                if (b.Treffer) posten.Treffer++;
-            }
-
-            _guetetafel = neu;
-            _guetetafelStand = DateTime.UtcNow;
+            return await conn.ExecuteAsync(new CommandDefinition($"""
+                MERGE INTO dbo.forecast_score {d.MergeSperre} AS t
+                USING (SELECT forecast_id, asset_id, horizon_hours FROM {d.Temp(stufe)}) AS s
+                   ON t.forecast_id = s.forecast_id
+                WHEN MATCHED THEN UPDATE SET
+                      asset_id = s.asset_id, horizon_hours = s.horizon_hours;
+                """, commandTimeout: 600, cancellationToken: ct));
         }
-        finally { GueteSperre.Release(); }
+        finally
+        {
+            /* Die Stufe muss in jedem Fall weg: Auf dem DataCell-Backend sind
+               temporaere Tabellen global, eine liegengebliebene traefe den
+               naechsten Lauf. */
+            await conn.ExecuteAsync(new CommandDefinition(
+                $"""DROP TABLE {d.Temp(stufe)}""", cancellationToken: CancellationToken.None));
+        }
     }
 }

@@ -102,6 +102,13 @@ public interface IForecastRepository
     /// <summary>Genauigkeits-Historie für das Dashboard.</summary>
     Task<IReadOnlyList<(int HorizonHours, int N, double Mape, double HitRate)>>
         GetAccuracyAsync(int? assetId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Wert und Horizont an Bewertungen nachtragen, die sie noch nicht tragen
+    /// (Migration 047). Liefert die Zahl der gefüllten Zeilen; null heißt
+    /// „nichts offen", nicht „nichts getan".
+    /// </summary>
+    Task<int> NachtragenAsync(CancellationToken ct = default);
 }
 
 public interface IPairStatRepository

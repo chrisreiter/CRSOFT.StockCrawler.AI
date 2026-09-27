@@ -171,7 +171,9 @@ public sealed class ScoringService : IScoringService
                     ActualClose = actual.Value,
                     ActualReturn = actualReturn,
                     AbsPctError = absPctError,
-                    DirectionCorrect = directionCorrect
+                    DirectionCorrect = directionCorrect,
+                    AssetId = f.AssetId,
+                    HorizonHours = f.HorizonHours
                 });
 
                 /* Dieselbe Rechnung für die Mischung -- sofern eine da ist. Ältere
