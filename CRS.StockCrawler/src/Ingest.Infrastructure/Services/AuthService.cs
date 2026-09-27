@@ -465,16 +465,34 @@ public sealed class AuthService : IAuthService
     {
         await using var conn = await _factory.OpenAsync(ct);
 
-        var rows = await conn.QueryAsync<BenutzerZeile>(new CommandDefinition(
-            $"""
-            SELECT user_id AS UserId, login AS Login, display_name AS Anzeigename,
-                   role AS Rolle, is_active AS Aktiv, created_utc AS ErstelltUtc,
-                   last_login_utc AS LetzteAnmeldungUtc,
-                   CAST(CASE WHEN locked_until_utc > {d.Jetzt} THEN 1 ELSE 0 END AS {d.TypBool}) AS Gesperrt
-              FROM dbo.app_user ORDER BY role, login
-            """, cancellationToken: ct));
+        /*  „Gesperrt" wird hier entschieden, nicht in der Datenbank.
 
-        return rows.ToList();
+            Vorher stand dort `CASE WHEN locked_until_utc > jetzt THEN 1 ELSE 0
+            END`. Auf dem EventMesh-DataCell-Backend kam daraus TRUE, obwohl
+            locked_until_utc NULL war -- die Benutzerverwaltung zeigte das
+            einzige Verwalterkonto am 27.09.2026 dauerhaft als gesperrt an,
+            waehrend die Anmeldung einwandfrei funktionierte.
+
+            Eine Anzeige, die faelschlich „gesperrt" sagt, ist schlimmer als
+            eine fehlende: Wer sie liest, sucht den Fehler dort, wo keiner ist.
+            Der Vergleich ist ein Zweizeiler in C# und dort nachweislich
+            richtig.                                                            */
+        var rows = await conn.QueryAsync<(int UserId, string Login, string? Anzeigename,
+                                          string Rolle, bool Aktiv, DateTime ErstelltUtc,
+                                          DateTime? LetzteAnmeldungUtc, DateTime? GesperrtBis)>(
+            new CommandDefinition("""
+                SELECT user_id AS UserId, login AS Login, display_name AS Anzeigename,
+                       role AS Rolle, is_active AS Aktiv, created_utc AS ErstelltUtc,
+                       last_login_utc AS LetzteAnmeldungUtc,
+                       locked_until_utc AS GesperrtBis
+                  FROM dbo.app_user ORDER BY role, login
+                """, cancellationToken: ct));
+
+        var jetzt = DateTime.UtcNow;
+
+        return rows.Select(r => new BenutzerZeile(
+            r.UserId, r.Login, r.Anzeigename, r.Rolle, r.Aktiv, r.ErstelltUtc,
+            r.LetzteAnmeldungUtc, r.GesperrtBis is { } bis && bis > jetzt)).ToList();
     }
 
     public Task<(bool Ok, string? Fehler)> AnlegenAsync(

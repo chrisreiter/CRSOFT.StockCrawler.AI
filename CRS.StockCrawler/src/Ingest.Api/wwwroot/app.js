@@ -2946,15 +2946,25 @@ async function loadSystem() {
       parts.push(`<dt>${CLASS_LABEL[a.assetClass] || a.assetClass}</dt>` +
         `<dd>${a.tracked} von ${a.total} verfolgt</dd>`);
     }
+    /*  Eine Zahl, die der Server nicht liefern konnte, kommt als null.
+
+        Vorher stand dann „undefined gesamt, undefined ausgewertet" in der
+        Kachel -- das sieht nach einem Fehler in der Anwendung aus, obwohl es
+        nur eine Zaehlung ist, die in ihr Zeitbudget lief. Ein Strich sagt
+        dasselbe, ohne zu erschrecken.                                        */
+    const zahl = v => (v === null || v === undefined)
+      ? '<span class="dim" title="nicht innerhalb des Zeitbudgets ermittelt">–</span>'
+      : Number(v).toLocaleString('de-DE');
+
     for (const b of stats.bars) {
       parts.push(`<dt>Bars ${b.interval}</dt>` +
-        `<dd>${Number(b.bars).toLocaleString('de-DE')} über ${b.assets} Werte<br>` +
+        `<dd>${zahl(b.bars)}<br>` +
         `<span class="dim">${fmtDate(b.oldest, false)} – ${fmtDate(b.newest)}</span></dd>`);
     }
-    parts.push(`<dt>Prognosen</dt><dd>${stats.forecasts.total} gesamt, ` +
-      `${stats.forecasts.scored} ausgewertet, ${stats.forecasts.pending} offen</dd>`);
-    parts.push(`<dt>Analyse</dt><dd>${stats.analysis.pairs} Paare, ` +
-      `${stats.analysis.crossings} Kreuzungen</dd>`);
+    parts.push(`<dt>Prognosen</dt><dd>${zahl(stats.forecasts.total)} gesamt, ` +
+      `${zahl(stats.forecasts.scored)} ausgewertet, ${zahl(stats.forecasts.pending)} offen</dd>`);
+    parts.push(`<dt>Analyse</dt><dd>${zahl(stats.analysis.pairs)} Paare, ` +
+      `${zahl(stats.analysis.crossings)} Kreuzungen</dd>`);
     parts.push(`<dt>Horizonte</dt><dd>${stats.config.horizons.join(', ')} Stunden</dd>`);
     parts.push('</dl>');
     $('#sys-stats').innerHTML = parts.join('');
