@@ -145,6 +145,29 @@ public sealed class AuthService : IAuthService
         Replikat hinnehmbar.                                                   */
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, (Angemeldet Wer, DateTime Bis)> _imSpeicher = new();
 
+    /*  Der Kurzspeicher fuer Sitzungen AUS DER DATENBANK -- eine andere Sache
+        als `_imSpeicher` daneben, und die Trennung ist Absicht.
+
+        Jede einzelne Anfrage der Oberflaeche geht durch `WerIstDasAsync`, und
+        die Oberflaeche fragt `/api/scheduler` im Fuenfsekundentakt. Gemessen an
+        einem Lauf: 205 Aufrufe von `/api/scheduler`, und 197 der 232
+        Poolfehler kamen aus dieser Methode. Zwei Abfragen je Anfrage -- lesen
+        und den gleitenden Ablauf schreiben --, und sobald die Datenbank langsam
+        antwortet, stauen sich die Verbindungen schneller, als sie zurueckkommen.
+        Dann ist der Pool leer, und es faellt NICHT die Sitzungspruefung aus,
+        sondern alles andere mit ihr.
+
+        Die Frist ist bewusst kurz. `_imSpeicher` haelt eine Sitzung ueber ihre
+        volle Lebensdauer, weil es dort keine zweite Wahrheit gibt; hier gibt es
+        sie, und eine Abmeldung, eine Kennwortaenderung oder ein entzogenes
+        Konto muessen ankommen. Fuenfzehn Sekunden decken den Fuenfsekundentakt
+        ab und sind kurz genug, dass niemand sie bemerkt. Abmelden und
+        Benutzerpflege raeumen zusaetzlich auf -- die Frist ist das Netz, nicht
+        der Weg.                                                               */
+    private static readonly TimeSpan Kurzfrist = TimeSpan.FromSeconds(15);
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, (Angemeldet Wer, DateTime Bis)> _kurz = new();
+
     public AuthService(ISqlConnectionFactory factory, ILogger<AuthService> log,
                        Microsoft.Extensions.Options.IOptions<BetriebOptions>? betrieb = null)
     {
@@ -398,6 +421,7 @@ public sealed class AuthService : IAuthService
 
     public async Task AbmeldenAsync(Guid sitzung, CancellationToken ct = default)
     {
+        _kurz.TryRemove(sitzung, out _);
         if (_imSpeicher.TryRemove(sitzung, out _) || _betrieb.IstSlave) return;
 
         await using var conn = await _factory.OpenAsync(ct);
@@ -422,6 +446,14 @@ public sealed class AuthService : IAuthService
             _imSpeicher.TryRemove(sitzung, out _);
         }
         if (_betrieb.IstSlave) return null;
+
+        if (_kurz.TryGetValue(sitzung, out var kurz))
+        {
+            /* Feste Frist, kein gleitender Ablauf: Dieser Speicher SOLL
+               verfallen, gerade weil die Datenbank die Wahrheit haelt. */
+            if (kurz.Bis > DateTime.UtcNow) return kurz.Wer;
+            _kurz.TryRemove(sitzung, out _);
+        }
 
         await using var conn = await _factory.OpenAsync(ct);
 
@@ -454,6 +486,8 @@ public sealed class AuthService : IAuthService
                  WHERE session_key = @key
                 """, new { key = sitzung, jetzt, ablauf = jetzt + Sitzungsdauer },
                 cancellationToken: ct));
+
+            _kurz[sitzung] = (u, DateTime.UtcNow + Kurzfrist);
         }
 
         return u;
@@ -643,6 +677,14 @@ public sealed class AuthService : IAuthService
                     userId, beendet);
         }
 
+
+        /*  Den Kurzspeicher raeumen: Rolle, Kennwort oder das aktive Kennzeichen
+            koennen sich gerade geaendert haben, und eine Sitzung, die dort noch
+            fuenfzehn Sekunden mit der alten Rolle laege, waere die unangenehmste
+            Sorte -- sie faellt niemandem auf. Der Speicher ist klein und in
+            Sekunden wieder gefuellt.                                          */
+        _kurz.Clear();
+
         return n > 0 ? (true, null) : (false, "Kein Benutzer mit dieser Kennung.");
     }
 
@@ -651,6 +693,8 @@ public sealed class AuthService : IAuthService
     {
         if (userId == handelnderUserId)
             return (false, "Man kann sich nicht selbst löschen.");
+
+        _kurz.Clear();
 
         await using var conn = await _factory.OpenAsync(ct);
 

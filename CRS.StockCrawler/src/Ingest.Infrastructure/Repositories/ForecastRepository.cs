@@ -322,45 +322,177 @@ public sealed class ForecastRepository : IForecastRepository
             """, list, cancellationToken: ct));
     }
 
+    /*  Die Guetetafel: EINMAL fuer alle Werte, nicht je Wert.
+
+        Das EventMesh-DataCell-Backend loest den Verbund `forecast JOIN
+        forecast_score` nicht ueber den Primaerschluessel auf, sondern als
+        Kreuzprodukt. Gemessen am 27.09.2026 auf einem unbelasteten Node:
+
+          Einzelzugriff `WHERE forecast_id = 100000`             1,8 ms
+          `SELECT count(*) FROM forecast_score` (483.588)      916 ms
+          der Verbund, eingeschraenkt auf EINEN Wert            17,6 s
+          derselbe Verbund als `IN (…)` mit 2.399 Kennungen    168,4 s
+          als `IN (SELECT …)` -> Abbruch nach 278 s: „Query erzeugt ueber
+                                 1.500.000 (Zwischen-)Zeilen“
+
+        Der letzte Punkt benennt die Ursache: Es wird gekreuzt, nicht
+        nachgeschlagen -- 2.399 mal 483.588 sind 1,16 Milliarden Paare fuer
+        997 Treffer. Das ist ein Mangel des Backends und dort gemeldet.
+
+        Hier zaehlt die Folge. `GetAccuracyAsync` hat fuenf Aufrufer, und zwei
+        davon -- `ForecastService` und `CombinedForecastService` -- rufen es JE
+        WERT. Bei rund 600 verfolgten Werten sind das 600 mal 17,6 Sekunden,
+        knapp drei Stunden fuer eine Kennzahl, die sich stuendlich einmal
+        aendert. Dieselbe Abfrage kostete die Kursansicht die 16,8 Sekunden,
+        wegen derer der Betreiber gefragt hat, warum ein Diagramm so lange
+        laedt: Das Diagramm selbst braucht 211 bis 449 ms.
+
+        Statt des Verbunds zwei schlichte Lesevorgaenge und die Zuordnung in
+        C# -- gemessen 24,6 s fuer den grossen Lauf, und zwar EINMAL fuer alle
+        Werte statt je Wert.
+
+        Gehalten wird prozessweit. Der Dienst ist Scoped, die Tafel gehoert
+        aber keinem Aufruf; sie ist abgeleitete, nur lesbare Kenntnis ueber den
+        ganzen Bestand, und die Verbindungsfabrik ist Singleton -- ein
+        Hintergrundlauf ueberlebt also den Aufruf, der ihn angestossen hat.
+
+        Waehrend einer Erneuerung wird die ALTE Tafel weitergegeben. Eine
+        Kennzahl, die eine halbe Minute alt ist, ist richtig; eine Kursansicht,
+        die eine halbe Minute steht, ist es nicht.                           */
+    private static readonly TimeSpan Guetefrist = TimeSpan.FromMinutes(30);
+    private static readonly SemaphoreSlim GueteSperre = new(1, 1);
+    private static Dictionary<int, Dictionary<int, Gueteposten>>? _guetetafel;
+    private static DateTime _guetetafelStand = DateTime.MinValue;
+    private static Task? _gueteLaeuft;
+
+    /// <summary>
+    /// Summen statt Mittelwerte. Ein Mittelwert je Wert liesse sich ueber
+    /// Werte hinweg nicht mehr zusammenfassen — der Mittelwert von
+    /// Mittelwerten ist nicht der Mittelwert.
+    /// </summary>
+    private sealed class Gueteposten
+    {
+        public int N;
+        public double SummeFehler;
+        public int Treffer;
+    }
+
     public async Task<IReadOnlyList<(int HorizonHours, int N, double Mape, double HitRate)>>
         GetAccuracyAsync(int? assetId, CancellationToken ct = default)
     {
-        await using var conn = await _factory.OpenAsync(ct);
+        var tafel = await GuetetafelAsync(ct);
 
-        /*  Der Wertefilter steht nur drin, wenn einer gemeint ist.
+        var summe = new Dictionary<int, Gueteposten>();
 
-            Hier stand `WHERE (f.asset_id = @assetId OR @assetId IS NULL)` —
-            derselbe Sammelfilter wie an drei anderen Stellen, die ich heute
-            schon aufgelöst habe. Er zwingt den Planer zu einem Plan, der für
-            beide Fälle gilt, also zum vollen Durchlauf über den Verbund von
-            1,26 Millionen Prognosen mit 484.000 Bewertungen.
+        if (assetId is not null)
+        {
+            if (tafel.TryGetValue(assetId.Value, out var jeHorizont))
+                foreach (var eintrag in jeHorizont) summe[eintrag.Key] = eintrag.Value;
+        }
+        else
+        {
+            foreach (var jeHorizont in tafel.Values)
+                foreach (var eintrag in jeHorizont)
+                {
+                    if (!summe.TryGetValue(eintrag.Key, out var z))
+                        summe[eintrag.Key] = z = new Gueteposten();
 
-            Das EventMesh-DataCell-Backend wies ihn am 27.09.2026 rundheraus
-            ab („Komplexe Query über die grosse Tabelle 'forecast' … ohne
-            einschränkendes WHERE"), und die Kursansicht lieferte 500, sobald
-            jemand die Prognose einblendete. Mit dem Wert im WHERE bleibt von
-            1,26 Millionen Zeilen eine Handvoll übrig.
+                    z.N += eintrag.Value.N;
+                    z.SummeFehler += eintrag.Value.SummeFehler;
+                    z.Treffer += eintrag.Value.Treffer;
+                }
+        }
 
-            Die Reihenfolge im FROM ist dabei nicht gleichgültig: Stand
-            `forecast_score` vorn, sah der Node `forecast` als unbeschränkt
-            verbundene Tabelle und wies weiter ab, obwohl die Bedingung im
-            WHERE stand. Die eingeschränkte Tabelle gehört nach vorn — was
-            ohnehin die richtige Leserichtung ist: erst die Prognosen dieses
-            Wertes, dann ihre Bewertungen.                                     */
-        var wertefilter = assetId is not null ? "WHERE f.asset_id = @assetId" : "";
+        return summe
+            .Where(e => e.Value.N > 0)
+            .OrderBy(e => e.Key)
+            .Select(e => (e.Key, e.Value.N,
+                          e.Value.SummeFehler / e.Value.N,
+                          (double)e.Value.Treffer / e.Value.N))
+            .ToList();
+    }
 
-        var rows = await conn.QueryAsync<(int, int, double, double)>(new CommandDefinition($"""
-            SELECT f.horizon_hours,
-                   CAST(COUNT(*) AS INT)                                              AS n,
-                   AVG(s.abs_pct_error)                                  AS mape,
-                   AVG(CASE WHEN s.direction_correct = {d.Wahr} THEN 1.0 ELSE 0.0 END) AS hit_rate
-              FROM dbo.forecast f
-              JOIN dbo.forecast_score s ON s.forecast_id = f.forecast_id
-             {wertefilter}
-             GROUP BY f.horizon_hours
-             ORDER BY f.horizon_hours
-            """, new { assetId }, commandTimeout: 60, cancellationToken: ct));
+    private async Task<Dictionary<int, Dictionary<int, Gueteposten>>> GuetetafelAsync(
+        CancellationToken ct)
+    {
+        var tafel = _guetetafel;
 
-        return rows.ToList();
+        if (tafel is not null)
+        {
+            /* Veraltet, aber vorhanden: im Hintergrund erneuern und sofort
+               antworten. Wer eine Kursansicht oeffnet, wartet nicht auf eine
+               Statistik, die er nur als Beschriftung sieht. */
+            if (DateTime.UtcNow - _guetetafelStand >= Guetefrist) StosseErneuerungAn();
+            return tafel;
+        }
+
+        await ErneuereGuetetafelAsync(ct);
+        return _guetetafel ?? new Dictionary<int, Dictionary<int, Gueteposten>>();
+    }
+
+    private void StosseErneuerungAn()
+    {
+        if (_gueteLaeuft is { IsCompleted: false }) return;
+
+        _gueteLaeuft = Task.Run(async () =>
+        {
+            // Eine Beschriftung darf nichts mitreissen, was sie nicht betrifft.
+            try { await ErneuereGuetetafelAsync(CancellationToken.None); }
+            catch { /* Beim naechsten Mal wieder. */ }
+        });
+    }
+
+    private async Task ErneuereGuetetafelAsync(CancellationToken ct)
+    {
+        await GueteSperre.WaitAsync(ct);
+        try
+        {
+            // Inzwischen von einem anderen Aufruf gefuellt?
+            if (_guetetafel is not null && DateTime.UtcNow - _guetetafelStand < Guetefrist) return;
+
+            await using var conn = await _factory.OpenAsync(ct);
+
+            /*  Erst die Bewertungen ins Woerterbuch, dann die Prognosen
+                UNGEPUFFERT daruebergelegt: So liegen nie 1,26 Millionen
+                Zeilen gleichzeitig als Objekte im Speicher. Die kleinere
+                Menge gehoert gehalten, die groessere durchgereicht.          */
+            var bewertung = new Dictionary<long, (double Fehler, bool Treffer)>(600_000);
+
+            var bewertungen = await conn.QueryAsync<(long ForecastId, double? Fehler, bool? Treffer)>(
+                new CommandDefinition(
+                    "SELECT forecast_id, abs_pct_error, direction_correct FROM dbo.forecast_score",
+                    commandTimeout: 300, cancellationToken: ct));
+
+            foreach (var b in bewertungen)
+            {
+                if (b.Fehler is null || b.Treffer is null) continue;
+                bewertung[b.ForecastId] = (b.Fehler.Value, b.Treffer.Value);
+            }
+
+            var neu = new Dictionary<int, Dictionary<int, Gueteposten>>();
+
+            var prognosen = conn.QueryUnbufferedAsync<(long ForecastId, int AssetId, int HorizonHours)>(
+                "SELECT forecast_id, asset_id, horizon_hours FROM dbo.forecast",
+                commandTimeout: 300);
+
+            await foreach (var f in prognosen.WithCancellation(ct))
+            {
+                if (!bewertung.TryGetValue(f.ForecastId, out var b)) continue;
+
+                if (!neu.TryGetValue(f.AssetId, out var jeHorizont))
+                    neu[f.AssetId] = jeHorizont = new Dictionary<int, Gueteposten>();
+
+                if (!jeHorizont.TryGetValue(f.HorizonHours, out var posten))
+                    jeHorizont[f.HorizonHours] = posten = new Gueteposten();
+
+                posten.N++;
+                posten.SummeFehler += b.Fehler;
+                if (b.Treffer) posten.Treffer++;
+            }
+
+            _guetetafel = neu;
+            _guetetafelStand = DateTime.UtcNow;
+        }
+        finally { GueteSperre.Release(); }
     }
 }
