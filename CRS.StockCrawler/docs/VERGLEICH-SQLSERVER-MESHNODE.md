@@ -290,6 +290,27 @@ Der Node braucht **ein Fünftel**. Gehalten werden dabei 750.840 Kursbars,
 SQL-Server-Prozess ist im Lauf der Messungen von 2,10 auf 3,34 GB gewachsen;
 er füllt seinen Pufferbereich, wie er soll.
 
+**Und unter Last**, denn eine Zahl aus dem Leerlauf wäre keine Antwort auf
+die Auflage. Gemessen während eines nachgeholten Tageslaufs über 646 Werte,
+alle 55 Sekunden, Node-Prozess:
+
+| Zeit | | Zeit | |
+| --- | ---: | --- | ---: |
+| 00:10:53 | **4,25 GB** | 00:19:10 | 0,71 GB |
+| 00:11:48 | 0,62 GB | 00:21:01 | 0,58 GB |
+| 00:13:39 | 0,63 GB | 00:22:52 | 0,53 GB |
+| 00:15:29 | 0,65 GB | 00:24:42 | 0,55 GB |
+| 00:17:20 | 0,66 GB | 00:28:23 | 0,55 GB |
+
+Über den ganzen Lauf **0,53 bis 0,71 GB**, dazu eine einzelne Spitze von
+4,25 GB, die binnen einer Minute wieder abgebaut war. Die Anwendung selbst
+blieb durchgehend bei 0,13 GB.
+
+Die Spitze ist beobachtet, aber nicht zugeordnet — im Protokoll steht zu
+diesem Zeitpunkt nichts Auffälliges. Sie gehört trotzdem hierher: Wer nur
+den Mittelwert nennt, verschweigt, dass es sie gibt. Zum Vergleich hält der
+SQL-Server-Prozess seine 3,34 GB **dauerhaft**, auch im Leerlauf.
+
 ### Was der Node länger braucht
 
 Das Vorwärmen nach dem Start, im Hintergrund:
@@ -317,6 +338,26 @@ Am Node, dort gemeldet und dort zu beheben:
    kosteten 138,6 s, ein Einzelzugriff 1,8 ms.
 4. **Der Plattenbedarf** liegt bei 37 GB gegen rund 3 GB beim SQL Server —
    der Arbeitsspeicher ist vorbildlich, die Platte nicht.
+5. **Ein `MAX()` ohne führende Schlüsselspalte läuft in den Scan-Schutz.**
+   Gemessen am 28.09.2026:
+
+   ```
+   SELECT MAX(ts_utc) FROM dbo.price_bar WHERE interval_code = '1d'
+   → ERROR: Scan ueber 'price_bar' liefert ueber 1.500.000 Zeilen —
+            bitte WHERE/LIMIT einschraenken.
+   ```
+
+   Der Schutz ist richtig, er trifft hier nur eine Frage, die billig zu
+   beantworten wäre: Der grösste Wert einer indizierten Spalte steht am Rand
+   des Index. Betroffen ist die Prognoseansicht (`/api/forecast/stand` und
+   `/auffrischen`) und die Kachel „Prognose" der Startseite — nicht die
+   Kursansicht. Beide fangen den Fehler ab und zeigen die Kachel als gestört;
+   der Zustand bestand schon vor dieser Arbeit.
+
+   Rückmeldung aus der Datenbankentwicklung: Der rückwärts laufende
+   Indexzugriff für `MIN`/`MAX` **existiert dort bereits** und war genau für
+   diese Form gebaut (einmal 63 s auf Millisekunden). Diese Abfrage erreicht
+   ihn nur nicht — ein Weichenproblem, kein fehlendes Verfahren.
 
 In der Anwendung:
 
