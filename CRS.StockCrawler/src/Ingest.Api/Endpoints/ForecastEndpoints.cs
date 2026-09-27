@@ -42,10 +42,15 @@ public static class ForecastEndpoints
             var (bar, gestellt, zeilen) = await conn.QuerySingleAsync<(DateTime?, DateTime?, int)>(
                 new CommandDefinition(
                     $"""
-                    SELECT (SELECT MAX(b.ts_utc)
-                              FROM dbo.price_bar b
-                              JOIN dbo.asset a ON a.asset_id = b.asset_id
-                             WHERE a.is_tracked = {d.Wahr}),
+                    /*  Ohne Verbund auf `asset`: Gefragt ist der juengste
+                        Kurszeitpunkt ueberhaupt, und der stammt zwangslaeufig
+                        von einem verfolgten Wert -- nur die werden abgerufen.
+                        Der Verbund ueber vier Millionen Kurszeilen beantwortete
+                        dieselbe Frage teurer. Dieselbe Abfrage stand in
+                        StartEndpoints bereits korrigiert; hier blieb die alte
+                        Fassung stehen, und `/stand` ruft die Prognoseansicht
+                        bei JEDEM Oeffnen.                                      */
+                    SELECT (SELECT MAX(ts_utc) FROM dbo.price_bar WHERE interval_code = '1d'),
                            (SELECT MAX(made_at_utc) FROM dbo.forecast),
                            (SELECT CAST(COUNT(*) AS INT) FROM dbo.forecast
                              WHERE made_at_utc = (SELECT MAX(made_at_utc) FROM dbo.forecast))
@@ -81,10 +86,9 @@ public static class ForecastEndpoints
                 var (bar, gestellt) = await conn.QuerySingleAsync<(DateTime?, DateTime?)>(
                     new CommandDefinition(
                         $"""
-                        SELECT (SELECT MAX(b.ts_utc)
-                                  FROM dbo.price_bar b
-                                  JOIN dbo.asset a ON a.asset_id = b.asset_id
-                                 WHERE a.is_tracked = {d.Wahr}),
+                        /*  Ohne Verbund auf `asset` -- siehe die Begruendung
+                            beim Zwillingsaufruf weiter oben.                  */
+                        SELECT (SELECT MAX(ts_utc) FROM dbo.price_bar WHERE interval_code = '1d'),
                                (SELECT MAX(made_at_utc) FROM dbo.forecast)
                         """, cancellationToken: ct));
 
