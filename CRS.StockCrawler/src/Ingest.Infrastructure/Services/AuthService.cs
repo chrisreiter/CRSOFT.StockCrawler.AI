@@ -292,17 +292,41 @@ public sealed class AuthService : IAuthService
                 return (null, "Anmeldename oder Kennwort stimmt nicht.");
 
 
+            /*  Ob und bis wann gesperrt wird, entscheidet sich HIER, nicht in
+                der Datenbank.
+
+                Vorher stand dort ein `CASE WHEN @neu >= @max THEN jetzt+15min
+                ELSE locked_until_utc END`. Das verlangt zweierlei, was das
+                EventMesh-DataCell-Backend im Schreibpfad nicht kann: eine
+                Bedingung auszuwerten und den aktuellen Zeilenwert zu lesen.
+                Der Node nahm den THEN-Zweig unabhaengig von der Bedingung --
+                gemessen am 27.09.2026: Fehlversuch um 09:22:53 UTC, danach
+                locked_until_utc = 09:37:53, also volle Sperre beim ERSTEN
+                Versuch statt beim fuenften.
+
+                Das ist boesartiger als es klingt: Ein einziger Vertipper -- oder
+                ein Kennwortspeicher, der ein veraltetes Kennwort einsetzt --
+                sperrte das einzige Verwalterkonto fuer eine Viertelstunde aus,
+                und die Meldung sagte dabei "Anmeldename oder Kennwort stimmt
+                nicht", nicht "gesperrt". Wer daraufhin das richtige Kennwort
+                eintippt, bekommt dieselbe Meldung und sucht den Fehler beim
+                Kennwort.
+
+                Ein fertig berechneter Wert wird zuverlaessig gespeichert. Und
+                da die Entscheidung ohnehin schon hier getroffen wird -- die
+                Rueckmeldung unten prueft dasselbe `neu >= MaxFehlversuche` --
+                stand die Bedingung ohnehin doppelt im Code.                    */
+            var gesperrtBis = neu >= MaxFehlversuche
+                ? DateTime.UtcNow + Sperrdauer
+                : u.GesperrtBis;
+
             await conn.ExecuteAsync(new CommandDefinition(
-                $"""
+                """
                 UPDATE dbo.app_user
-                   SET failed_logins = @neu,
-                       locked_until_utc = CASE WHEN @neu >= @max
-                                               THEN {d.PlusMinuten("@minuten", d.Jetzt)}
-                                               ELSE locked_until_utc END
+                   SET failed_logins = @neu, locked_until_utc = @gesperrtBis
                  WHERE user_id = @id
                 """,
-                new { neu, max = MaxFehlversuche, minuten = (int)Sperrdauer.TotalMinutes, id = u.UserId },
-                cancellationToken: ct));
+                new { neu, gesperrtBis, id = u.UserId }, cancellationToken: ct));
 
             _log.LogWarning("Fehlanmeldung für {Login} ({Zahl}. Versuch)", u.Login, neu);
 
@@ -526,24 +550,51 @@ public sealed class AuthService : IAuthService
                              + "lassen sich nicht ändern, sonst kommt niemand mehr hinein.");
         }
 
+        /*  „Was nicht angegeben wurde, bleibt" wird hier entschieden, nicht in
+            der Datenbank.
+
+            Vorher stand dort `COALESCE(@hash, password_hash)` und zweimal
+            `CASE WHEN @hash IS NULL THEN spalte ELSE ... END` -- beides liest
+            im Schreibvorgang den aktuellen Zeilenwert, und genau das kann das
+            EventMesh-DataCell-Backend nicht (bestaetigt von der Node-Seite:
+            der Schreibpfad hat keinen Zugriff auf den bestehenden Wert).
+
+            Hier waere das nicht bloss unwirksam, sondern zerstoerend gewesen:
+            Wer nur den Anzeigenamen aendert, haette Rolle, Zustand UND den
+            Kennworthash mit NULL ueberschrieben -- das Konto waere danach nicht
+            mehr anmeldbar gewesen. Deshalb wird die Zeile zuerst gelesen, in C#
+            zusammengesetzt und dann vollstaendig geschrieben.                  */
+        var alt = await conn.QuerySingleOrDefaultAsync<Bestand>(new CommandDefinition(
+            """
+            SELECT password_hash AS Hash, role AS Rolle, is_active AS Aktiv,
+                   display_name AS Name, failed_logins AS Fehlversuche,
+                   locked_until_utc AS GesperrtBis
+              FROM dbo.app_user WHERE user_id = @id
+            """, new { id = userId }, cancellationToken: ct));
+
+        if (alt is null)
+            return (false, "Diesen Benutzer gibt es nicht.");
+
+        // Ein neues Kennwort loescht Fehlversuche und Sperre; ohne bleibt beides.
+        var neuesKennwort = kennwort is not null;
+
         var n = await conn.ExecuteAsync(new CommandDefinition(
             """
             UPDATE dbo.app_user
-               SET password_hash = COALESCE(@hash, password_hash),
-                   role          = COALESCE(@rolle, role),
-                   is_active     = COALESCE(@aktiv, is_active),
-                   display_name  = COALESCE(@name, display_name),
-                   failed_logins = CASE WHEN @hash IS NULL THEN failed_logins ELSE 0 END,
-                   locked_until_utc = CASE WHEN @hash IS NULL THEN locked_until_utc ELSE NULL END
+               SET password_hash = @hash, role = @rolle, is_active = @aktiv,
+                   display_name = @name,
+                   failed_logins = @fehlversuche, locked_until_utc = @gesperrtBis
              WHERE user_id = @id
             """,
             new
             {
                 id = userId,
-                hash = kennwort is null ? null : Kennwort.Hashen(kennwort),
-                rolle,
-                aktiv,
-                name = anzeigename
+                hash = neuesKennwort ? Kennwort.Hashen(kennwort!) : alt.Hash,
+                rolle = rolle ?? alt.Rolle,
+                aktiv = aktiv ?? alt.Aktiv,
+                name = anzeigename ?? alt.Name,
+                fehlversuche = neuesKennwort ? 0 : alt.Fehlversuche,
+                gesperrtBis = neuesKennwort ? null : alt.GesperrtBis
             }, cancellationToken: ct));
 
         /* Ein neues Kennwort beendet die alten Sitzungen.
@@ -609,4 +660,14 @@ public sealed class AuthService : IAuthService
     private sealed record Roh(
         int UserId, string Login, string? Anzeigename, string? Hash, string Rolle,
         bool Aktiv, int Fehlversuche, DateTime? GesperrtBis);
+
+    /// <summary>
+    /// Der bestehende Stand einer Benutzerzeile, gelesen bevor sie geschrieben
+    /// wird — siehe <see cref="AendernAsync"/>: „was nicht angegeben wurde,
+    /// bleibt" muss in C# entschieden werden, weil der Schreibpfad des
+    /// DataCell-Backends den aktuellen Zeilenwert nicht lesen kann.
+    /// </summary>
+    private sealed record Bestand(
+        string? Hash, string Rolle, bool Aktiv, string? Name,
+        int Fehlversuche, DateTime? GesperrtBis);
 }

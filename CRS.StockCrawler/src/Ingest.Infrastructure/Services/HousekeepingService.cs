@@ -502,10 +502,38 @@ public sealed class HousekeepingService(
                    LIMIT 12
                   """;
 
-            var rows = await conn.QueryAsync<TabellenGroesse>(
+            /*  Lose lesen und selbst umwandeln.
+
+                Direkt nach `TabellenGroesse` zu lesen scheiterte auf dem
+                EventMesh-DataCell-Backend: Es liefert `Megabyte` als Text, und
+                Dapper verlangte daraufhin einen Konstruktor
+                `(string, long, string)`. Der Katalog ist ohnehin die einzige
+                Stelle mit backendeigenem SQL -- dann sollte auch das Lesen
+                nicht auf genaue Typen bestehen.                                */
+            var roh = await conn.QueryAsync(
                 new CommandDefinition(sql, commandTimeout: 120, cancellationToken: ct));
 
-            return rows.Select(r => r with { Megabyte = Math.Round(r.Megabyte, 1) }).ToList();
+            static double Zahl(object? o) => o switch
+            {
+                null => 0,
+                double dd => dd,
+                decimal m => (double)m,
+                long l => l,
+                int i => i,
+                string s when double.TryParse(s, System.Globalization.NumberStyles.Any,
+                                              System.Globalization.CultureInfo.InvariantCulture,
+                                              out var p) => p,
+                _ => 0
+            };
+
+            return roh.Select(r =>
+            {
+                var z = (IDictionary<string, object?>)r;
+                return new TabellenGroesse(
+                    z.TryGetValue("Tabelle", out var t) ? t?.ToString() ?? "?" : "?",
+                    (long)Zahl(z.TryGetValue("Zeilen", out var n) ? n : null),
+                    Math.Round(Zahl(z.TryGetValue("Megabyte", out var mb) ? mb : null), 1));
+            }).ToList();
         }
         catch (Exception ex)
         {

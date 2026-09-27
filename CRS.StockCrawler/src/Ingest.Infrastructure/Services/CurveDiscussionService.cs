@@ -336,8 +336,25 @@ public sealed class CurveDiscussionService(
             "SELECT MAX(run_id) FROM dbo.curve_run WHERE finished_utc IS NOT NULL;",
             cancellationToken: ct)) ?? 0;
 
+        /*  Zwei Abfragen statt einer mit Sammelfilter.
+
+            Vorher stand hier ein `(l.asset_a = @assetId OR l.asset_b = @assetId
+            OR @assetId IS NULL)`. Ein solcher Filter, der sich je nach Parameter
+            selbst abschaltet, ist auf JEDER Datenbank schlecht: Der Planer muss
+            einen Plan waehlen, der fuer beide Faelle gilt, und nimmt dann den
+            vollen Durchlauf. Bei 934.000 Verknuepfungen plus zwei Verbunden auf
+            `asset` fuehrte das auf dem EventMesh-DataCell-Backend am 27.09.2026
+            in den Lesetimeout -- die Kurvenansicht lieferte 500.
+
+            Der Fall ohne Wertefilter braucht die Bedingung gar nicht, der Fall
+            mit Wertefilter braucht kein `IS NULL`. Aufgeteilt bekommt jeder
+            seinen eigenen, engen Plan.                                         */
+        var wertefilter = assetId is not null
+            ? "AND (l.asset_a = @assetId OR l.asset_b = @assetId)"
+            : "";
+
         return (await conn.QueryAsync(new CommandDefinition(
-            """
+            $"""
             SELECT l.lift, l.pairs, l.expected, l.median_lag_bars, l.lead_share,
                    l.mean_severity, l.type_a, l.type_b,
                    a.symbol AS symbol_a, b.symbol AS symbol_b,
@@ -345,11 +362,10 @@ public sealed class CurveDiscussionService(
               FROM dbo.curve_link l
               JOIN dbo.asset a ON a.asset_id = l.asset_a
               JOIN dbo.asset b ON b.asset_id = l.asset_b
-             WHERE l.run_id = @id
-               AND (l.asset_a = @assetId OR l.asset_b = @assetId OR @assetId IS NULL)
+             WHERE l.run_id = @id {wertefilter}
              ORDER BY l.lift DESC OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY;
             """, new { id, limit = Math.Clamp(limit, 10, 500), assetId },
-            cancellationToken: ct))).ToList();
+            commandTimeout: 120, cancellationToken: ct))).ToList();
     }
 
     public async Task<IReadOnlyList<dynamic>> TypeStatsAsync(

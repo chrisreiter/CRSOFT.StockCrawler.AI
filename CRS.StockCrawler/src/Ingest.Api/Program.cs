@@ -198,7 +198,35 @@ try
     {
         var auth = start.ServiceProvider.GetRequiredService<IAuthService>();
 
-        if (await auth.IstEingerichtetAsync())
+        /*  Eine unerreichbare Datenbank darf den Start nicht verhindern.
+
+            Vorher stand hier ein ungeschuetztes `await auth.IstEingerichtetAsync()`.
+            War die Datenbank in genau dieser Sekunde nicht da, endete der Start
+            mit „Anwendung unerwartet beendet" -- und blieb beendet. Am
+            27.09.2026 hat das EventMesh-DataCell-Backend mehrfach am Tag neu
+            gestartet; jedes Mal war danach auch die Anwendung weg und musste
+            von Hand nachgezogen werden.
+
+            Das ist die falsche Reihenfolge: Ein Dienst, der von einem anderen
+            abhaengt, wartet auf ihn, statt sich zu beenden. Die Anwendung
+            laeuft jetzt an, die Oberflaeche ist erreichbar, und die Anmeldung
+            meldet einen Datenbankfehler, sobald jemand sie versucht -- das ist
+            eine Auskunft, die der Betreiber lesen kann, im Unterschied zu
+            einem Prozess, der nicht mehr da ist.                              */
+        bool eingerichtet;
+        try
+        {
+            eingerichtet = await auth.IstEingerichtetAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Datenbank beim Start nicht erreichbar — die Anwendung "
+                        + "läuft trotzdem an. Anmeldung und Daten bleiben bis zur "
+                        + "Erreichbarkeit der Datenbank gestört.");
+            eingerichtet = true;   // Kein Einrichtungswort ausgeben, solange ungeklärt.
+        }
+
+        if (eingerichtet)
         {
             Log.Information("Zugangskontrolle aktiv.");
         }

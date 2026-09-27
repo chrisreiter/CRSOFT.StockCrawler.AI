@@ -99,7 +99,15 @@ public sealed record SeriesResponse(
     DateTime ToUtc,
     IReadOnlyList<long> Timestamps,
     IReadOnlyList<SeriesDto> Series,
-    IReadOnlyList<SkippedSeries>? Skipped = null);
+    IReadOnlyList<SkippedSeries>? Skipped = null,
+
+    /// <summary>
+    /// Gesetzt, wenn das Zeitraster ausgedünnt wurde — mit der ursprünglichen
+    /// Punktzahl. Eine Kurve, die weniger Punkte zeigt, als es gibt, muss das
+    /// sagen: Wer eine Spitze sucht, die zwischen zwei Rasterpunkten lag, soll
+    /// wissen, dass sie fehlen kann, statt sie für nicht vorhanden zu halten.
+    /// </summary>
+    int? AusgeduenntVon = null);
 
 /// <summary>
 /// Ein angefragter Wert, für den keine Linie entstanden ist — mit Begründung.
@@ -261,6 +269,49 @@ public static class SeriesEndpoints
                 .Distinct()
                 .OrderBy(t => t)
                 .ToArray();
+
+            /*  Das Raster wird gedeckelt, bevor irgendetwas darauf gerechnet wird.
+
+                Die Zeitachse ist für ALLE Linien dieselbe, und jede Linie, jede
+                Prognose und jede Rückschau bekommt ein Feld dieser Länge. Bei
+                „alles" setzt die Oberfläche months=1200; über 25 Jahre
+                Tagesbars sind das rund 9.000 Rasterpunkte, und bei vierzig
+                ausgewählten Werten entstehen daraus über 300.000 Zahlen, die
+                gerechnet, in JSON geschrieben, übertragen und gezeichnet
+                werden. Ein Diagramm ist rund 1.500 Bildpunkte breit — alles
+                darüber ist Aufwand für Unterschiede, die niemand sehen kann.
+
+                Gewählt wird der LETZTE Punkt je Eimer, nicht der erste oder
+                ein Mittelwert: Das entspricht dem Schlusskurs einer gröberen
+                Kerze und ist damit die Zusammenfassung, die in diesem Fach
+                üblich und erwartet ist. Der allerletzte Zeitpunkt bleibt
+                immer erhalten — der aktuelle Kurs darf nicht verrutschen.
+
+                Der Deckel greift nur oberhalb von 2.000 Punkten; der
+                Normalfall (ein Jahr Tagesbars, rund 250 Punkte) bleibt
+                unberührt.                                                      */
+            const int MaxRasterpunkte = 2000;
+            int? ausgeduenntVon = null;
+
+            if (grid.Length > MaxRasterpunkte)
+            {
+                ausgeduenntVon = grid.Length;
+
+                var schritt = (double)grid.Length / MaxRasterpunkte;
+                var gekuerzt = new List<DateTime>(MaxRasterpunkte);
+
+                for (var eimer = 0; eimer < MaxRasterpunkte; eimer++)
+                {
+                    // Letzter Index dieses Eimers, geklemmt auf das Feldende.
+                    var idx = Math.Min((int)Math.Round((eimer + 1) * schritt) - 1, grid.Length - 1);
+                    if (gekuerzt.Count == 0 || gekuerzt[^1] != grid[idx])
+                        gekuerzt.Add(grid[idx]);
+                }
+
+                if (gekuerzt[^1] != grid[^1]) gekuerzt.Add(grid[^1]);
+
+                grid = [.. gekuerzt];
+            }
 
             var meta = new Dictionary<int, Core.Models.Asset>();
             foreach (var id in assetIds)
@@ -638,7 +689,7 @@ public static class SeriesEndpoints
                                           .ToUnixTimeMilliseconds()).ToArray();
 
             return Results.Ok(new SeriesResponse(interval, months, rebase, fromUtc, toUtc, ts, series,
-                skipped.Count > 0 ? skipped : null));
+                skipped.Count > 0 ? skipped : null, ausgeduenntVon));
         });
 
         // Rohbars eines einzelnen Assets, inklusive OHLC — für Detailansichten.
