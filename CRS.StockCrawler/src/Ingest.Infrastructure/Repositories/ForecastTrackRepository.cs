@@ -56,8 +56,11 @@ public sealed class ForecastTrackRepository : IForecastTrackRepository
 
         // Über eine Stage-Tabelle, damit ein erneuter Lauf vorhandene Zeilen
         // ersetzt statt am Primärschlüssel zu scheitern.
+        // Eindeutiger Name: temporaere Tabellen sind auf dem DataCell-Backend global.
+        var stufe = SqlDialekt.EindeutigerTempName("track_stage");
+
         await conn.ExecuteAsync(new CommandDefinition($"""
-            {d.CreateTemp("track_stage")} (
+            {d.CreateTemp(stufe)} (
               asset_id INT, horizon_hours INT, interval_code VARCHAR(3),
               target_ts_utc {d.TypZeit}, made_at_utc {d.TypZeit},
               base_close DECIMAL(19,8), predicted_close DECIMAL(19,8),
@@ -90,7 +93,7 @@ public sealed class ForecastTrackRepository : IForecastTrackRepository
                 r.Confidence, runLabel);
         }
 
-        await Massenkopie.SchreibeAsync(conn, table, d.Temp("track_stage"), 900, ct);
+        await Massenkopie.SchreibeAsync(conn, table, d.Temp(stufe), 900, ct);
 
         var affected = await conn.ExecuteAsync(new CommandDefinition($"""
             MERGE INTO dbo.forecast_track {d.MergeSperre} AS t
@@ -103,7 +106,7 @@ public sealed class ForecastTrackRepository : IForecastTrackRepository
                           MAX(CAST(direction_correct AS INT)) AS direction_correct,
                           MAX(confidence) AS confidence,
                           MAX(run_label) AS run_label
-                     FROM {d.Temp("track_stage")}
+                     FROM {d.Temp(stufe)}
                     GROUP BY asset_id, horizon_hours, interval_code, target_ts_utc) AS s
                ON t.asset_id = s.asset_id AND t.horizon_hours = s.horizon_hours
               AND t.interval_code = s.interval_code AND t.target_ts_utc = s.target_ts_utc
@@ -121,7 +124,7 @@ public sealed class ForecastTrackRepository : IForecastTrackRepository
                       s.base_close, s.predicted_close, s.actual_close, s.abs_pct_error,
                       CAST(s.direction_correct AS {d.TypBool}), s.confidence, s.run_label);
 
-            DROP TABLE {d.Temp("track_stage")};
+            DROP TABLE {d.Temp(stufe)};
             """, commandTimeout: 900, cancellationToken: ct));
 
         return affected;

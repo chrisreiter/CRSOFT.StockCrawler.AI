@@ -242,15 +242,45 @@ public sealed class CurveDiscussionService(
             _ => "e.severity DESC"
         };
 
-        var where = """
-            WHERE e.run_id = @id
-              AND e.severity >= @minSev
-              AND (e.asset_id = @assetId OR @assetId IS NULL)
-              AND (e.event_type = @type OR @type IS NULL)
-              AND (e.sign = @sign OR @sign IS NULL)
-              AND (e.ts_utc >= @from OR @from IS NULL)
-              AND (e.ts_utc <= @to OR @to IS NULL)
-            """;
+        /*  Die Bedingung wird zusammengesetzt, nicht abgeschaltet.
+
+            Hier standen fünf Filter der Form `(spalte = @p OR @p IS NULL)` —
+            eine bequeme Schreibweise für „filtere nur, wenn etwas angegeben
+            ist". Sie ist auf jeder Datenbank schlecht: Der Planer muss einen
+            Plan wählen, der für beide Fälle gilt, und nimmt dann den vollen
+            Durchlauf. Über 380.000 Ereigniszeilen mit Verbund auf `asset`
+            liefen diese Ansichten am 27.09.2026 deshalb in den Timeout —
+            `/api/curve/events` und `/api/curve/stats` antworteten nach 35
+            Sekunden mit 500, obwohl im Normalfall keiner der fünf Filter
+            gesetzt ist.
+
+            Jetzt steht nur in der Bedingung, wonach wirklich gefragt wurde.
+            Die Parameternamen bleiben unverändert; Dapper stört ein Parameter
+            nicht, der im SQL nicht vorkommt.                                  */
+        var bedingungen = new List<string> { "e.run_id = @id" };
+
+        /*  Die Mindeststufe steht nur drin, wenn sie etwas ausschliesst.
+
+            `severity >= 0` schliesst nichts aus — die Stufe ist per Definition
+            nicht negativ. Es ist trotzdem ein Bereichsvergleich auf einer
+            Wertespalte, und der ist auf dem DataCell-Backend teuer: gemessen
+            am 27.09.2026 über den jüngsten Lauf mit 243.312 Zeilen
+
+              COUNT ... WHERE run_id = 9                   154 ms
+              COUNT ... WHERE run_id = 9 AND severity >= 2  30.335 ms
+
+            Ein Vergleich, der jede Zeile behält, kostete also das
+            Zweihundertfache. Die Voreinstellung der Oberfläche ist 0 — diese
+            Ansicht zahlte den Preis folglich immer.                           */
+        if (minSeverity > 0) bedingungen.Add("e.severity >= @minSev");
+
+        if (assetId is not null) bedingungen.Add("e.asset_id = @assetId");
+        if (!string.IsNullOrWhiteSpace(eventType)) bedingungen.Add("e.event_type = @type");
+        if (sign is not null) bedingungen.Add("e.sign = @sign");
+        if (fromUtc is not null) bedingungen.Add("e.ts_utc >= @from");
+        if (toUtc is not null) bedingungen.Add("e.ts_utc <= @to");
+
+        var where = "WHERE " + string.Join("\n              AND ", bedingungen);
 
         var p = new
         {
@@ -268,19 +298,45 @@ public sealed class CurveDiscussionService(
         var total = await conn.ExecuteScalarAsync<long>(new CommandDefinition(
             $"SELECT CAST(COUNT(*) AS BIGINT) FROM dbo.curve_event e {where};", p, cancellationToken: ct));
 
-        var rows = (await conn.QueryAsync<CurveEventRow>(new CommandDefinition(
+        /*  Der Verbund auf `asset` nur dort, wo er für die Sortierung gebraucht
+            wird — sonst holt die Anwendung die Namen selbst.
+
+            `asset` hat 704 Zeilen, `curve_event` im jüngsten Lauf 243.312. Die
+            Ansicht zeigt fünfzig davon. Den Verbund über die grosse Seite zu
+            führen, um fünfzig Symbole zu beschriften, war auf dem
+            DataCell-Backend am 27.09.2026 der Unterschied zwischen einer
+            Antwort und einem Lesetimeout nach 30 Sekunden.
+
+            Nur die Sortierung nach Symbol braucht den Verbund wirklich: Wer
+            seitenweise nach Namen blättert, kann das nicht im Nachhinein
+            ordnen. Für sie bleibt er stehen.                                  */
+        var nachSymbol = order.StartsWith("a.symbol", StringComparison.Ordinal);
+
+        var quelle = nachSymbol
+            ? "FROM dbo.curve_event e JOIN dbo.asset a ON a.asset_id = e.asset_id"
+            : "FROM dbo.curve_event e";
+
+        var rohzeilen = (await conn.QueryAsync<CurveEventRow>(new CommandDefinition(
             $"""
              SELECT e.curve_event_id AS CurveEventId, e.asset_id AS AssetId,
-                    a.symbol AS Symbol, a.name AS Name, a.asset_class AS AssetClass,
                     e.ts_utc AS TsUtc, e.event_type AS EventType, e.sign AS Sign,
                     e.severity AS Severity, e.close_price AS ClosePrice,
                     e.smoothed AS Smoothed, e.slope AS Slope, e.curvature AS Curvature
-               FROM dbo.curve_event e
-               JOIN dbo.asset a ON a.asset_id = e.asset_id
+             {quelle}
              {where}
               ORDER BY {order}
              OFFSET @skip ROWS FETCH NEXT (@take) ROWS ONLY;
              """, p, cancellationToken: ct))).ToList();
+
+        var werte = (await conn.QueryAsync<(int AssetId, string Symbol, string? Name, byte Klasse)>(
+            new CommandDefinition(
+                """SELECT asset_id, symbol, "name", asset_class FROM dbo.asset""",
+                cancellationToken: ct)))
+            .ToDictionary(a => a.AssetId);
+
+        var rows = rohzeilen.Select(r => werte.TryGetValue(r.AssetId, out var a)
+            ? r with { Symbol = a.Symbol, Name = a.Name, AssetClass = (AssetClass)a.Klasse }
+            : r).ToList();
 
         return new CurveEventPage(id, page, size, total, rows);
     }

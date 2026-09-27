@@ -27,8 +27,11 @@ public sealed class PairStatRepository : IPairStatRepository
 
         await using var conn = await _factory.OpenAsync(ct);
 
+        // Eindeutiger Name: temporaere Tabellen sind auf dem DataCell-Backend global.
+        var pairStufe = SqlDialekt.EindeutigerTempName("pair_stage");
+
         await ExecAsync(conn, $"""
-            {d.CreateTemp("pair_stage")} (
+            {d.CreateTemp(pairStufe)} (
               asset_id_a INT, asset_id_b INT, interval_code VARCHAR(3), window_bars INT,
               corr0 FLOAT, best_lag_bars INT, best_lag_corr FLOAT, n_obs INT);
             """, ct);
@@ -47,13 +50,13 @@ public sealed class PairStatRepository : IPairStatRepository
             table.Rows.Add(s.AssetIdA, s.AssetIdB, s.IntervalCode, s.WindowBars,
                            s.Corr0, s.BestLagBars, s.BestLagCorr, s.NObs);
 
-        await BulkCopyAsync(conn, table, d.Temp("pair_stage"), ct);
+        await BulkCopyAsync(conn, table, d.Temp(pairStufe), ct);
 
         await ExecAsync(conn, $"""
             MERGE INTO dbo.pair_stat {d.MergeSperre} AS t
             USING (SELECT asset_id_a, asset_id_b, interval_code, window_bars,
                           corr0, best_lag_bars, best_lag_corr, n_obs
-                     FROM {d.Temp("pair_stage")}) AS s
+                     FROM {d.Temp(pairStufe)}) AS s
                ON t.asset_id_a = s.asset_id_a AND t.asset_id_b = s.asset_id_b
               AND t.interval_code = s.interval_code AND t.window_bars = s.window_bars
             WHEN MATCHED THEN UPDATE SET
@@ -66,7 +69,7 @@ public sealed class PairStatRepository : IPairStatRepository
               VALUES (s.asset_id_a, s.asset_id_b, s.interval_code, s.window_bars,
                       s.corr0, s.best_lag_bars, s.best_lag_corr, s.n_obs);
 
-            DROP TABLE {d.Temp("pair_stage")};
+            DROP TABLE {d.Temp(pairStufe)};
             """, ct);
     }
 
@@ -77,8 +80,11 @@ public sealed class PairStatRepository : IPairStatRepository
 
         await using var conn = await _factory.OpenAsync(ct);
 
+        // Eindeutiger Name: temporaere Tabellen sind auf dem DataCell-Backend global.
+        var crossStufe = SqlDialekt.EindeutigerTempName("cross_stage");
+
         await ExecAsync(conn, $"""
-            {d.CreateTemp("cross_stage")} (
+            {d.CreateTemp(crossStufe)} (
               asset_id_a INT, asset_id_b INT, interval_code VARCHAR(3), ts_utc {d.TypZeit},
               direction SMALLINT, spread_before FLOAT, spread_after FLOAT);
             """, ct);
@@ -96,7 +102,7 @@ public sealed class PairStatRepository : IPairStatRepository
             table.Rows.Add(c.AssetIdA, c.AssetIdB, c.IntervalCode, c.TsUtc,
                            (byte)(c.Upward ? 1 : 0), c.SpreadBefore, c.SpreadAfter);
 
-        await BulkCopyAsync(conn, table, d.Temp("cross_stage"), ct);
+        await BulkCopyAsync(conn, table, d.Temp(crossStufe), ct);
 
         // Nur neue Kreuzungen einfügen; der eindeutige Index verträgt keine Dubletten.
         await ExecAsync(conn, $"""
@@ -107,14 +113,14 @@ public sealed class PairStatRepository : IPairStatRepository
               FROM (SELECT *, ROW_NUMBER() OVER (
                        PARTITION BY asset_id_a, asset_id_b, interval_code, ts_utc
                        ORDER BY ts_utc) AS rn
-                      FROM {d.Temp("cross_stage")}) s
+                      FROM {d.Temp(crossStufe)}) s
              WHERE s.rn = 1
                AND NOT EXISTS (
                      SELECT 1 FROM dbo.crossing c
                       WHERE c.asset_id_a = s.asset_id_a AND c.asset_id_b = s.asset_id_b
                         AND c.interval_code = s.interval_code AND c.ts_utc = s.ts_utc);
 
-            DROP TABLE {d.Temp("cross_stage")};
+            DROP TABLE {d.Temp(crossStufe)};
             """, ct);
     }
 

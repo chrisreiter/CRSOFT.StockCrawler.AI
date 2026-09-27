@@ -251,22 +251,25 @@ public sealed class SaeulenbeitragService : ISaeulenbeitragService
     {
         try
         {
+            // Eindeutiger Name: temporaere Tabellen sind auf dem DataCell-Backend global.
+            var aStufe = SqlDialekt.EindeutigerTempName("a");
+
             var aktiv = (await conn.QueryAsync<AktiverAusloeser>(new CommandDefinition(
                 $"""
-                {d.CreateTemp("a")} (ausloeser {d.TypText(100)}, richtung INT, asset_id INT,
+                {d.CreateTemp(aStufe)} (ausloeser {d.TypText(100)}, richtung INT, asset_id INT,
                                  asset_class SMALLINT, ts_utc {d.TypZeit});
-                INSERT INTO {d.Temp("a")} {d.Aufruf("dbo.get_active_triggers", "tage")};
+                INSERT INTO {d.Temp(aStufe)} {d.Aufruf("dbo.get_active_triggers", "tage")};
 
                 SELECT a.asset_id AS AssetId, a.ausloeser AS Ausloeser, a.richtung AS Richtung,
                        s.r1 - s.b1 AS Ueber1, s.r5 - s.b5 AS Ueber5, s.r20 - s.b20 AS Ueber20,
                        s.richtung1 AS Treffer1, s.richtung5 AS Treffer5, s.richtung20 AS Treffer20,
                        s.ereignisse AS Ereignisse
-                  FROM {d.Temp("a")} a
+                  FROM {d.Temp(aStufe)} a
                   JOIN dbo.bot_trigger_stat s
                     ON s.ausloeser = a.ausloeser AND s.klasse = a.asset_class
                    AND s.run_id = (SELECT MAX(run_id) FROM dbo.bot_trigger_stat);
 
-                DROP TABLE {d.Temp("a")};
+                DROP TABLE {d.Temp(aStufe)};
                 """, new { tage = 3 }, cancellationToken: ct))).ToList();
 
             if (aktiv.Count == 0) return;
