@@ -63,7 +63,7 @@ public sealed class LearningRepository : ILearningRepository
 
         await conn.ExecuteAsync(new CommandDefinition($"""
             UPDATE dbo.learning_epoch
-               SET finished_utc = {d.Jetzt}, assets = @assets, steps = @steps,
+               SET finished_utc = @jetzt, assets = @assets, steps = @steps,
                    forecasts = @forecasts, scored = @scored, mape = @mape,
                    hit_rate = @hitRate, pair_refreshes = @pairRefreshes, note = @note
              WHERE epoch_id = @epochId
@@ -71,6 +71,7 @@ public sealed class LearningRepository : ILearningRepository
             new
             {
                 epochId, assets, steps, forecasts, scored,
+                jetzt = DateTime.UtcNow,
                 mape = Sane(mape), hitRate = Sane(hitRate), pairRefreshes,
                 note = note?.Length > 900 ? note[..900] : note
             }, cancellationToken: ct));

@@ -201,13 +201,14 @@ public sealed class GrundschwingungService(
                  + $"Toleranz 12 %, Klassen ab 3 Akkorden, Paare ab 3 gemeinsamen Epochen.";
 
         await conn.ExecuteAsync(new CommandDefinition($"""
-            UPDATE dbo.freq_run SET finished_utc = {d.Jetzt}, werte = @werte, epochen = @epochen,
+            UPDATE dbo.freq_run SET finished_utc = @jetzt, werte = @werte, epochen = @epochen,
                    muster = @muster, akkorde = @akkorde, klassen = @klassen, paare = @paare,
                    paare_bestaendig = @pb, dauer_s = @dauer, note = @note
              WHERE run_id = @runId
             """, new
             {
                 runId, werte = mitDaten, epochen, muster = muster.Count, akkorde = akkorde.Count,
+                jetzt = DateTime.UtcNow,
                 klassen = katalog.Count, paare = paareGesamt, pb = bestaendigGesamt,
                 dauer = Math.Round(sw.Elapsed.TotalSeconds, 1), note
             }, cancellationToken: ct));
