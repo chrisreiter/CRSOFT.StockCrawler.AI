@@ -358,13 +358,48 @@ Am Node, dort gemeldet und dort zu beheben:
    Indexzugriff für `MIN`/`MAX` **existiert dort bereits** und war genau für
    diese Form gebaut (einmal 63 s auf Millisekunden). Diese Abfrage erreicht
    ihn nur nicht — ein Weichenproblem, kein fehlendes Verfahren.
+6. **Ein `DEFAULT` auf einer Spalte greift beim `INSERT` nicht.**
+   `dbo.ingest_run.started_utc` blieb leer, ohne Fehler und ohne Meldung.
+7. **`now() at time zone 'utc'` liefert die Ortszeit**, nicht UTC.
+
+   Die beiden letzten sind **keine Tempofragen, sondern Korrektheit**, und
+   Punkt 7 ist der gefährlichste Befund dieser ganzen Arbeit. An einer
+   Probezeile nachgestellt:
+
+   ```
+   INSERT … (job_name, provider) VALUES (…)              -- Spaltenstandard
+   UPDATE … SET finished_utc = now() at time zone 'utc'
+     → started_utc = NULL,  finished_utc = 00:42:55
+
+   INSERT … (job_name, provider, started_utc) VALUES (…, @jetzt)
+   UPDATE … SET finished_utc = @jetzt
+     → started_utc = 22:42:55,  finished_utc = 22:42:55
+   ```
+
+   Zwei Stunden Differenz, und zwar in die tückische Richtung: Der
+   Zeitstempel sieht **neuer** aus, als er ist. Ein falsches Tempo merkt man,
+   einen falschen Zeitstempel nicht.
+
+   Was Punkt 6 gekostet hat, zeigt, wie teuer ein lautloser Fehler wird:
+   `NachholenAsync` entscheidet über `MAX(started_utc) … AND finished_utc IS
+   NOT NULL`, ob ein Tageslauf versäumt wurde. Ohne `started_utc` fand es nie
+   einen erledigten Lauf und startete bei **jedem Neustart** einen Import über
+   646 Werte und 35 Minuten. Das lief den ganzen Abend mit, auch unter den
+   Messungen dieses Dokuments — und ich habe es für richtiges Verhalten
+   gehalten, weil die Meldung „Tages- und Stundenlauf versäumt" ja stimmte.
+
+   Rückmeldung aus der Datenbankentwicklung zu beiden: Der Schreibpfad
+   behandelt `now()` bereits korrekt als UTC; der Executor-Pfad tut es nicht.
+   Punkt 6 ist dieselbe Familie — die Zeile wird beim Einfügen nicht
+   vervollständigt. Beides ist ohne Schreibrisiko an einer Probezeile
+   nachprüfbar.
 
 In der Anwendung:
 
-5. Die Zwischenspeicher sind **eine Umgehung**, kein Entwurf. Fällt Punkt 2
+8. Die Zwischenspeicher sind **eine Umgehung**, kein Entwurf. Fällt Punkt 2
    am Node, gehören sie auf den Prüfstand — nicht ersatzlos weg, aber ihre
    Grössen und das Vorwärmen wären dann anders zu begründen.
-6. Weitere Stellen der Anwendung fahren Aggregate mit Einschränkung und sind
+9. Weitere Stellen der Anwendung fahren Aggregate mit Einschränkung und sind
    damit von Punkt 1 betroffen; die Kursansicht ist nur die sichtbarste.
    Besonders `PrognosegueteService.RanglisteAsync` (acht Aggregate über den
    Verbund zweier Grosstabellen, siebenmal hintereinander gerufen),
