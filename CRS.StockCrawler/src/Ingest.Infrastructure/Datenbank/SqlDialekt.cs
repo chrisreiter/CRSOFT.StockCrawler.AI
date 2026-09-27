@@ -167,6 +167,34 @@ public abstract class SqlDialekt
     public abstract string Temp(string name);
     public abstract string CreateTemp(string name);
 
+    private static int _tempZaehler;
+
+    /// <summary>
+    /// Ein Name für eine temporäre Tabelle, den nichts anderes benutzt.
+    ///
+    /// <para><b>Warum das nötig ist.</b> Temporäre Tabellen heißen in beiden
+    /// Systemen normalerweise nur innerhalb ihrer Sitzung so — zwei
+    /// Verbindungen mit einer Tabelle <c>bars</c> stören sich nicht. Das
+    /// EventMesh-DataCell-Backend hält sie am 27.09.2026 dagegen
+    /// <b>global</b>: Dort ist jede <c>bars</c> dieselbe Tabelle, über alle
+    /// Verbindungen hinweg.</para>
+    ///
+    /// <para>Die Folge war kein Fehler, sondern Vermischung. Unser Kursimport
+    /// füllte seine Stufe, eine fremde Sitzung legte gleichzeitig ihre an, und
+    /// beide lasen die Zeilen des anderen: <c>COPY 2</c>, danach
+    /// <c>count(*) = 7</c>, und der abschliessende <c>MERGE</c> meldete
+    /// Erfolg, ohne die eigenen Zeilen abzulegen. Der Import schrieb dadurch
+    /// stundenlang nichts, ohne eine einzige Fehlermeldung.</para>
+    ///
+    /// <para>Ein eindeutiger Name kostet nichts und macht die Stelle von der
+    /// Frage unabhängig, wie weit eine Datenbank „temporär" fasst — auf SQL
+    /// Server und Postgres genauso richtig wie hier. Prozesskennung gegen
+    /// mehrere Anwendungen, Zähler gegen mehrere Aufrufe im selben
+    /// Prozess.</para>
+    /// </summary>
+    public static string EindeutigerTempName(string basis)
+        => $"{basis}_{Environment.ProcessId:x}_{Interlocked.Increment(ref _tempZaehler):x}";
+
     /// <summary>
     /// <c>SELECT … INTO #x FROM …</c> gibt es in Postgres nicht; dort heisst es
     /// <c>CREATE TEMP TABLE x AS SELECT … FROM …</c>. Wieder ein Paar:

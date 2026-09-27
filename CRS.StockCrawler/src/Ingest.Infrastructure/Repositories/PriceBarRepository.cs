@@ -32,8 +32,15 @@ public sealed class PriceBarRepository : IPriceBarRepository
             und die Prozedur upsert_price_bars. Beides kennt nur SQL Server; die
             Stage-Tabelle plus MERGE hier im Code kennen beide Systeme, und die
             Logik steht dort, wo man sie sucht.                                */
+        /*  Eindeutiger Name je Aufruf — siehe SqlDialekt.EindeutigerTempName.
+            Auf dem DataCell-Backend sind temporäre Tabellen global; eine feste
+            `bars` vermischte sich dort mit jeder anderen Verbindung, die
+            ebenfalls `bars` benutzte, und der Import schrieb daraufhin
+            stundenlang nichts.                                                */
+        var stufe = SqlDialekt.EindeutigerTempName("bars");
+
         await conn.ExecuteAsync(new CommandDefinition($"""
-            {d.CreateTemp("bars")} (
+            {d.CreateTemp(stufe)} (
               ts_utc {d.TypZeit} NOT NULL PRIMARY KEY,
               "open" DECIMAL(19,8) NULL, "high" DECIMAL(19,8) NULL, "low" DECIMAL(19,8) NULL,
               "close" DECIMAL(19,8) NOT NULL, adj_close DECIMAL(19,8) NULL, volume DECIMAL(38,8) NULL);
@@ -72,13 +79,13 @@ public sealed class PriceBarRepository : IPriceBarRepository
             }
 
             await conn.ExecuteAsync(new CommandDefinition(
-                $"""DELETE FROM {d.Temp("bars")}""", cancellationToken: ct));
-            await Massenkopie.SchreibeAsync(conn, table, d.Temp("bars"), 120, ct);
+                $"""DELETE FROM {d.Temp(stufe)}""", cancellationToken: ct));
+            await Massenkopie.SchreibeAsync(conn, table, d.Temp(stufe), 120, ct);
 
             total += await conn.ExecuteAsync(new CommandDefinition($"""
                 MERGE INTO dbo.price_bar {d.MergeSperre} AS t
                 USING (SELECT @asset_id AS asset_id, @interval_code AS interval_code, b.*
-                         FROM {d.Temp("bars")} b) AS s
+                         FROM {d.Temp(stufe)} b) AS s
                    ON t.asset_id = s.asset_id
                   AND t.interval_code = s.interval_code
                   AND t.ts_utc = s.ts_utc
@@ -97,7 +104,7 @@ public sealed class PriceBarRepository : IPriceBarRepository
         }
 
         await conn.ExecuteAsync(new CommandDefinition(
-            $"""DROP TABLE {d.Temp("bars")}""", cancellationToken: ct));
+            $"""DROP TABLE {d.Temp(stufe)}""", cancellationToken: ct));
 
         return total;
     }

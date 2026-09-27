@@ -54,10 +54,13 @@ internal static class KreuzungsBewaehrung
         tabelle.Columns.Add("b", typeof(int));
         foreach (var (a, b) in liste) tabelle.Rows.Add(a, b);
 
+        // Eindeutiger Name: temporaere Tabellen sind auf dem DataCell-Backend global.
+        var paareStufe = SqlDialekt.EindeutigerTempName("paare");
+
         await conn.ExecuteAsync(new CommandDefinition(
-            $"""DROP TABLE IF EXISTS {d.Temp("paare")}; {d.CreateTemp("paare")} (a INT NOT NULL, b INT NOT NULL);""",
+            $"""DROP TABLE IF EXISTS {d.Temp(paareStufe)}; {d.CreateTemp(paareStufe)} (a INT NOT NULL, b INT NOT NULL);""",
             cancellationToken: ct));
-        await Massenkopie.SchreibeAsync(conn, tabelle, d.Temp("paare"), 60, ct);
+        await Massenkopie.SchreibeAsync(conn, tabelle, d.Temp(paareStufe), 60, ct);
 
         var p = new DynamicParameters();
         p.Add("@interval", intervalCode);
@@ -65,7 +68,7 @@ internal static class KreuzungsBewaehrung
         p.Add("@halte", haltedauer);
 
         var rows = await conn.QueryAsync<Zeile>(new CommandDefinition(
-            Sql(d), p, commandTimeout: 180, cancellationToken: ct));
+            Sql(d, paareStufe), p, commandTimeout: 180, cancellationToken: ct));
 
         return rows.ToDictionary(r => (r.A, r.B));
     }
@@ -79,12 +82,12 @@ internal static class KreuzungsBewaehrung
     /// Ohne sie ginge die gerade angezeigte Kreuzung in ihre eigene Bewährung
     /// ein — das Maß benotete sich selbst.</para>
     /// </summary>
-    private static string Sql(SqlDialekt d) => $"""
+    private static string Sql(SqlDialekt d, string paareStufe) => $"""
         WITH reihe AS (
           SELECT p.a, p.b, pa.ts_utc,
                  CAST(pa."close" AS FLOAT) AS ca, CAST(pb."close" AS FLOAT) AS cb,
                  ROW_NUMBER() OVER (PARTITION BY p.a, p.b ORDER BY pa.ts_utc) AS rn
-            FROM {d.Temp("paare")} p
+            FROM {d.Temp(paareStufe)} p
             JOIN dbo.price_bar pa ON pa.asset_id = p.a AND pa.interval_code = @interval
                                   AND pa."close" > 0
             JOIN dbo.price_bar pb ON pb.asset_id = p.b AND pb.interval_code = @interval
@@ -97,7 +100,7 @@ internal static class KreuzungsBewaehrung
                       ELSE (r1.cb / r0.cb - r1.ca / r0.ca)
                  END AS gewinn
             FROM dbo.crossing c
-            JOIN {d.Temp("paare")} p ON p.a = c.asset_id_a AND p.b = c.asset_id_b
+            JOIN {d.Temp(paareStufe)} p ON p.a = c.asset_id_a AND p.b = c.asset_id_b
             JOIN reihe r0 ON r0.a = c.asset_id_a AND r0.b = c.asset_id_b AND r0.ts_utc = c.ts_utc
             JOIN reihe r1 ON r1.a = c.asset_id_a AND r1.b = c.asset_id_b AND r1.rn = r0.rn + @halte
            WHERE c.interval_code = @interval AND c.ts_utc < @seit
