@@ -52,11 +52,12 @@ public sealed class Kursspeicher
 
     /// <param name="budgetBars">
     /// Obergrenze in Bars. 1,5 Millionen entsprechen bei dieser Datenform rund
-    /// 180 MB — genug für die Tagesreihen aller verfolgten Werte über mehrere
-    /// Jahre, und weit unter dem, was der abgelöste SQL Server allein für sich
-    /// beanspruchte.
+    /// 300 MB. Das deckt die Tagesreihen aller verfolgten Werte ueber zwei
+    /// Jahre (318.240 Bars) UND die Stundenreihen ueber drei Monate (rund 1,4
+    /// Millionen) — und liegt noch immer bei einem Siebtel dessen, was der
+    /// abgeloeste SQL Server allein fuer sich beanspruchte (2,10 GB).
     /// </param>
-    public Kursspeicher(int budgetBars = 1_500_000) => _budget = budgetBars;
+    public Kursspeicher(int budgetBars = 2_500_000) => _budget = budgetBars;
 
     public int GehalteneBars { get; private set; }
 

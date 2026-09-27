@@ -23,6 +23,12 @@ builder.Services.AddSingleton<SchedulerState>();
 builder.Services.AddSingleton<CronScheduler>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CronScheduler>());
 
+/*  Vorwaermen des Kursspeichers -- eigener Dienst, nicht Teil des Zeitplans.
+    Es ist keine Aufgabe mit Termin, sondern eine einmalige Vorbereitung nach
+    dem Start, und sie laeuft auch dann, wenn der Zeitplan abgeschaltet ist
+    (etwa beim Messen oder auf einem Replikat).                              */
+builder.Services.AddHostedService<Vorwaermer>();
+
 builder.Services.ConfigureHttpJsonOptions(o =>
 {
     o.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
