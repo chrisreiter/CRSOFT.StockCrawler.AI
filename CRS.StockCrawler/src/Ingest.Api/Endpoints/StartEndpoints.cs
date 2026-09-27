@@ -66,47 +66,50 @@ public static class StartEndpoints
             if (!frisch && Cache.TryGetValue(key, out var c) && c.Bis > DateTime.UtcNow)
                 return Results.Ok(c.Wert);
 
-            /*  Die Kacheln laufen NACHEINANDER, nicht gleichzeitig.
+            /*  Die Kacheln laufen wieder gleichzeitig.
 
-                Hier stand `Task.WhenAll` über alle acht — die naheliegende
-                Wahl, solange die Datenbank nebenläufige Abfragen auf eigene
-                Kerne legt. Das EventMesh-DataCell-Backend tut das nicht: Jede
-                einzelne Kachelabfrage braucht dort rund 1,4 Sekunden, acht
-                gleichzeitig aber mehr als zwanzig je Stück. Am 27.09.2026
-                liefen deshalb fünf von acht in ihre Frist, obwohl zusammen
-                kaum zwölf Sekunden Arbeit anstanden.
+                Für einen halben Tag standen sie hier nacheinander: Das
+                EventMesh-DataCell-Backend war am 27.09.2026 unter
+                Nebenläufigkeit zusammengebrochen — eine Kachelabfrage kostete
+                allein 1,4 Sekunden, acht gleichzeitig aber über zwanzig je
+                Stück, und fünf von acht liefen in ihre Frist. Serialisieren
+                war damals messbar schneller.
 
-                Nacheinander ist hier also nicht langsamer, sondern schneller —
-                und es ist die freundlichere Nachbarschaft: Während die Seite
-                sich aufbaut, bleibt Luft für den, der gerade einen Chart
-                öffnet. Auf einer Datenbank, die Nebenläufigkeit belohnt,
-                kostet die Umstellung wenig, weil das Ergebnis fünf Minuten
-                gemerkt wird.                                                  */
-            var t = new Dictionary<string, object?>();
+                Der Grund war kein Ausführungsstrang, sondern Speicherdruck:
+                Der Abfrageausführer materialisierte unter Last Millionen
+                Zeilen. Seit das streamend läuft, belohnt der Node
+                Nebenläufigkeit wieder — acht gleichzeitige Abfragen brauchen
+                2,3 s, nacheinander 10,2 s.
 
-            async Task Lauf(string name, Func<CancellationToken, Task<object?>> f)
-                => t[name] = await Teil(f, ct);
+                Die Notiz bleibt als Warnung: Eine Anpassung an das Verhalten
+                einer bestimmten Datenbank ist eine Wette auf deren heutigen
+                Zustand. Sie gehört datiert, begründet und zurückgenommen,
+                sobald die Begründung entfällt.                                */
+            var t = new Dictionary<string, Task<object?>>
+            {
+                ["lage"] = Teil(k => LageAsync(factory, briefing, k), ct),
+                ["markt"] = Teil(k => MarktAsync(factory, k), ct),
+                ["nachrichten"] = Teil(k => NachrichtenAsync(factory, k), ct),
+                ["depot"] = Teil(k => DepotAsync(invest, k), ct),
+                ["prognose"] = Teil(k => PrognoseAsync(factory, urteile, k), ct),
+                ["neuzugaenge"] = Teil(k => NeuzugaengeAsync(neuzugang, k), ct),
+                ["grundschwingungen"] = Teil(k => GrundschwingungenAsync(grund, k), ct),
+                ["system"] = Teil(k => SystemAsync(factory, knowledge, scheduler, k), ct),
+            };
 
-            await Lauf("lage", k => LageAsync(factory, briefing, k));
-            await Lauf("markt", k => MarktAsync(factory, k));
-            await Lauf("nachrichten", k => NachrichtenAsync(factory, k));
-            await Lauf("depot", k => DepotAsync(invest, k));
-            await Lauf("prognose", k => PrognoseAsync(factory, urteile, k));
-            await Lauf("neuzugaenge", k => NeuzugaengeAsync(neuzugang, k));
-            await Lauf("grundschwingungen", k => GrundschwingungenAsync(grund, k));
-            await Lauf("system", k => SystemAsync(factory, knowledge, scheduler, k));
+            await Task.WhenAll(t.Values);
 
             var wert = new
             {
                 standUtc = DateTime.UtcNow,
-                lage = t["lage"],
-                markt = t["markt"],
-                nachrichten = t["nachrichten"],
-                depot = t["depot"],
-                prognose = t["prognose"],
-                neuzugaenge = t["neuzugaenge"],
-                grundschwingungen = t["grundschwingungen"],
-                system = t["system"],
+                lage = t["lage"].Result,
+                markt = t["markt"].Result,
+                nachrichten = t["nachrichten"].Result,
+                depot = t["depot"].Result,
+                prognose = t["prognose"].Result,
+                neuzugaenge = t["neuzugaenge"].Result,
+                grundschwingungen = t["grundschwingungen"].Result,
+                system = t["system"].Result,
             };
             Cache[key] = (DateTime.UtcNow + Haltbar, wert);
             return Results.Ok(wert);
@@ -296,7 +299,13 @@ public static class StartEndpoints
         await using var conn = await factory.OpenAsync(ct);
         var d = conn.Dialekt();
         var (bar, gestellt, zeilen) = await conn.QuerySingleAsync<(DateTime?, DateTime?, int)>(new CommandDefinition($"""
-            SELECT (SELECT MAX(b.ts_utc) FROM dbo.price_bar b JOIN dbo.asset a ON a.asset_id = b.asset_id WHERE a.is_tracked = {d.Wahr}),
+            /*  Ohne Verbund auf `asset`: Gefragt ist der jüngste Kurszeitpunkt
+                überhaupt, und der stammt zwangsläufig von einem verfolgten
+                Wert — nur die werden abgerufen. Der Verbund über vier
+                Millionen Kurszeilen beantwortete dieselbe Frage teurer.
+                `MAX(ts_utc)` mit Gleichheit auf `interval_code` steht am Rand
+                des Index und kostet gemessen rund 140 ms.                     */
+            SELECT (SELECT MAX(ts_utc) FROM dbo.price_bar WHERE interval_code = '1d'),
                    (SELECT MAX(made_at_utc) FROM dbo.forecast),
                    (SELECT CAST(COUNT(*) AS INT) FROM dbo.forecast WHERE made_at_utc = (SELECT MAX(made_at_utc) FROM dbo.forecast))
             """, cancellationToken: ct));
