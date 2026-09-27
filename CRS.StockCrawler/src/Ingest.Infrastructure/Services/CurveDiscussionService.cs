@@ -365,7 +365,7 @@ public sealed class CurveDiscussionService(
              WHERE l.run_id = @id {wertefilter}
              ORDER BY l.lift DESC OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY;
             """, new { id, limit = Math.Clamp(limit, 10, 500), assetId },
-            commandTimeout: 120, cancellationToken: ct))).ToList();
+            commandTimeout: 25, cancellationToken: ct))).ToList();
     }
 
     public async Task<IReadOnlyList<dynamic>> TypeStatsAsync(
