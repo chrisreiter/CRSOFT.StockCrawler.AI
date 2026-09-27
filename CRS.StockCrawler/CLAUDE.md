@@ -1356,6 +1356,47 @@ die Zeilenzahl. Ein Abbruch ist ein Geschenk — er zeigt auf die Stelle. Eine
 falsche Antwort lässt den Suchenden dort graben, wo nichts ist. Alle Einzelheiten:
 [docs/EVENTMESH-DATACELL-BERICHT-27-09.md](docs/EVENTMESH-DATACELL-BERICHT-27-09.md).
 
+**Was auf JEDER Anfrage liegt, darf die Datenbank nicht anfassen.** Die
+Sitzungsprüfung `WerIstDasAsync` las und schrieb je Anfrage zwei Mal — und die
+Oberfläche fragt `/api/scheduler` im Fünfsekundentakt. Gemessen an einem Lauf:
+205 Aufrufe von `/api/scheduler`, 232 Poolfehler, davon **197 aus dieser einen
+Methode**. Sobald die Datenbank langsam antwortet, stauen sich die Verbindungen
+schneller, als sie zurückkommen; dann fällt nicht die Sitzungsprüfung aus,
+sondern alles andere mit ihr. Der Pool ist der Ort, an dem eine einzelne
+langsame Abfrage zur Störung der ganzen Anwendung wird. Behoben mit einem
+Kurzspeicher von fünfzehn Sekunden — lang genug für den Fünfsekundentakt, kurz
+genug, dass Abmeldung und Rollenwechsel ankommen; Abmelden und Benutzerpflege
+räumen ihn zusätzlich. Danach: null Poolfehler. Der Unterschied zum
+Sitzungsspeicher daneben (`_imSpeicher`, volle Lebensdauer) ist Absicht: Dort
+gibt es keine zweite Wahrheit, hier schon.
+
+**Eine Kennzahl je Wert abzufragen, die für alle Werte in einem Durchlauf
+entsteht, ist der teuerste Weg zur selben Zahl.** `GetAccuracyAsync` hat fünf
+Aufrufer; `ForecastService` und `CombinedForecastService` riefen sie **je
+Wert**. Auf dem DataCell-Backend kostete der Verbund `forecast JOIN
+forecast_score`, eingeschränkt auf einen Wert, **17,6 s** — bei rund 600
+verfolgten Werten knapp drei Stunden für eine Kennzahl, die sich stündlich
+einmal ändert. Dieselbe Abfrage kostete die Kursansicht 16,8 s, während das
+Diagramm selbst 211–449 ms braucht; das war die Frage „warum dauert das Laden
+eines Charts so lange". Jetzt zwei schlichte Lesevorgänge und die Zuordnung in
+C#, **einmal für alle Werte** (24,6 s), prozessweit gehalten, beim Start
+vorgewärmt. Die Frage war nicht „wie mache ich diese Abfrage schneller",
+sondern „warum stelle ich sie sechshundertmal".
+
+**Ein Verbund über einen Primärschlüssel kann ein Kreuzprodukt sein.** Gemessen
+am 27.09.2026 auf einem unbelasteten Node: Einzelzugriff `WHERE forecast_id =
+100000` **1,8 ms**, die ganze Tabelle zählen (483.588 Zeilen) **916 ms**, der
+Verbund eingeschränkt auf einen Wert (2.399 linke Zeilen, 997 Treffer)
+**17,6 s**, dieselben Kennungen als wörtliche `IN`-Liste **168 s**, als
+`IN (SELECT …)` Abbruch nach 278 s mit „Query erzeugt über 1.500.000
+(Zwischen-)Zeilen". Die letzte Meldung benennt die Ursache selbst: Der Executor
+filtert die linke Seite, materialisiert die rechte aber vollständig, bevor er
+verbindet. Die Schranke trifft damit den Falschen — ohne das Kreuzprodukt gäbe
+es die Zwischenzeilen nicht. **Die Zahl, die es verrät, ist das Verhältnis von
+Aufwand zu Ergebnis**: 1,16 Milliarden Paare für 997 Zeilen. Wer nur die
+Gesamtdauer sieht, hält es für eine große Abfrage; wer die Trefferzahl daneben
+legt, sieht den Plan.
+
 **Wer ein fremdes Backend misst, misst mit dem Treiber der Anwendung.** Ich habe
 über `psql` mit `PREPARE`/`EXECUTE` getestet — der Node kennt das nicht und
 antwortet mit `SELECT 0`, statt zu scheitern. Damit wurde *jede* Prüfung falsch

@@ -67,6 +67,34 @@ public sealed class CronScheduler : BackgroundService
             "Scheduler {Status}. Nächster Stundenlauf {H:u}, nächster Tageslauf {D:u}",
             _state.Enabled ? "aktiv" : "angehalten", nextHourly, nextDaily);
 
+        /*  Die Guetetafel vorwaermen -- im Hintergrund, ohne jemanden aufzuhalten.
+
+            Sie entsteht aus einem vollen Durchlauf ueber Prognosen und
+            Bewertungen und kostet rund 25 Sekunden. Wer sie nicht vorwaermt,
+            laedt sie beim ersten Oeffnen einer Kursansicht mit eingeblendeter
+            Prognose -- und dann wartet ein Mensch darauf. Hier wartet niemand;
+            wer in den ersten Sekunden nach dem Start zugreift, wartet
+            hoechstens den Rest.                                               */
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var vorlauf = _scopes.CreateScope();
+                var prognosen = vorlauf.ServiceProvider.GetRequiredService<IForecastRepository>();
+
+                var uhr = System.Diagnostics.Stopwatch.StartNew();
+                var tafel = await prognosen.GetAccuracyAsync(null, ct);
+
+                _log.LogInformation(
+                    "Guetetafel vorgewaermt: {Zahl} Horizonte in {Ms} ms",
+                    tafel.Count, uhr.ElapsedMilliseconds);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Guetetafel konnte nicht vorgewaermt werden");
+            }
+        }, ct);
+
         /*  Erst nachholen, dann in den Takt.
 
             Ein nachgeholter Tageslauf dauert eine halbe Stunde; danach ist der
