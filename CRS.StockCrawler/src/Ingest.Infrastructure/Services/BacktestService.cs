@@ -267,7 +267,9 @@ public sealed class BacktestService : IBacktestService
                         ActualClose = actual,
                         ActualReturn = actualReturn,
                         AbsPctError = absPctError,
-                        DirectionCorrect = directionCorrect
+                        DirectionCorrect = directionCorrect,
+                        AssetId = asset.AssetId,
+                        HorizonHours = horizonHours
                     }], ct);
                 }
             }

@@ -36,13 +36,13 @@ public static class Massenkopie
         };
 
     private static async Task SqlServerAsync(
-        SqlConnection conn, DataTable tabelle, string ziel, int zeitlimit, CancellationToken ct)
+        SqlConnection conn, DataTable tabelle, string ziel, int zeitlimitSekunden, CancellationToken ct)
     {
         using var bulk = new SqlBulkCopy(conn)
         {
             DestinationTableName = ziel,
             BatchSize = 10_000,
-            BulkCopyTimeout = zeitlimit,
+            BulkCopyTimeout = zeitlimitSekunden,
         };
 
         foreach (DataColumn c in tabelle.Columns)
@@ -52,14 +52,37 @@ public static class Massenkopie
     }
 
     private static async Task PostgresAsync(
-        NpgsqlConnection conn, DataTable tabelle, string ziel, int zeitlimit, CancellationToken ct)
+        NpgsqlConnection conn, DataTable tabelle, string ziel, int zeitlimitSekunden, CancellationToken ct)
     {
         var spalten = string.Join(", ",
             tabelle.Columns.Cast<DataColumn>().Select(c => "\"" + c.ColumnName + "\""));
 
         await using var schreiber = await conn.BeginTextImportAsync(
             $"COPY {ziel} ({spalten}) FROM STDIN (FORMAT TEXT)", ct);
-        schreiber.Timeout = zeitlimit;
+        /*  MILLISEKUNDEN, nicht Sekunden -- und darin lag der Fehler.
+
+            `SqlBulkCopy.BulkCopyTimeout` zaehlt SEKUNDEN,
+            `NpgsqlCopyTextWriter.Timeout` zaehlt MILLISEKUNDEN. Beide
+            bekommen hier dieselbe Variable, und sie hiess `zeitlimit` --
+            eine Zahl ohne Einheit, die auf dem einen Backend „zwei Minuten"
+            und auf dem anderen „hundertzwanzig Millisekunden" bedeutet.
+
+            Die Folge war nicht ein langsamer Import, sondern GAR KEINER. Am
+            27.09.2026 scheiterten 88 von 88 Werten mit „Timeout during
+            reading attempt" in `NpgsqlRawCopyStream.DisposeAsync`, also beim
+            Warten auf das CommandComplete nach CopyDone. Ein COPY ueber 250
+            Kursbars braucht auf dem DataCell-Backend gemessen 82 bis 197 ms
+            -- knapp ueber der Grenze von 120. Deshalb kamen auch vereinzelt
+            Zeilen durch, was das Bild noch verwirrender machte: Der Import
+            sah aus wie ein Netzwerkproblem, nicht wie ein Zahlendreher.
+
+            Die juengste Tagesbar stand dadurch drei Tage in der
+            Vergangenheit, waehrend der Nachholer jeden Start brav einen
+            neuen Lauf startete, der wieder an derselben Stelle scheiterte.
+
+            Der Parameter heisst jetzt `zeitlimitSekunden`, damit die Einheit
+            an der Aufrufstelle steht und nicht im Kopf des Lesers.          */
+        schreiber.Timeout = zeitlimitSekunden * 1000;
 
         var zeile = new StringBuilder(256);
         foreach (DataRow r in tabelle.Rows)

@@ -54,6 +54,16 @@ public sealed class ForecastScore
     public double AbsPctError { get; set; }
     public bool DirectionCorrect { get; set; }
     public DateTime ScoredAtUtc { get; set; }
+
+    /*  Wert und Horizont stehen bei der Bewertung selbst -- siehe Migration
+        047. Sie sind keine Ableitung, die man sich sparen koennte: Eine
+        Bewertung gehoert zu genau einer Prognose und damit unveraenderlich zu
+        genau einem Wert und Horizont. Wer sie ueber den Verbund holt, laesst
+        die Datenbank bei jeder Frage neu herleiten, was seit dem Schreiben
+        feststeht -- und genau dieser Verbund kostete auf dem DataCell-Backend
+        14,1 Sekunden fuer sieben Zeilen.                                      */
+    public int AssetId { get; set; }
+    public int HorizonHours { get; set; }
 }
 
 /// <summary>

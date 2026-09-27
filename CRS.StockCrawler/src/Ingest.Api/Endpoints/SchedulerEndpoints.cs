@@ -34,8 +34,31 @@ public static class SchedulerEndpoints
                dauerte gemessen sieben Minuten; alles jenseits von zwei Stunden ist mit
                Sicherheit eine Leiche. */
             var d = factory.Dialekt;
-            var schritt = state.Busy
-                ? await (await factory.OpenAsync(ct)).QuerySingleOrDefaultAsync<Schritt>(
+
+            /*  Die Verbindung gehoert in ein `await using`, und hier fehlte es.
+
+                `await (await factory.OpenAsync(ct)).QuerySingleOrDefaultAsync(…)`
+                liest sich kompakt und gibt die Verbindung NIE zurueck — sie
+                bleibt dem Pool entzogen, bis der Finalisierer sie irgendwann
+                einsammelt. Die Zeile lief nur, solange `state.Busy` gilt, also
+                waehrend eines Laufs; und die Oberflaeche fragt diesen Endpunkt
+                im Fuenfsekundentakt. Ueber einen halbstuendigen Tageslauf sind
+                das rund dreihundertsechzig verlorene Verbindungen bei einem
+                Pool von hundert.
+
+                Das erklaert die Poolerschoepfung besser als alles andere: Sie
+                trat ausschliesslich waehrend der Laeufe auf. Die
+                Fehlermeldungen kamen aus `WerIstDasAsync` — dem HAEUFIGSTEN
+                Verbindungsnehmer, nicht dem Verursacher. **Wer den Stapel
+                liest, findet das Opfer.** Der Taeter steht nicht darin, weil er
+                gar nicht scheitert; er nimmt und gibt nicht zurueck.          */
+            Schritt? schritt = null;
+
+            if (state.Busy)
+            {
+                await using var conn = await factory.OpenAsync(ct);
+
+                schritt = await conn.QuerySingleOrDefaultAsync<Schritt>(
                     new CommandDefinition(
                         $"""
                         SELECT job_name AS Name, started_utc AS SeitUtc
@@ -43,8 +66,8 @@ public static class SchedulerEndpoints
                          WHERE finished_utc IS NULL
                            AND started_utc >= {d.PlusStunden("-2", d.Jetzt)}
                          ORDER BY started_utc DESC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
-                        """, cancellationToken: ct))
-                : null;
+                        """, cancellationToken: ct));
+            }
 
             var jetzt = DateTime.UtcNow;
 
