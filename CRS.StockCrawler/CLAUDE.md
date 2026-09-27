@@ -1397,6 +1397,86 @@ Aufwand zu Ergebnis**: 1,16 Milliarden Paare für 997 Zeilen. Wer nur die
 Gesamtdauer sieht, hält es für eine große Abfrage; wer die Trefferzahl daneben
 legt, sieht den Plan.
 
+**Ein Zwischenspeicher, dessen Schlüssel mitwandert, trifft nie.** Der erste
+Entwurf des Kursspeichers schlüsselte nach dem angefragten Zeitraum. Der
+kommt aber aus `jetzt − 12 Monate` und ist bei jedem Aufruf ein anderer —
+also jedes Mal ein neuer Schlüssel und nie ein Treffer, bei vollem
+Verwaltungsaufwand. Gehalten wird deshalb ab einer unteren Grenze und in C#
+geschnitten; dieselbe Überlegung beim Rückblicksverlauf und bei der
+Rückrechnungsspur. **Der Test dafür ist banal und wurde trotzdem zu spät
+gemacht**: zweimal dieselbe Anfrage, und die zweite muss schneller sein.
+
+**`QueryUnbufferedAsync` ist nicht sparsam, sondern langsam.** Ich hatte es
+gewählt, um bei der Treffsicherheit „den Speicher flach zu halten" — knapp
+tausend Zeilen. Gemessen über Npgsql gegen dasselbe Backend, 993 Zeilen:
+rohes ADO.NET 93–151 ms, `QueryAsync` gepuffert 68–85 ms,
+`QueryUnbufferedAsync` **2.108–2.151 ms**. Dapper zahlt je Zeile eine eigene
+asynchrone Fortsetzung. In der Kursansicht war das die gesamte Zeit der
+Treffsicherheit. Ungepuffert lohnt erst bei Mengen, die nicht in den Speicher
+passen — und dann ist die eigentliche Frage, warum man sie überhaupt holt.
+
+**Viele kleine Indexsuchen können schlechter sein als eine grosse Abfrage —
+und `psql` sagt das Gegenteil.** Die jüngste Prognose je Horizont über neun
+`FETCH NEXT 1`-Abfragen kostet über `psql` 3,5 bis 11,6 ms je Stück, über
+Npgsql aber **1.426 bis 1.947 ms zusammen**; eine einzige Abfrage über alle
+2.392 Prognosen des Wertes kostet 466 ms. `psql` verschickt einfache Abfragen
+mit Literalen, Npgsql verschickt Parse/Bind/Execute — auf diesem Backend
+kostet jede dieser Runden mehr als das Lesen von tausenden Zeilen. Die Regel
+„mit dem Treiber der Anwendung messen" stand an diesem Tag bereits in dieser
+Datei; ich bin trotzdem hineingelaufen, weil die `psql`-Zahl so überzeugend
+aussah.
+
+**Wer aus der Gesamtzeit schliesst, optimiert die falsche Stelle.** Ich habe
+das an einem Abend zweimal getan — erst die jüngsten Prognosen (waren es
+nicht), dann die Kursbars (waren es nur zum Teil). Drei Zeilen Protokoll mit
+den Phasenzeiten der Kursansicht (Bars, Prognose, Güte, Rückblick) haben
+beide Male auf Anhieb gezeigt, wo die Zeit wirklich lag. Sie stehen seither
+fest im Endpunkt.
+
+**Die Anwendung beenden, BEVOR übersetzt wird.** Läuft sie, kann MSBuild die
+DLLs nicht kopieren (`MSB3027`), meldet aber für den Übersetzungsschritt
+weiterhin „0 Errors" — wer nur danach greppt, sieht einen grünen Bau und
+misst anschliessend den alten Stand. Dreimal in einer Sitzung passiert, jedes
+Mal mit mehreren Minuten Fehlersuche an einer Änderung, die gar nicht lief.
+
+**ASP.NET wählt die Server-Speicherbereinigung, und das ist hier falsch.**
+Ein Heap je Kern und späte Sammlung sind für einen Dienst mit vielen
+gleichzeitigen Anfragen richtig; diese Anwendung hat einen Benutzer und hält
+Zwischenspeicher. Gemessen nach dem Vorwärmen von 318.240 Kursbars (rund
+38 MB echte Daten): **0,93 GB**, die auch in Ruhe nicht sanken. Mit
+`ServerGarbageCollection=false`: **0,14 GB** bei gleichem Inhalt.
+
+**Ein Zeitlimit ohne Einheit im Namen ist eine Falle mit Zündschnur.**
+`SqlBulkCopy.BulkCopyTimeout` zählt Sekunden, `NpgsqlCopyTextWriter.Timeout`
+zählt Millisekunden — beide bekamen in `Massenkopie` dieselbe Variable namens
+`zeitlimit`. Auf dem SQL Server war der Code damit richtig und der Fehler
+unsichtbar; auf dem DataCell-Backend lief der COPY-Schreiber mit 120
+Millisekunden statt 120 Sekunden, und ein COPY über 250 Kursbars braucht dort
+82 bis 197 ms. Ergebnis: **88 von 88 Werten scheiterten**, die jüngste
+Tagesbar stand drei Tage in der Vergangenheit, und die Meldung lautete
+„Timeout during reading attempt" — was nach Netzwerk aussieht. Dass
+vereinzelt Werte durchkamen, machte es schlimmer. Der Parameter heisst jetzt
+`zeitlimitSekunden`.
+
+**Eine fremde Schwäche wird mit ihrem Messdatum umgangen, sonst wird sie
+Architektur.** Drei Umgehungen in dieser Anwendung tragen ihre Messung im
+Kommentar: `GetManyAsync` fragt je Wert statt per `= ANY` (1.083 ms gegen
+176 ms), `GetAccuracyAsync` summiert in C# statt per `GROUP BY` (Faktor 40),
+`GetHistoryAsync` kommt ohne CTE und Fensterfunktion aus. Jede davon ist auf
+einer gewöhnlichen Datenbank die schlechtere Wahl. Ohne Datum weiss in einem
+halben Jahr niemand mehr, ob die Begründung noch gilt — genau das ist an
+dieser Stelle schon einmal passiert und wurde zurückgebaut.
+
+**Das EventMesh-DataCell-Backend zahlt je Zeile, die es über einen Index
+findet, nicht je gelesener Zeile.** Sequentiell liefert es 3,3 µs je Zeile;
+über einen Index sind es 60 µs, bei acht Spalten 832 µs — der Aufwand wächst
+mit Zeilen MAL Spalten, weil jede Zeile aus einzelnen Zellen zusammengesetzt
+wird. Eine Kursansicht holt genau so: ein paar hundert Zeilen über einen
+Index. Daraus folgt die ganze Bauform der Gegenmittel — Zwischenspeicher für
+alles, was sich nur bei einem Lauf ändert, und Vorwärmen im Hintergrund.
+Alle Zahlen und die offenen Punkte am Node stehen in
+[docs/VERGLEICH-SQLSERVER-MESHNODE.md](docs/VERGLEICH-SQLSERVER-MESHNODE.md).
+
 **Wer ein fremdes Backend misst, misst mit dem Treiber der Anwendung.** Ich habe
 über `psql` mit `PREPARE`/`EXECUTE` getestet — der Node kennt das nicht und
 antwortet mit `SELECT 0`, statt zu scheitern. Damit wurde *jede* Prüfung falsch

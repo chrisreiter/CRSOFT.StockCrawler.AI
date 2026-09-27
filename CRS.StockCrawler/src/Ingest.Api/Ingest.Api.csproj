@@ -4,6 +4,26 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+
+    <!--  Arbeitsplatz- statt Server-Speicherbereinigung.
+
+          ASP.NET waehlt von sich aus die Server-Variante: ein Heap je Kern,
+          spaete Sammlung, dafuer hoher Durchsatz. Das passt fuer einen Dienst
+          mit vielen gleichzeitigen Anfragen; diese Anwendung hat einen
+          Benutzer und haelt Zwischenspeicher.
+
+          Gemessen am 27.09.2026 nach dem Vorwaermen von 318.240 Kursbars
+          (rund 38 MB echte Daten): 0,93 GB belegter Arbeitsspeicher, der auch
+          nach dreissig Sekunden Ruhe nicht sank. Das ist weit ueberwiegend
+          nicht gesammelter Muell aus dem Vorwaermlauf — der liest je Wert
+          2.392 Prognosen, um neun zu behalten.
+
+          Die Auflage lautet, nie mehr Arbeitsspeicher zu belegen als der
+          abgeloeste SQL Server (gemessen 2,10 GB). Eingehalten waere sie auch
+          vorher gewesen; aber "unter der Grenze" ist kein Grund, das
+          Zwanzigfache der Nutzdaten zu halten.                              -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
   </PropertyGroup>
 
   <ItemGroup>

@@ -158,7 +158,7 @@ public sealed class Prognosespeicher
         (`SchreibeAsync`), und der ist selten. Ein Eintrag ist damit lange
         gueltig.                                                              */
     private readonly ConcurrentDictionary<(int Wert, int Horizont, string Intervall), Verlaufseintrag<TrackRow>> _spur = new();
-    private const int SpurBudget = 400_000;
+    private const int SpurBudget = 1_000_000;
     private int _spurZeilen;
 
     public TrackRow[]? Spur(int wert, int horizont, string intervall)

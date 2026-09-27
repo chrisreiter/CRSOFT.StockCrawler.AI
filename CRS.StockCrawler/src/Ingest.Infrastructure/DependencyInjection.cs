@@ -73,7 +73,7 @@ public static class DependencyInjection
             Regler. 1,5 Millionen Bars sind rund 180 MB und damit ein Bruchteil
             dessen, was der abgeloeste SQL Server allein fuer sich belegte
             (gemessen 2,10 GB gegen 0,44 GB des Node).                        */
-        services.AddSingleton(new Kursspeicher(1_500_000));
+        services.AddSingleton(new Kursspeicher(2_500_000));
 
         /*  Der Prognosespeicher braucht keine Obergrenze: je Wert neun
             Prognosen und eine Handvoll Guetezeilen, bei 700 Werten also
