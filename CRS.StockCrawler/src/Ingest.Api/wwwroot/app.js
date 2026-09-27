@@ -4858,7 +4858,11 @@ async function ladeCurveLinks() {
   const l = d.verknuepfungen || [];
 
   if (!l.length) {
-    $('#cv-links').innerHTML = '<p class="hint">Keine Verknüpfung über der Schwelle.</p>';
+    /*  „Nichts gefunden" und „nicht geantwortet" sind zwei verschiedene
+        Aussagen, und die zweite darf nicht als die erste erscheinen.        */
+    $('#cv-links').innerHTML = d.stoerung
+      ? '<p class="hint warn">' + esc(d.stoerung) + '</p>'
+      : '<p class="hint">Keine Verknüpfung über der Schwelle.</p>';
     return;
   }
 

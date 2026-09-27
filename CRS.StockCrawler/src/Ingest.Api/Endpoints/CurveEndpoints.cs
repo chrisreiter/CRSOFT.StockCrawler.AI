@@ -146,15 +146,42 @@ public static class CurveEndpoints
             }));
 
         /* Die Verknüpfungen zwischen den Werten. */
-        g.MapGet("/links", async (ICurveDiscussionService svc, int? lauf, int limit = 100,
-                                  int? assetId = null,
+        g.MapGet("/links", async (ICurveDiscussionService svc, ILoggerFactory protokoll,
+                                  int? lauf, int limit = 100, int? assetId = null,
                                   CancellationToken ct = default) =>
         {
-            var l = await svc.LinksAsync(lauf, limit, assetId, ct);
+            /*  Eine Datenbank, die nicht antwortet, ist kein Programmfehler.
+
+                Die Abfrage sucht die stärksten Verknüpfungen eines Laufs —
+                ein Top-N mit Sortierung über rund 243.000 Zeilen. Auf dem
+                EventMesh-DataCell-Backend lief das am 27.09.2026 nach 33
+                Sekunden in den Abbruch, und die Ansicht zeigte einen roten
+                Serverfehler mit Aufrufliste. Das ist die falsche Auskunft: Der
+                Fehler liegt nicht in der Anwendung, und der Betrachter kann
+                nichts daran reparieren.
+
+                Jetzt steht dort, was wirklich los ist — und die übrige Seite
+                bleibt bedienbar.                                              */
+            IReadOnlyList<dynamic> l;
+            string? stoerung = null;
+
+            try
+            {
+                l = await svc.LinksAsync(lauf, limit, assetId, ct);
+            }
+            catch (Exception ex)
+            {
+                protokoll.CreateLogger("Curve").LogWarning(ex, "Verknüpfungen nicht abrufbar");
+                l = [];
+                stoerung = "Die Datenbank hat die Verknüpfungen nicht in der vorgesehenen "
+                         + "Zeit geliefert. Die Liste bleibt deshalb leer — das ist keine "
+                         + "Aussage über die Daten, sondern über die Abfrage.";
+            }
 
             return Results.Ok(new
             {
                 verknuepfungen = l,
+                stoerung,
 
                 hinweis = "Der Faktor (lift) ist beobachtet geteilt durch erwartet. Ohne diese "
                         + "Normierung gewännen immer die Werte mit den meisten Ereignissen. "
