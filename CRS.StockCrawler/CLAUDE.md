@@ -1342,6 +1342,33 @@ liesse sie sich nur aus dem eigenen Bestand — und damit hätte man den
 bleibt**; deshalb läuft der Sammler im Tageslauf vor dem Autopiloten. Erster
 gemessener Vorlauf: **9,0 Tage** zwischen Ankündigung und erwartetem Start.
 
+**Ein Backend, das nicht abbricht, sondern falsch antwortet, ist die
+schwierigste Sorte.** Der Umzug auf EventMesh DataCell am 27.09.2026 hat das
+vorgeführt: `expires_utc = jetzt + 14 Tage` speicherte `jetzt`, ohne Fehler und
+ohne Warnung. Da der Sitzungslesevorgang `expires_utc > jetzt` verlangt, war
+jede Sitzung im Moment ihrer Entstehung abgelaufen — der Login antwortete mit
+`200` und der richtigen Rolle, die nächste Anfrage kannte niemanden, und die
+Oberfläche fiel wortlos aufs Formular zurück. **Es sah aus wie ein falsches
+Kennwort und war keines.** Dieselbe Familie: `CASE WHEN spalte > jetzt` nahm bei
+`spalte IS NULL` den `THEN`-Zweig und zeigte das einzige Verwalterkonto
+dauerhaft als gesperrt; `COUNT(DISTINCT x)` ignorierte `DISTINCT` und lieferte
+die Zeilenzahl. Ein Abbruch ist ein Geschenk — er zeigt auf die Stelle. Eine
+falsche Antwort lässt den Suchenden dort graben, wo nichts ist. Alle Einzelheiten:
+[docs/EVENTMESH-DATACELL-BERICHT-27-09.md](docs/EVENTMESH-DATACELL-BERICHT-27-09.md).
+
+**Wer ein fremdes Backend misst, misst mit dem Treiber der Anwendung.** Ich habe
+über `psql` mit `PREPARE`/`EXECUTE` getestet — der Node kennt das nicht und
+antwortet mit `SELECT 0`, statt zu scheitern. Damit wurde *jede* Prüfung falsch
+negativ, und ich habe einen Befund gemeldet, den es nicht gab. Über echtes
+Npgsql sah dieselbe Anweisung völlig anders aus.
+
+**Was in der Datenbank gerechnet wird, hängt an ihren Zusagen; was in C#
+gerechnet wird, nicht.** Die Lehre aus demselben Tag, und sie gilt weit über
+dieses Backend hinaus: Zeitpunkte, Fristen und Fallunterscheidungen über den
+bestehenden Zeilenwert (`COALESCE(@neu, spalte)`, `CASE … ELSE spalte END`)
+gehören in den Code, nicht ins SQL. Dort sind sie nachweisbar richtig, auf jedem
+Backend gleich, und sie kosten nichts.
+
 **Dapper kennt `DateOnly` weder als Parameter noch als Ergebnis.** Als Parameter
 „cannot be used as a parameter value", beim Lesen verlangt es einen Konstruktor
 mit `DateTime`. Dieselbe Klasse Fehler wie bei den ValueTuples: Der Typ, der im
