@@ -246,7 +246,21 @@ public static class SeriesEndpoints
                bequeme Abkürzung erhalten. */
             var (fromUtc, toUtc) = TimeRange.Resolve(from, to, months);
 
+            /*  Phasenzeiten im Protokoll.
+
+                Diese Ansicht hat fuenf Abschnitte, die sich gegenseitig nicht
+                ansehen lassen: Kursbars, Prognosen, Treffsicherheit, Rueckblick
+                und das Zusammenbauen des Rasters. Beim Umzug auf das
+                DataCell-Backend habe ich zweimal die falsche Stelle optimiert,
+                weil ich aus der Gesamtzeit geschlossen habe, statt zu messen --
+                einmal die juengsten Prognosen (die es nicht waren), einmal die
+                Kursbars (die es nur zum Teil waren). Drei Zeilen Protokoll
+                haetten beide Male gereicht.                                    */
+            var uhr = System.Diagnostics.Stopwatch.StartNew();
+            long tBars = 0, tPrognose = 0, tGuete = 0, tRueckblick = 0;
+
             var raw = await bars.GetManyAsync(assetIds, interval, fromUtc, toUtc, ct);
+            tBars = uhr.ElapsedMilliseconds;
 
             if (raw.Count == 0)
             {
@@ -328,6 +342,7 @@ public static class SeriesEndpoints
                echte Bars gibt, bleiben außen vor: dort gilt der Ist-Kurs. */
             var fcByAsset = new Dictionary<int, List<Core.Models.Forecast>>();
             var futureStamps = new SortedSet<DateTime>();
+            var uhrP = System.Diagnostics.Stopwatch.StartNew();
 
             if (forecast)
             {
@@ -400,6 +415,8 @@ public static class SeriesEndpoints
                 }
             }
 
+            tPrognose = uhrP.ElapsedMilliseconds;
+
             var asOfDates = ParseDates(asOf);
             var fullGrid = grid.Concat(futureStamps).ToArray();
             var accuracy = new Dictionary<int, Dictionary<int, (int N, double Mape, double Hit)>>();
@@ -464,6 +481,7 @@ public static class SeriesEndpoints
                             Lesetimeout. Die Kursansicht lieferte daraufhin 500,
                             sobald jemand die Prognose einblendete — wegen einer
                             Zahl, die nur danebensteht.                          */
+                        var uhrG = System.Diagnostics.Stopwatch.StartNew();
                         try
                         {
                             acc = (await forecasts.GetAccuracyAsync(id, ct))
@@ -475,6 +493,7 @@ public static class SeriesEndpoints
                                      .LogWarning(ex, "Treffsicherheit für {Id} nicht abrufbar", id);
                             acc = [];
                         }
+                        finally { tGuete += uhrG.ElapsedMilliseconds; }
 
                         accuracy[id] = acc;
                     }
@@ -505,6 +524,7 @@ public static class SeriesEndpoints
                     }
                 }
 
+                var uhrR = System.Diagnostics.Stopwatch.StartNew();
                 List<ForecastTrack>? pastTracks = null;
 
                 if (forecastPast && grid.Length > 0)
@@ -649,6 +669,8 @@ public static class SeriesEndpoints
                     if (pastTracks.Count == 0) pastTracks = null;
                 }
 
+                tRueckblick += uhrR.ElapsedMilliseconds;
+
                 List<AsOfForecast>? asOfList = null;
 
                 if (asOfDates.Count > 0 && grid.Length > 0)
@@ -710,6 +732,11 @@ public static class SeriesEndpoints
 
             var ts = fullGrid.Select(t => new DateTimeOffset(DateTime.SpecifyKind(t, DateTimeKind.Utc))
                                           .ToUnixTimeMilliseconds()).ToArray();
+
+            Serilog.Log.Information(
+                "Kursansicht {Werte} Werte {Intervall}: Bars {Bars} ms, Prognose {Prognose} ms, "
+                + "Guete {Guete} ms, Rueckblick {Rueckblick} ms, gesamt {Gesamt} ms",
+                assetIds.Length, interval, tBars, tPrognose, tGuete, tRueckblick, uhr.ElapsedMilliseconds);
 
             return Results.Ok(new SeriesResponse(interval, months, rebase, fromUtc, toUtc, ts, series,
                 skipped.Count > 0 ? skipped : null, ausgeduenntVon));

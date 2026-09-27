@@ -44,7 +44,13 @@ public sealed class ForecastTrackRepository : IForecastTrackRepository
     private readonly ISqlConnectionFactory _factory;
     private SqlDialekt d => _factory.Dialekt;
 
-    public ForecastTrackRepository(ISqlConnectionFactory factory) => _factory = factory;
+    private readonly Prognosespeicher? _speicher;
+
+    public ForecastTrackRepository(ISqlConnectionFactory factory, Prognosespeicher? speicher = null)
+    {
+        _factory = factory;
+        _speicher = speicher;
+    }
 
     public async Task<int> BulkWriteAsync(IReadOnlyList<TrackRow> rows, string runLabel,
                                           CancellationToken ct = default)
@@ -127,11 +133,20 @@ public sealed class ForecastTrackRepository : IForecastTrackRepository
             DROP TABLE {d.Temp(stufe)};
             """, commandTimeout: 900, cancellationToken: ct));
 
+        /*  Geschrieben heisst verworfen -- fuer alle Werte, die in diesem
+            Lauf vorkamen. Der Rueckrechnungslauf schreibt selten, aber wenn,
+            dann viel.                                                       */
+        foreach (var wert in rows.Select(r => r.AssetId).Distinct())
+            _speicher?.Verwerfe(wert);
+
         return affected;
     }
 
     public async Task<int> ClearAsync(string? runLabel, CancellationToken ct = default)
     {
+        // Geleert heisst verworfen -- welche Werte betroffen sind, ist nicht bekannt.
+        _speicher?.VerwerfeAlles();
+
         await using var conn = await _factory.OpenAsync(ct);
 
         return await conn.ExecuteAsync(new CommandDefinition(
@@ -180,23 +195,35 @@ public sealed class ForecastTrackRepository : IForecastTrackRepository
         int assetId, int horizonHours, string intervalCode,
         DateTime fromUtc, DateTime toUtc, CancellationToken ct = default)
     {
-        await using var conn = await _factory.OpenAsync(ct);
+        /*  Unbefenstert gehalten, in C# geschnitten. Das Fenster spart auf
+            diesem Backend fast nichts (gemessen 293 bis 847 ms im Fenster
+            gegen 1.146 ms unbefenstert), verhindert aber jeden Treffer im
+            Speicher -- es wandert mit jedem Tag.                             */
+        var gehalten = _speicher?.Spur(assetId, horizonHours, intervalCode);
 
-        var rows = await conn.QueryAsync<TrackRow>(new CommandDefinition("""
-            SELECT asset_id AS AssetId, horizon_hours AS HorizonHours,
-                   interval_code AS IntervalCode, target_ts_utc AS TargetTsUtc,
-                   made_at_utc AS MadeAtUtc, base_close AS BaseClose,
-                   predicted_close AS PredictedClose, actual_close AS ActualClose,
-                   abs_pct_error AS AbsPctError, direction_correct AS DirectionCorrect,
-                   confidence AS Confidence
-              FROM dbo.forecast_track
-             WHERE asset_id = @assetId AND horizon_hours = @horizonHours
-               AND interval_code = @intervalCode
-               AND target_ts_utc >= @fromUtc AND target_ts_utc <= @toUtc
-             ORDER BY target_ts_utc
-            """, new { assetId, horizonHours, intervalCode, fromUtc, toUtc },
-            commandTimeout: 120, cancellationToken: ct));
+        if (gehalten is null)
+        {
+            await using var conn0 = await _factory.OpenAsync(ct);
 
-        return rows.ToList();
+            gehalten = (await conn0.QueryAsync<TrackRow>(new CommandDefinition("""
+                SELECT asset_id AS AssetId, horizon_hours AS HorizonHours,
+                       interval_code AS IntervalCode, target_ts_utc AS TargetTsUtc,
+                       made_at_utc AS MadeAtUtc, base_close AS BaseClose,
+                       predicted_close AS PredictedClose, actual_close AS ActualClose,
+                       abs_pct_error AS AbsPctError, direction_correct AS DirectionCorrect,
+                       confidence AS Confidence
+                  FROM dbo.forecast_track
+                 WHERE asset_id = @assetId AND horizon_hours = @horizonHours
+                   AND interval_code = @intervalCode
+                 ORDER BY target_ts_utc
+                """, new { assetId, horizonHours, intervalCode },
+                commandTimeout: 120, cancellationToken: ct))).ToArray();
+
+            _speicher?.LegeSpur(assetId, horizonHours, intervalCode, gehalten);
+        }
+
+        return gehalten
+            .Where(r => r.TargetTsUtc >= fromUtc && r.TargetTsUtc <= toUtc)
+            .ToList();
     }
 }
