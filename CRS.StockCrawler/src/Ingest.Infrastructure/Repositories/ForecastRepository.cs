@@ -204,20 +204,38 @@ public sealed class ForecastRepository : IForecastRepository
     {
         await using var conn = await _factory.OpenAsync(ct);
 
-        var rows = await conn.QueryAsync<Forecast>(new CommandDefinition("""
-            WITH ranked AS (
-              SELECT forecast_id AS ForecastId, asset_id AS AssetId, horizon_hours AS HorizonHours,
-                     made_at_utc AS MadeAtUtc, target_ts_utc AS TargetTsUtc, base_close AS BaseClose,
-                     predicted_close AS PredictedClose, predicted_return AS PredictedReturn,
-                     confidence AS Confidence, model_version AS ModelVersion,
-                     ROW_NUMBER() OVER (PARTITION BY horizon_hours ORDER BY made_at_utc DESC) AS rn
-                FROM dbo.forecast
-               WHERE asset_id = @assetId
-            )
-            SELECT * FROM ranked WHERE rn = 1 ORDER BY HorizonHours
-            """, new { assetId }, cancellationToken: ct));
+        /*  Ohne CTE und ohne Fensterfunktion: lesen, dann in C# auswählen.
 
-        return rows.ToList();
+            Hier stand ein `WITH ranked AS (… ROW_NUMBER() OVER (PARTITION BY
+            horizon_hours ORDER BY made_at_utc DESC) … WHERE asset_id =
+            @assetId)` — die Lehrbuchform für „die jüngste je Horizont".
+
+            Das EventMesh-DataCell-Backend zählt eine Bedingung INNERHALB eines
+            CTE nicht als Einschränkung der Tabelle. Es wies die Abfrage am
+            27.09.2026 deshalb ab: „Komplexe Query über die grosse Tabelle
+            'forecast' (1.264.033 Zeilen) ohne einschränkendes WHERE" — obwohl
+            genau dort ein `WHERE asset_id = @assetId` steht. In der Oberfläche
+            erschien das als 500 beim Einblenden der Prognose.
+
+            Ein Wert hat über alle Horizonte hinweg einige hundert Prognosen.
+            Die zu lesen und die jüngste je Horizont hier zu wählen, kostet
+            nichts — und die Bedingung steht dabei dort, wo jede Datenbank sie
+            sieht.                                                             */
+        var rows = await conn.QueryAsync<Forecast>(new CommandDefinition("""
+            SELECT forecast_id AS ForecastId, asset_id AS AssetId,
+                   horizon_hours AS HorizonHours, made_at_utc AS MadeAtUtc,
+                   target_ts_utc AS TargetTsUtc, base_close AS BaseClose,
+                   predicted_close AS PredictedClose, predicted_return AS PredictedReturn,
+                   confidence AS Confidence, model_version AS ModelVersion
+              FROM dbo.forecast
+             WHERE asset_id = @assetId
+            """, new { assetId }, commandTimeout: 60, cancellationToken: ct));
+
+        return rows
+            .GroupBy(f => f.HorizonHours)
+            .Select(g => g.OrderByDescending(f => f.MadeAtUtc).First())
+            .OrderBy(f => f.HorizonHours)
+            .ToList();
     }
 
     public async Task<IReadOnlyList<ForecastVsActual>> GetHistoryAsync(
@@ -309,17 +327,39 @@ public sealed class ForecastRepository : IForecastRepository
     {
         await using var conn = await _factory.OpenAsync(ct);
 
+        /*  Der Wertefilter steht nur drin, wenn einer gemeint ist.
+
+            Hier stand `WHERE (f.asset_id = @assetId OR @assetId IS NULL)` —
+            derselbe Sammelfilter wie an drei anderen Stellen, die ich heute
+            schon aufgelöst habe. Er zwingt den Planer zu einem Plan, der für
+            beide Fälle gilt, also zum vollen Durchlauf über den Verbund von
+            1,26 Millionen Prognosen mit 484.000 Bewertungen.
+
+            Das EventMesh-DataCell-Backend wies ihn am 27.09.2026 rundheraus
+            ab („Komplexe Query über die grosse Tabelle 'forecast' … ohne
+            einschränkendes WHERE"), und die Kursansicht lieferte 500, sobald
+            jemand die Prognose einblendete. Mit dem Wert im WHERE bleibt von
+            1,26 Millionen Zeilen eine Handvoll übrig.
+
+            Die Reihenfolge im FROM ist dabei nicht gleichgültig: Stand
+            `forecast_score` vorn, sah der Node `forecast` als unbeschränkt
+            verbundene Tabelle und wies weiter ab, obwohl die Bedingung im
+            WHERE stand. Die eingeschränkte Tabelle gehört nach vorn — was
+            ohnehin die richtige Leserichtung ist: erst die Prognosen dieses
+            Wertes, dann ihre Bewertungen.                                     */
+        var wertefilter = assetId is not null ? "WHERE f.asset_id = @assetId" : "";
+
         var rows = await conn.QueryAsync<(int, int, double, double)>(new CommandDefinition($"""
             SELECT f.horizon_hours,
                    CAST(COUNT(*) AS INT)                                              AS n,
                    AVG(s.abs_pct_error)                                  AS mape,
                    AVG(CASE WHEN s.direction_correct = {d.Wahr} THEN 1.0 ELSE 0.0 END) AS hit_rate
-              FROM dbo.forecast_score s
-              JOIN dbo.forecast f ON f.forecast_id = s.forecast_id
-             WHERE (f.asset_id = @assetId OR @assetId IS NULL)
+              FROM dbo.forecast f
+              JOIN dbo.forecast_score s ON s.forecast_id = f.forecast_id
+             {wertefilter}
              GROUP BY f.horizon_hours
              ORDER BY f.horizon_hours
-            """, new { assetId }, cancellationToken: ct));
+            """, new { assetId }, commandTimeout: 60, cancellationToken: ct));
 
         return rows.ToList();
     }

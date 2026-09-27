@@ -222,8 +222,11 @@ public static class SeriesEndpoints
                              bool forecastPast = false, string? fcHorizons = null,
                              string? asOf = null,
                              string? gewichte = null,
+                             ILoggerFactory? protokoll = null,
                              CancellationToken ct = default) =>
         {
+            protokoll ??= LoggerFactory.Create(b => { });
+
             if (!BarInterval.IsValid(interval))
                 return Results.BadRequest(new { error = $"Intervall muss 1h oder 1d sein, war: {interval}" });
 
@@ -451,8 +454,28 @@ public static class SeriesEndpoints
 
                     if (!accuracy.TryGetValue(id, out var acc))
                     {
-                        acc = (await forecasts.GetAccuracyAsync(id, ct))
-                            .ToDictionary(a => a.HorizonHours, a => (a.N, a.Mape, a.HitRate));
+                        /*  Die Treffsicherheit beschriftet die Prognoselinie, sie
+                            trägt sie nicht. Bleibt sie aus, fehlt eine Angabe am
+                            Rand — das Diagramm selbst steht trotzdem.
+
+                            Vorher riss sie es mit: Ihre Abfrage verbindet 1,26
+                            Millionen Prognosen mit 484.000 Bewertungen, und auf
+                            dem DataCell-Backend lief sie am 27.09.2026 in den
+                            Lesetimeout. Die Kursansicht lieferte daraufhin 500,
+                            sobald jemand die Prognose einblendete — wegen einer
+                            Zahl, die nur danebensteht.                          */
+                        try
+                        {
+                            acc = (await forecasts.GetAccuracyAsync(id, ct))
+                                .ToDictionary(a => a.HorizonHours, a => (a.N, a.Mape, a.HitRate));
+                        }
+                        catch (Exception ex)
+                        {
+                            protokoll.CreateLogger("Series")
+                                     .LogWarning(ex, "Treffsicherheit für {Id} nicht abrufbar", id);
+                            acc = [];
+                        }
+
                         accuracy[id] = acc;
                     }
 
