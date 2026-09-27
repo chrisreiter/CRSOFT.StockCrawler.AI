@@ -144,7 +144,7 @@ public static class HealthEndpoints
                 langsamer: Der Index liegt ohnehin auf (interval_code, ...),
                 und zwei Bereichssuchen kosten weniger als ein voller
                 Durchlauf.                                                      */
-            var barStats = new List<(string Interval, long Bars, int Assets,
+            var barStats = new List<(string Interval, long? Bars, int Assets,
                                      DateTime? Oldest, DateTime? Newest)>();
 
             foreach (var iv in BarInterval.All)
@@ -182,7 +182,7 @@ public static class HealthEndpoints
 
                 var anzahl = await ZaehleAsync("dbo.price_bar", $"interval_code = '{iv}'");
 
-                barStats.Add((iv, anzahl ?? 0, 0, rand.Value.Oldest, rand.Value.Newest));
+                barStats.Add((iv, anzahl, 0, rand.Value.Oldest, rand.Value.Newest));
             }
 
             /*  Offene Prognosen werden gerechnet, nicht verbunden.
