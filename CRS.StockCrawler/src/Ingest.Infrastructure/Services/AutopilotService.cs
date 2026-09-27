@@ -932,11 +932,12 @@ public sealed class AutopilotService(
 
         await conn.ExecuteAsync(new CommandDefinition($"""
             UPDATE dbo.autopilot_lauf
-               SET beendet_utc = {d.Jetzt}, geprueft = @gepr, geschaefte = @gesch,
+               SET beendet_utc = @jetzt, geprueft = @gepr, geschaefte = @gesch,
                    gebuehren = @geb, vermoegen = @verm, notiz = @notiz
              WHERE lauf_id = @id
             """,
             new { id = laufId, gepr = anwaerter.Count, gesch = geschaefte,
+                  jetzt = DateTime.UtcNow,
                   geb = gebuehren, verm = endstand,
                   notiz = notiz.Length > 0 ? notiz : null },
             cancellationToken: ct));

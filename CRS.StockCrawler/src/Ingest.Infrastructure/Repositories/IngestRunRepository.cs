@@ -13,14 +13,55 @@ public sealed class IngestRunRepository : IIngestRunRepository
 
     public IngestRunRepository(ISqlConnectionFactory factory) => _factory = factory;
 
+    /*  Der Startzeitpunkt wird GESCHRIEBEN, nicht dem Spaltenstandard
+        überlassen — und `finished_utc` unten genauso.
+
+        Zwei verschiedene Defekte, beide am 28.09.2026 an einer Probezeile
+        nachgestellt:
+
+          INSERT … (job_name, provider) VALUES (…)          -- Spaltenstandard
+          UPDATE … SET finished_utc = now() at time zone 'utc'
+            → started_utc = NULL,  finished_utc = 00:42:55
+
+          INSERT … (job_name, provider, started_utc) VALUES (…, @jetzt)
+          UPDATE … SET finished_utc = @jetzt
+            → started_utc = 22:42:55,  finished_utc = 22:42:55
+
+        Erstens greift der Spaltenstandard auf dem EventMesh-DataCell-Backend
+        beim INSERT nicht — `started_utc` bleibt leer, ohne Fehler und ohne
+        Meldung. Zweitens liefert `now() at time zone 'utc'` dort die
+        ORTSZEIT: 00:42:55 statt 22:42:55, zwei Stunden in der Zukunft. Ein
+        so gesetzter Zeitstempel, verglichen mit einem aus C# geschriebenen,
+        ist damit systematisch falsch — und zwar in die gefährlichere
+        Richtung, denn er sieht neuer aus, als er ist.
+
+        Die Folge des ersten Defekts war teuer und sah nach etwas ganz anderem
+        aus. `NachholenAsync` entscheidet über `MAX(started_utc) … AND
+        finished_utc IS NOT NULL`, ob ein Tageslauf versäumt wurde. Ohne
+        `started_utc` findet es nie einen erledigten Lauf und holt bei JEDEM
+        Start nach — an diesem Abend bei jedem einzelnen Neustart ein Lauf über
+        646 Werte und 35 Minuten. Ich habe das stundenlang für richtiges
+        Verhalten gehalten, weil die Meldung „Tages- und Stundenlauf versäumt"
+        ja stimmte.
+
+        Dieselbe Familie wie der Sitzungsfehler vom Vortag, wo `expires_utc =
+        jetzt + 14 Tage` still zu `jetzt` wurde und damit jede Anmeldung im
+        Moment ihrer Entstehung ablief. Und dieselbe Lehre, die seither in
+        CLAUDE.md steht: Was in C# gerechnet wird, hängt an keiner Zusage der
+        Datenbank.                                                             */
     public async Task<long> StartAsync(string jobName, ProviderId? provider, CancellationToken ct = default)
     {
         await using var conn = await _factory.OpenAsync(ct);
 
         return await conn.ExecuteScalarAsync<long>(new CommandDefinition($"""
-            INSERT INTO dbo.ingest_run (job_name, provider)
-            {d.RueckgabeVor("run_id")} VALUES (@jobName, @provider) {d.RueckgabeNach("run_id")}
-            """, new { jobName, provider = provider.HasValue ? (byte?)provider.Value : null },
+            INSERT INTO dbo.ingest_run (job_name, provider, started_utc)
+            {d.RueckgabeVor("run_id")} VALUES (@jobName, @provider, @jetzt) {d.RueckgabeNach("run_id")}
+            """, new
+            {
+                jobName,
+                provider = provider.HasValue ? (byte?)provider.Value : null,
+                jetzt = DateTime.UtcNow,
+            },
             cancellationToken: ct));
     }
 
@@ -28,15 +69,20 @@ public sealed class IngestRunRepository : IIngestRunRepository
     {
         await using var conn = await _factory.OpenAsync(ct);
 
-        await conn.ExecuteAsync(new CommandDefinition($"""
+        await conn.ExecuteAsync(new CommandDefinition("""
             UPDATE dbo.ingest_run
-               SET finished_utc = {d.Jetzt},
+               SET finished_utc = @jetzt,
                    ok_count = @ok, err_count = @err,
                    rows_written = @rows, note = @note
              WHERE run_id = @runId
             """,
             // Note ist auf 4000 Zeichen begrenzt; lange Fehlerlisten abschneiden.
-            new { runId, ok, err, rows, note = note?.Length > 3900 ? note[..3900] + "..." : note },
+            new
+            {
+                runId, ok, err, rows,
+                jetzt = DateTime.UtcNow,
+                note = note?.Length > 3900 ? note[..3900] + "..." : note,
+            },
             cancellationToken: ct));
     }
 

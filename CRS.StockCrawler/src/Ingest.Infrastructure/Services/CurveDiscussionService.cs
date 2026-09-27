@@ -216,11 +216,11 @@ public sealed class CurveDiscussionService(
         await conn.ExecuteAsync(new CommandDefinition(
             $"""
             UPDATE dbo.curve_run
-               SET finished_utc = {d.Jetzt},
+               SET finished_utc = @jetzt,
                    assets = @a, events = @e, note = @n
              WHERE run_id = @id;
             """,
-            new { a = used, e = count, n = note, id = runId }, cancellationToken: ct));
+            new { a = used, e = count, n = note, id = runId, jetzt = DateTime.UtcNow }, cancellationToken: ct));
 
         return new CurveRunResult(runId, used, count, links.Count, sw.Elapsed, note);
     }

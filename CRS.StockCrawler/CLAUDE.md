@@ -1397,6 +1397,35 @@ Aufwand zu Ergebnis**: 1,16 Milliarden Paare für 997 Zeilen. Wer nur die
 Gesamtdauer sieht, hält es für eine große Abfrage; wer die Trefferzahl daneben
 legt, sieht den Plan.
 
+**Ein Spaltenstandard ist eine Zusage der Datenbank — und auf dem
+DataCell-Backend greift er beim INSERT nicht.** `dbo.ingest_run.started_utc`
+trägt in beiden Schemata ein `DEFAULT` auf die aktuelle Zeit. Gemessen am
+28.09.2026 an einer Probezeile: `started_utc` bleibt **NULL**, ohne Fehler und
+ohne Meldung. Die Folge sah nach etwas ganz anderem aus: `NachholenAsync`
+entscheidet über `MAX(started_utc) … AND finished_utc IS NOT NULL`, ob ein
+Tageslauf versäumt wurde — ohne Zeitstempel findet es nie einen erledigten Lauf
+und holt bei JEDEM Start nach. An einem Abend waren das bei jedem einzelnen
+Neustart 35 Minuten Import über 646 Werte, und ich habe es stundenlang für
+richtiges Verhalten gehalten, weil die Meldung „Tages- und Stundenlauf
+versäumt" ja stimmte.
+
+**Und `now() at time zone 'utc'` liefert dort die ORTSZEIT.** Dieselbe Probe:
+`finished_utc = 00:42:55` statt `22:42:55`. Zwei Stunden in der Zukunft — und
+damit in die gefährlichere Richtung, denn ein solcher Zeitstempel sieht neuer
+aus, als er ist. Wer ihn gegen einen aus C# geschriebenen vergleicht, bekommt
+systematisch das falsche Ergebnis. Über zwanzig Stellen der Anwendung setzen
+`{d.Jetzt}` in einem UPDATE; die fünf, an denen eine Entscheidung daran hängt
+(`finished_utc`/`beendet_utc` in `ingest_run`, `curve_run`, `learning_epoch`,
+`freq_run`, `housekeeping_lauf`, `autopilot_lauf`), binden den Zeitpunkt
+inzwischen aus C#. Die übrigen sind `updated_utc`-Felder, die niemand liest.
+
+Beides ist dieselbe Familie wie der Sitzungsfehler (`expires_utc = jetzt + 14
+Tage` wurde still zu `jetzt`) und dieselbe Lehre, nur eine Stufe allgemeiner:
+**Nicht nur berechnete Ausdrücke gehören in den Code, sondern auch alles, was
+auf einer Zusage des Schemas beruht.** Ein `DEFAULT`, ein `CHECK`, ein
+`ON DELETE CASCADE` — jede dieser Zusagen ist ein Versprechen, das ein fremdes
+Backend halten kann oder nicht, und das Nichthalten ist lautlos.
+
 **Ein Zwischenspeicher, dessen Schlüssel mitwandert, trifft nie.** Der erste
 Entwurf des Kursspeichers schlüsselte nach dem angefragten Zeitraum. Der
 kommt aber aus `jetzt − 12 Monate` und ist bei jedem Aufruf ein anderer —

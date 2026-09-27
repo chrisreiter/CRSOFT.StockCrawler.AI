@@ -163,12 +163,13 @@ public sealed class HousekeepingService(
 
         await conn.ExecuteAsync(new CommandDefinition($"""
             UPDATE dbo.housekeeping_lauf
-               SET beendet_utc = {d.Jetzt}, regeln = @regeln, zeilen = @zeilen,
+               SET beendet_utc = @jetzt, regeln = @regeln, zeilen = @zeilen,
                    dauer_s = @dauer, note = @note
              WHERE lauf_id = @laufId
             """, new
             {
                 laufId, regeln = ergebnisse.Count(e => !e.Abgeschaltet), zeilen = gesamt,
+                jetzt = DateTime.UtcNow,
                 dauer = Math.Round(sw.Elapsed.TotalSeconds, 1), note
             }, cancellationToken: ct));
 
