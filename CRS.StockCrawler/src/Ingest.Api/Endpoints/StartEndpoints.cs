@@ -28,7 +28,20 @@ namespace Ingest.Api.Endpoints;
 public static class StartEndpoints
 {
     private static readonly ConcurrentDictionary<string, (DateTime Bis, object Wert)> Cache = new();
-    private static readonly TimeSpan Frist = TimeSpan.FromSeconds(8);
+    /*  Frist je Kachel.
+
+        Acht Sekunden waren gerechnet für eine Datenbank, die eine einzelne
+        Abfrage in Millisekunden beantwortet. Das EventMesh-DataCell-Backend
+        braucht für die Bereichsform rund 1,4 Sekunden allein — und acht
+        Kacheln fragen gleichzeitig, sodass sich das unter der Gleichzeitigkeit
+        vervielfacht. Am 27.09.2026 liefen deshalb fünf von acht Kacheln in
+        ihre Frist, obwohl jede einzelne Abfrage für sich schnell genug war.
+
+        Zwanzig Sekunden sind vertretbar, weil das Ergebnis fünf Minuten
+        gemerkt wird: Den Preis zahlt nur der erste Aufruf nach Ablauf, und er
+        zahlt ihn für alle. Eine leere Kachel kostet mehr als ein langsamer
+        erster Aufruf — sie sieht aus wie ein Befund und ist keiner.          */
+    private static readonly TimeSpan Frist = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan Haltbar = TimeSpan.FromMinutes(5);
 
     /// <summary>
@@ -53,31 +66,47 @@ public static class StartEndpoints
             if (!frisch && Cache.TryGetValue(key, out var c) && c.Bis > DateTime.UtcNow)
                 return Results.Ok(c.Wert);
 
-            var t = new Dictionary<string, Task<object?>>
-            {
-                ["lage"] = Teil(async k => await LageAsync(factory, briefing, k), ct),
-                ["markt"] = Teil(async k => await MarktAsync(factory, k), ct),
-                ["nachrichten"] = Teil(async k => await NachrichtenAsync(factory, k), ct),
-                ["depot"] = Teil(async k => await DepotAsync(invest, k), ct),
-                ["prognose"] = Teil(async k => await PrognoseAsync(factory, urteile, k), ct),
-                ["neuzugaenge"] = Teil(async k => await NeuzugaengeAsync(neuzugang, k), ct),
-                ["grundschwingungen"] = Teil(async k => await GrundschwingungenAsync(grund, k), ct),
-                ["system"] = Teil(async k => await SystemAsync(factory, knowledge, scheduler, k), ct),
-            };
+            /*  Die Kacheln laufen NACHEINANDER, nicht gleichzeitig.
 
-            await Task.WhenAll(t.Values);
+                Hier stand `Task.WhenAll` über alle acht — die naheliegende
+                Wahl, solange die Datenbank nebenläufige Abfragen auf eigene
+                Kerne legt. Das EventMesh-DataCell-Backend tut das nicht: Jede
+                einzelne Kachelabfrage braucht dort rund 1,4 Sekunden, acht
+                gleichzeitig aber mehr als zwanzig je Stück. Am 27.09.2026
+                liefen deshalb fünf von acht in ihre Frist, obwohl zusammen
+                kaum zwölf Sekunden Arbeit anstanden.
+
+                Nacheinander ist hier also nicht langsamer, sondern schneller —
+                und es ist die freundlichere Nachbarschaft: Während die Seite
+                sich aufbaut, bleibt Luft für den, der gerade einen Chart
+                öffnet. Auf einer Datenbank, die Nebenläufigkeit belohnt,
+                kostet die Umstellung wenig, weil das Ergebnis fünf Minuten
+                gemerkt wird.                                                  */
+            var t = new Dictionary<string, object?>();
+
+            async Task Lauf(string name, Func<CancellationToken, Task<object?>> f)
+                => t[name] = await Teil(f, ct);
+
+            await Lauf("lage", k => LageAsync(factory, briefing, k));
+            await Lauf("markt", k => MarktAsync(factory, k));
+            await Lauf("nachrichten", k => NachrichtenAsync(factory, k));
+            await Lauf("depot", k => DepotAsync(invest, k));
+            await Lauf("prognose", k => PrognoseAsync(factory, urteile, k));
+            await Lauf("neuzugaenge", k => NeuzugaengeAsync(neuzugang, k));
+            await Lauf("grundschwingungen", k => GrundschwingungenAsync(grund, k));
+            await Lauf("system", k => SystemAsync(factory, knowledge, scheduler, k));
 
             var wert = new
             {
                 standUtc = DateTime.UtcNow,
-                lage = t["lage"].Result,
-                markt = t["markt"].Result,
-                nachrichten = t["nachrichten"].Result,
-                depot = t["depot"].Result,
-                prognose = t["prognose"].Result,
-                neuzugaenge = t["neuzugaenge"].Result,
-                grundschwingungen = t["grundschwingungen"].Result,
-                system = t["system"].Result,
+                lage = t["lage"],
+                markt = t["markt"],
+                nachrichten = t["nachrichten"],
+                depot = t["depot"],
+                prognose = t["prognose"],
+                neuzugaenge = t["neuzugaenge"],
+                grundschwingungen = t["grundschwingungen"],
+                system = t["system"],
             };
             Cache[key] = (DateTime.UtcNow + Haltbar, wert);
             return Results.Ok(wert);
@@ -123,38 +152,61 @@ public static class StartEndpoints
     {
         await using var conn = await factory.OpenAsync(ct);
         var d = conn.Dialekt();
-        var rows = (await conn.QueryAsync<(string Symbol, string? Name, string Klasse, decimal Heute, decimal Gestern, DateTime Ts)>(
+        /*  Zwei schlichte Abfragen, das Ranking in C#.
+
+            Hier stand eine Fensterfunktion: ein CTE mit ROW_NUMBER OVER
+            (PARTITION BY asset_id ORDER BY ts_utc DESC), zweimal in sich
+            selbst verbunden, um je Wert den letzten und vorletzten Schlusskurs
+            zu bekommen. Das ist die Lehrbuchform für „die letzten N je Gruppe"
+            — und auf dem EventMesh-DataCell-Backend am 27.09.2026 unbrauchbar:
+
+              schlichter Bereich, 14 Tage            1.356 ms, 5.742 Zeilen
+              derselbe Bereich mit `"close" > 0`    40.346 ms, Prozesstod
+              derselbe Bereich als CTE + Fenster    46.049 ms, Verbindung weg
+
+            Die Zutaten der teuren Formen sind also beide entbehrlich. Was
+            bleibt, ist die billige Abfrage — und über 5.742 Zeilen kostet das
+            Sortieren und Gruppieren in C# nichts Messbares.
+
+            Es ist auch die ehrlichere Form: Die Datenbank liefert Zeilen, die
+            Anwendung entscheidet, was „letzter und vorletzter Kurs" heisst.   */
+        var bars = (await conn.QueryAsync<(int AssetId, DateTime Ts, decimal Close)>(
             new CommandDefinition($"""
-                WITH b AS (
-                  SELECT asset_id, ts_utc, "close",
-                         ROW_NUMBER() OVER (PARTITION BY asset_id ORDER BY ts_utc DESC) AS rn
-                    FROM dbo.price_bar
-                   WHERE interval_code = '1d'
-                     AND ts_utc >= {d.PlusTage("-14", d.Jetzt)})
-                SELECT a.symbol, a."name", CAST(a.asset_class AS VARCHAR(8)), b1."close", b2."close", b1.ts_utc
-                  FROM b b1
-                  JOIN b b2 ON b2.asset_id = b1.asset_id AND b2.rn = 2
-                  JOIN dbo.asset a ON a.asset_id = b1.asset_id
-                 WHERE b1.rn = 1 AND a.is_tracked = {d.Wahr}
-                   AND b1.ts_utc >= {d.PlusTage("-4", d.Jetzt)}
-                """, cancellationToken: ct))).ToList();
+                SELECT asset_id, ts_utc, "close"
+                  FROM dbo.price_bar
+                 WHERE interval_code = '1d'
+                   AND ts_utc >= {d.PlusTage("-14", d.Jetzt)}
+                """, commandTimeout: 30, cancellationToken: ct))).ToList();
+
+        if (bars.Count == 0) return new { werte = 0 };
+
+        var werte = (await conn.QueryAsync<(int AssetId, string Symbol, string? Name, byte Klasse)>(
+            new CommandDefinition($"""
+                SELECT asset_id, symbol, "name", asset_class
+                  FROM dbo.asset WHERE is_tracked = {d.Wahr}
+                """, commandTimeout: 30, cancellationToken: ct)))
+            .ToDictionary(a => a.AssetId);
+
+        /*  Je Wert die beiden jüngsten Bars; nur wer zwei hat, lässt sich
+            vergleichen. Der jüngste muss frisch sein — ein Wert, dessen
+            letzter Kurs vier Tage alt ist, gehört nicht in eine Tagesübersicht. */
+        var frischAb = DateTime.UtcNow.AddDays(-4);
+
+        var rows = bars
+            .Where(b => werte.ContainsKey(b.AssetId))
+            .GroupBy(b => b.AssetId)
+            .Select(g => g.OrderByDescending(b => b.Ts).Take(2).ToList())
+            .Where(p => p.Count == 2 && p[0].Ts >= frischAb && p[1].Close > 0 && p[0].Close > 0)
+            .Select(p =>
+            {
+                var a = werte[p[0].AssetId];
+                return (a.Symbol, a.Name, Klasse: a.Klasse.ToString(),
+                        Heute: p[0].Close, Gestern: p[1].Close, Ts: p[0].Ts);
+            })
+            .ToList();
 
         if (rows.Count == 0) return new { werte = 0 };
 
-        /*  Der Plausibilitätsfilter steht hier, nicht im SQL.
-
-            Vorher stand `AND "close" > 0` in der Bedingung — ein Vergleich auf
-            einer Wertespalte ohne Index, über die ganze Tabelle. Auf dem
-            EventMesh-DataCell-Backend hat das am 27.09.2026 mitgeholfen, die
-            Abfrage auf 10 s und 6 GB zu treiben, und sie gab dabei eine LEERE
-            Antwort zurück statt der rund 600 Paare.
-
-            Über rund 600 gelesene Zeilen kostet derselbe Filter in C# nichts,
-            und er ist hier ohnehin nur eine Vorsichtsmassnahme gegen
-            Nullkurse — ein Nenner von null ergäbe unendlich Prozent.          */
-        rows = rows.Where(r => r.Gestern > 0 && r.Heute > 0).ToList();
-
-        if (rows.Count == 0) return new { werte = 0 };
 
         var bew = rows.Select(r => new
         {
