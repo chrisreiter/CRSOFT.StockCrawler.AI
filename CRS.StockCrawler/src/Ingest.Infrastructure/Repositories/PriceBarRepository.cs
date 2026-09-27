@@ -150,35 +150,32 @@ public sealed class PriceBarRepository : IPriceBarRepository
 
         foreach (var chunk in SqlBatching.Chunks(ids))
         {
-            /*  Die Werteliste steht als Zahlenfolge im SQL, nicht als Array-Parameter.
+            /*  Wieder ueber SqlDialekt.In, also `= ANY(@ids)` auf Postgres.
 
-                Das ist die eine Stelle im Projekt, an der das bewusst so ist.
-                Der uebliche Weg -- `asset_id = ANY(@ids)` ueber SqlDialekt.In --
-                laeuft auf dem EventMesh-DataCell-Backend nicht auf den
-                Indexpfad: gemessen am 27.09.2026 braucht `= ANY(ARRAY[201])`
-                ueber 80 Sekunden und laeuft in den Timeout, waehrend
-                `IN (201)` dieselbe Abfrage in 2,5 s und `= 201` in 439 ms
-                beantwortet. Diese Abfrage steckt hinter JEDEM Chart der
-                Anwendung, also entscheidet sie ueber die Bedienbarkeit.
+                Hier stand vom 27.09.2026 bis zum selben Abend eine
+                ausgeschriebene Werteliste im SQL, weil `= ANY` auf dem
+                EventMesh-DataCell-Backend ueber 80 Sekunden brauchte und in
+                den Timeout lief, waehrend `IN (201)` in 2,5 s antwortete.
+                Der Node bildet inzwischen den Effekt eines zusammengesetzten
+                Index nach und behandelt beide Formen gleich; nachgemessen
+                gegen 55561: `= ANY(ARRAY[201])` 253 ms, mit fuenf Werten
+                804 ms. Der Umweg ist damit nicht nur unnoetig, sondern
+                langsamer als der gerade Weg.
 
-                Zusammengesetztes SQL ist hier unbedenklich, aber nur weil es
-                ausschliesslich um `int` geht: Die Werte kommen aus `int[]`,
-                sind also bereits vom Typ her Zahlen und koennen nichts
-                einschleusen. Eine Zeichenkette duerfte hier nie stehen.
-
-                Sobald `= ANY` auf dem Node den Indexpfad nimmt, gehoert diese
-                Stelle zurueck auf `d.In(...)`.                                 */
-            var werteliste = string.Join(",", chunk);
-
+                Die Notiz bleibt stehen, weil die Lehre bleibt: Ein Umweg um
+                eine fremde Schwaeche gehoert mit dem Datum seiner Messung
+                versehen und zurueckgebaut, sobald die Messung nicht mehr
+                gilt -- sonst wird aus einer Notloesung stillschweigend
+                Architektur.                                                    */
             var part = await conn.QueryAsync<(int AssetId, DateTime TsUtc, decimal? Open, decimal? High,
                                               decimal? Low, decimal Close, decimal? AdjClose, decimal? Volume)>(
                 new CommandDefinition($"""
                     SELECT asset_id, ts_utc, "open", "high", "low", "close", adj_close, volume
                       FROM dbo.price_bar
-                     WHERE asset_id IN ({werteliste}) AND interval_code = @intervalCode
+                     WHERE {d.In("asset_id", "ids")} AND interval_code = @intervalCode
                        AND ts_utc >= @fromUtc AND ts_utc <= @toUtc
                      ORDER BY asset_id, ts_utc
-                    """, new { intervalCode, fromUtc, toUtc },
+                    """, new { ids = chunk, intervalCode, fromUtc, toUtc },
                     commandTimeout: 180, cancellationToken: ct));
 
             rows.AddRange(part);

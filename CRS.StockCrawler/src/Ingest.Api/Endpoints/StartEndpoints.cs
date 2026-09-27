@@ -129,7 +129,7 @@ public static class StartEndpoints
                   SELECT asset_id, ts_utc, "close",
                          ROW_NUMBER() OVER (PARTITION BY asset_id ORDER BY ts_utc DESC) AS rn
                     FROM dbo.price_bar
-                   WHERE interval_code = '1d' AND "close" > 0
+                   WHERE interval_code = '1d'
                      AND ts_utc >= {d.PlusTage("-14", d.Jetzt)})
                 SELECT a.symbol, a."name", CAST(a.asset_class AS VARCHAR(8)), b1."close", b2."close", b1.ts_utc
                   FROM b b1
@@ -138,6 +138,21 @@ public static class StartEndpoints
                  WHERE b1.rn = 1 AND a.is_tracked = {d.Wahr}
                    AND b1.ts_utc >= {d.PlusTage("-4", d.Jetzt)}
                 """, cancellationToken: ct))).ToList();
+
+        if (rows.Count == 0) return new { werte = 0 };
+
+        /*  Der Plausibilitätsfilter steht hier, nicht im SQL.
+
+            Vorher stand `AND "close" > 0` in der Bedingung — ein Vergleich auf
+            einer Wertespalte ohne Index, über die ganze Tabelle. Auf dem
+            EventMesh-DataCell-Backend hat das am 27.09.2026 mitgeholfen, die
+            Abfrage auf 10 s und 6 GB zu treiben, und sie gab dabei eine LEERE
+            Antwort zurück statt der rund 600 Paare.
+
+            Über rund 600 gelesene Zeilen kostet derselbe Filter in C# nichts,
+            und er ist hier ohnehin nur eine Vorsichtsmassnahme gegen
+            Nullkurse — ein Nenner von null ergäbe unendlich Prozent.          */
+        rows = rows.Where(r => r.Gestern > 0 && r.Heute > 0).ToList();
 
         if (rows.Count == 0) return new { werte = 0 };
 
