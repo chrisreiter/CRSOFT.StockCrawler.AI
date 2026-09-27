@@ -188,7 +188,7 @@ public sealed class PrognosegueteService : IPrognosegueteService
              GROUP  BY a.asset_id, a.symbol, a.name, a.asset_class
             HAVING  CAST(COUNT(*) AS INT) >= @mindestens
              ORDER  BY Fehlerverhaeltnis ASC
-            OFFSET  0 ROWS FETCH NEXT (@limit) ROWS ONLY
+            OFFSET  0 ROWS FETCH NEXT @limit ROWS ONLY
             """,
             new { von, h = horizonHours, mindestens = Math.Max(1, mindestens),
                   limit = Math.Clamp(limit, 1, 500) },
@@ -403,7 +403,7 @@ public sealed class PrognosegueteService : IPrognosegueteService
                AND  f.target_ts_utc >= @von
                AND  (f.horizon_hours = @h OR @h IS NULL)
              ORDER  BY f.target_ts_utc DESC
-            OFFSET  0 ROWS FETCH NEXT (@limit) ROWS ONLY
+            OFFSET  0 ROWS FETCH NEXT @limit ROWS ONLY
             """,
             new { symbol, von, h = horizonHours, limit = Math.Clamp(limit, 1, 500) },
             cancellationToken: ct));

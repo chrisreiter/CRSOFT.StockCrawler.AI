@@ -309,7 +309,7 @@ public sealed class CrossingOpportunityService(ISqlConnectionFactory factory)
           LEFT JOIN {d.Temp("sprung")} sa ON sa.asset_id = p.asset_id_a
           LEFT JOIN {d.Temp("sprung")} sb ON sb.asset_id = p.asset_id_b;
 
-        SELECT * FROM {d.Temp("alle")} WHERE Verdacht = 0 ORDER BY Paargewinn DESC OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY;
+        SELECT * FROM {d.Temp("alle")} WHERE Verdacht = 0 ORDER BY Paargewinn DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY;
 
         SELECT * FROM {d.Temp("alle")} WHERE Verdacht = 1 ORDER BY MaxSprung DESC OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;
 

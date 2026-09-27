@@ -82,7 +82,7 @@ public sealed class AssetRepository : IAssetRepository
                AND (sector = @sector OR @sector IS NULL)
                AND (country = @country OR @country IS NULL)
              ORDER BY CASE WHEN market_cap_rank IS NULL THEN 1 ELSE 0 END,
-                      market_cap_rank, symbol OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY
+                      market_cap_rank, symbol OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
             """;
 
         var rows = await conn.QueryAsync<Asset>(new CommandDefinition(sql, new

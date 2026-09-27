@@ -276,7 +276,7 @@ public sealed class InvestService(ISqlConnectionFactory factory) : IInvestServic
               LEFT JOIN dbo.invest_buchung b ON b.buchung_id = m.buchung_id
               LEFT JOIN dbo.asset a ON a.asset_id = b.asset_id
              WHERE m.waehrung = @w AND m.depot = @depot
-             ORDER BY m.am_utc DESC, m.bewegung_id DESC OFFSET 0 ROWS FETCH NEXT (@grenze) ROWS ONLY
+             ORDER BY m.am_utc DESC, m.bewegung_id DESC OFFSET 0 ROWS FETCH NEXT @grenze ROWS ONLY
             """, new { w, depot, grenze = Math.Clamp(grenze, 1, 2000) },
             cancellationToken: ct));
 

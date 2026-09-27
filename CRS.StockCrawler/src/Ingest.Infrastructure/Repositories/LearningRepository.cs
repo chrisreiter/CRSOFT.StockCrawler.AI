@@ -134,7 +134,7 @@ public sealed class LearningRepository : ILearningRepository
                    note AS Note
               FROM dbo.learning_epoch
              WHERE (run_label = @runLabel OR @runLabel IS NULL)
-             ORDER BY epoch_id DESC OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY
+             ORDER BY epoch_id DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
             """, new { runLabel, limit }, cancellationToken: ct));
 
         return rows.ToList();

@@ -1135,7 +1135,7 @@ public sealed class AutopilotService(
                    notiz AS Notiz
               FROM dbo.autopilot_lauf
              WHERE (depot = @depot OR @depot IS NULL)
-             ORDER BY lauf_id DESC OFFSET 0 ROWS FETCH NEXT (@grenze) ROWS ONLY
+             ORDER BY lauf_id DESC OFFSET 0 ROWS FETCH NEXT @grenze ROWS ONLY
             """, new { depot, grenze = Math.Clamp(grenze, 1, 200) },
             cancellationToken: ct))).ToList();
 
@@ -1160,7 +1160,7 @@ public sealed class AutopilotService(
               JOIN dbo.autopilot_lauf l ON l.lauf_id = e.lauf_id
               JOIN dbo.asset a ON a.asset_id = e.asset_id
              WHERE e.lauf_id = @lauf
-             ORDER BY e.rang OFFSET 0 ROWS FETCH NEXT (@grenze) ROWS ONLY
+             ORDER BY e.rang OFFSET 0 ROWS FETCH NEXT @grenze ROWS ONLY
             """, new { lauf = laufId, grenze = Math.Clamp(grenze, 1, 1000) },
             cancellationToken: ct));
 
