@@ -59,11 +59,24 @@ public static class HealthEndpoints
                 Diese Seite zählt sechs Tabellen mit zusammen über fünfzehn
                 Millionen Zeilen. Solche Zahlen ändern sich im Minutentakt um
                 Promille — sie bei jedem Aufruf neu zu zählen, kostet Sekunden
-                und liefert dieselbe Antwort. Eine Minute ist kurz genug, dass
-                nach einem Lauf sofort neue Zahlen erscheinen, und lang genug,
+                und liefert dieselbe Antwort. Zehn Minuten sind kurz genug, dass
+                nach einem Lauf bald neue Zahlen erscheinen, und lang genug,
                 dass mehrfaches Öffnen der Seite nichts mehr kostet.            */
-            if (_bestandCache is { } c && DateTime.UtcNow - c.Stand < TimeSpan.FromMinutes(1))
+            if (_bestandCache is { } c && DateTime.UtcNow - c.Stand < TimeSpan.FromMinutes(10))
                 return Results.Ok(c.Wert);
+
+            /*  Ein Budget für die ganze Seite, nicht eine Frist je Abfrage.
+
+                Mit acht Abfragen zu je fünfzehn Sekunden Frist dauert der
+                schlimmste Fall zwei Minuten — und genau der trat ein, solange
+                das Backend zäh war. Eine Übersichtsseite darf aber nie länger
+                dauern als die Geduld dessen, der sie öffnet. Also läuft eine
+                gemeinsame Uhr: Was in zwölf Sekunden beantwortet ist, steht
+                da; der Rest bleibt leer und wird beim nächsten Aufruf nach
+                Ablauf des Zwischenspeichers erneut versucht.                   */
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            budget.CancelAfter(TimeSpan.FromSeconds(12));
+            ct = budget.Token;
 
             await using var conn = await factory.OpenAsync(ct);
             var d = conn.Dialekt();
@@ -76,13 +89,14 @@ public static class HealthEndpoints
                 Sekunden, obwohl die uebrigen zehn Zahlen laengst da waren.
                 Jetzt fehlt im schlimmsten Fall eine Zahl -- die Oberflaeche
                 zeigt dort einen Strich -- und alles andere steht.              */
-            async Task<int?> ZaehleAsync(string tabelle)
+            async Task<int?> ZaehleAsync(string tabelle, string? bedingung = null)
             {
                 try
                 {
+                    var wo = bedingung is null ? "" : $" WHERE {bedingung}";
                     return await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-                        $"SELECT CAST(COUNT(*) AS INT) FROM {tabelle}",
-                        commandTimeout: 15, cancellationToken: ct));
+                        $"SELECT CAST(COUNT(*) AS INT) FROM {tabelle}{wo}",
+                        commandTimeout: 12, cancellationToken: ct));
                 }
                 catch (Exception ex)
                 {
@@ -92,14 +106,28 @@ public static class HealthEndpoints
                 }
             }
 
-            var byClass = await conn.QueryAsync<(byte AssetClass, int Total, int Tracked)>(
-                new CommandDefinition($"""
-                    SELECT asset_class,
-                           CAST(COUNT(*) AS INT) AS total,
-                           CAST(SUM(CASE WHEN is_tracked = {d.Wahr} THEN 1 ELSE 0 END) AS INT) AS tracked
-                      FROM dbo.asset
-                     GROUP BY asset_class
-                    """, cancellationToken: ct));
+            /*  Wie ZaehleAsync, nur fuer alles andere: Eine Abfrage, die nicht
+                zurueckkommt, liefert null statt die Seite mitzureissen.        */
+            async Task<T?> VersucheAsync<T>(string was, Func<Task<T?>> abfrage)
+            {
+                try { return await abfrage(); }
+                catch (Exception ex)
+                {
+                    protokoll.CreateLogger("Health").LogWarning(ex, "{Was} übersprungen", was);
+                    return default;
+                }
+            }
+
+            var byClass = await VersucheAsync("Werte je Klasse", async () =>
+                (await conn.QueryAsync<(byte AssetClass, int Total, int Tracked)>(
+                    new CommandDefinition($"""
+                        SELECT asset_class,
+                               CAST(COUNT(*) AS INT) AS total,
+                               CAST(SUM(CASE WHEN is_tracked = {d.Wahr} THEN 1 ELSE 0 END) AS INT) AS tracked
+                          FROM dbo.asset
+                         GROUP BY asset_class
+                        """, commandTimeout: 12, cancellationToken: ct))).ToList())
+                ?? [];
 
             /*  Je Intervall eine eigene Abfrage statt eines GROUP BY ueber die
                 ganze Tabelle.
@@ -129,18 +157,32 @@ public static class HealthEndpoints
                     der Oberflaeche ist schlimmer als keine, denn sie sieht aus
                     wie eine Aussage. Die Zahl der verfolgten Werte steht
                     ohnehin schon weiter oben in `assets`.                      */
-                var r = await conn.QuerySingleOrDefaultAsync<(long Bars,
-                                                              DateTime? Oldest, DateTime? Newest)>(
-                    new CommandDefinition("""
-                        SELECT CAST(COUNT(*) AS BIGINT) AS bars,
-                               MIN(ts_utc)              AS oldest,
-                               MAX(ts_utc)              AS newest
-                          FROM dbo.price_bar
-                         WHERE interval_code = @iv
-                        """, new { iv }, commandTimeout: 60, cancellationToken: ct));
+                /*  Erst die billige Frage, dann die teure.
 
-                if (r.Bars > 0)
-                    barStats.Add((iv, r.Bars, 0, r.Oldest, r.Newest));
+                    Die Frage, auf die es bei dieser Seite ankommt, ist „wie
+                    aktuell sind die Kurse" -- also MIN und MAX. Die kosten
+                    gemessen rund 100 ms, weil sie an den Raendern des Index
+                    stehen. `COUNT(*)` ueber dieselbe Menge kostet Sekunden und
+                    auf dem DataCell-Backend Gigabyte, weil dafuer jede Zeile
+                    angefasst wird. Beides in einer Anweisung zu fragen hiess,
+                    die billige Antwort mit dem Preis der teuren zu bezahlen.
+
+                    Bleibt die Zaehlung aus, steht in der Oberflaeche ein
+                    Strich -- die Aktualitaet steht trotzdem da.                */
+                var rand = await VersucheAsync($"Zeitraum {iv}", async () =>
+                    (await conn.QueryAsync<(DateTime? Oldest, DateTime? Newest)>(
+                        new CommandDefinition("""
+                            SELECT MIN(ts_utc) AS oldest, MAX(ts_utc) AS newest
+                              FROM dbo.price_bar
+                             WHERE interval_code = @iv
+                            """, new { iv }, commandTimeout: 12, cancellationToken: ct)))
+                        .Cast<(DateTime? Oldest, DateTime? Newest)?>().FirstOrDefault());
+
+                if (rand is not { Newest: not null }) continue;
+
+                var anzahl = await ZaehleAsync("dbo.price_bar", $"interval_code = '{iv}'");
+
+                barStats.Add((iv, anzahl ?? 0, 0, rand.Value.Oldest, rand.Value.Newest));
             }
 
             /*  Offene Prognosen werden gerechnet, nicht verbunden.
