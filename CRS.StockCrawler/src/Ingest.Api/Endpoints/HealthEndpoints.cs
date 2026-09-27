@@ -1,5 +1,6 @@
 using Ingest.Core.Abstractions;
 using Ingest.Core.Enums;
+using Ingest.Infrastructure.Datenbank;
 using Ingest.Infrastructure.Options;
 using Ingest.Infrastructure.Repositories;
 using Microsoft.Extensions.Options;
@@ -20,6 +21,21 @@ public static class HealthEndpoints
     {
         app.MapGet("/api/health", () => Results.Ok(new { status = "ok", utc = DateTime.UtcNow }))
            .WithTags("Health");
+
+        /*  Was der Kursspeicher gerade haelt.
+
+            Nicht Zierde, sondern die Pruefung der Auflage: Dieser Speicher
+            existiert nur, solange er weniger Arbeitsspeicher braucht als die
+            Datenbank, die er entlastet. Eine Obergrenze, die niemand ablesen
+            kann, ist eine Behauptung. `bytesGeschaetzt` ist bewusst als
+            Schaetzung benannt -- gemessen wird der echte Verbrauch am Prozess,
+            nicht hier.                                                        */
+        app.MapGet("/api/health/kursspeicher", (Kursspeicher speicher) => Results.Ok(new
+        {
+            reihen = speicher.GehalteneReihen,
+            bars = speicher.GehalteneBars,
+            bytesGeschaetzt = (long)speicher.GehalteneBars * 120,
+        })).WithTags("Health");
 
         app.MapGet("/api/health/runs", async (IIngestRunRepository repo, int last = 50,
                                               CancellationToken ct = default) =>

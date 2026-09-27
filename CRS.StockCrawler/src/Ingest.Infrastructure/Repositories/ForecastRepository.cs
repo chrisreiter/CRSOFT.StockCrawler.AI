@@ -11,7 +11,16 @@ public sealed class ForecastRepository : IForecastRepository
     private readonly ISqlConnectionFactory _factory;
     private SqlDialekt d => _factory.Dialekt;
 
-    public ForecastRepository(ISqlConnectionFactory factory) => _factory = factory;
+    /*  Optional, wie beim Kursspeicher: Faellt er weg, geht jede Abfrage an
+        die Datenbank. Ein Zwischenspeicher, ohne den die Anwendung nicht mehr
+        laeuft, waere keiner mehr.                                           */
+    private readonly Prognosespeicher? _speicher;
+
+    public ForecastRepository(ISqlConnectionFactory factory, Prognosespeicher? speicher = null)
+    {
+        _factory = factory;
+        _speicher = speicher;
+    }
 
     public async Task<long> InsertAsync(Forecast f, CancellationToken ct = default)
     {
@@ -73,6 +82,12 @@ public sealed class ForecastRepository : IForecastRepository
             }
 
             await tx.CommitAsync(ct);
+
+            /*  Geschrieben heisst verworfen. Das ist die einzige Stelle, an
+                der eine Prognose entsteht -- deshalb steht die Verwerfung
+                hier und nicht in einer Frist.                               */
+            _speicher?.Verwerfe(f.AssetId);
+
             return id!.Value;
         }
         catch
@@ -200,29 +215,46 @@ public sealed class ForecastRepository : IForecastRepository
                    @AssetId, @HorizonHours
              WHERE NOT EXISTS (SELECT 1 FROM dbo.forecast_score WHERE forecast_id = @ForecastId)
             """, list, cancellationToken: ct));
+
+        /*  Eine neue Bewertung aendert die Treffsicherheit des Wertes UND den
+            Durchschnitt ueber alle -- `Verwerfe` raeumt beides.             */
+        foreach (var wert in list.Select(s => s.AssetId).Distinct())
+            _speicher?.Verwerfe(wert);
     }
 
+    /*  EINE Abfrage ueber alle Prognosen des Wertes, dann die Auswahl in C#.
+
+        Diese Stelle hat heute drei Fassungen gesehen, und die Reihenfolge ist
+        lehrreich:
+
+        1. `ROW_NUMBER() OVER (PARTITION BY horizon_hours ...)` -- vom
+           DataCell-Backend abgewiesen („komplexe Query ohne einschraenkendes
+           WHERE"), obwohl die Bedingung im CTE stand.
+        2. Alles lesen, in C# auswaehlen -- lief, kostete aber ueber Npgsql
+           gemessen 466 bis 489 ms fuer 2.392 Zeilen.
+        3. Je Horizont eine Indexsuche mit `FETCH NEXT 1`. Ueber psql gemessen
+           3,5 bis 11,6 ms je Abfrage, also rechnerisch besser. Ueber den
+           TREIBER DER ANWENDUNG gemessen: **1.426 bis 1.947 ms** fuer
+           dieselben neun Zeilen -- dreimal schlechter als Fassung 2.
+
+        Also zurueck zu Fassung 2. Und die Lehre dazu steht schon in
+        CLAUDE.md, ich bin trotzdem hineingelaufen: Wer ein fremdes Backend
+        misst, misst mit dem Treiber der Anwendung. `psql` schickt einfache
+        Abfragen mit Literalen; Npgsql schickt Parse/Bind/Execute. Neun kleine
+        Abfragen sind dort neunmal dieser Weg, und auf diesem Node kostet das
+        mehr als eine grosse Abfrage mit dreitausend Zeilen.
+
+        Die 466 ms bleiben trotzdem zu viel fuer eine Kursansicht. Deshalb
+        liegt davor der `Prognosespeicher` -- dieselbe Ueberlegung wie beim
+        Kursspeicher: Die Menge aendert sich nur, wenn ein Lauf sie schreibt,
+        und dann weiss die Anwendung es genau.                                */
     public async Task<IReadOnlyList<Forecast>> GetLatestAsync(int assetId, CancellationToken ct = default)
     {
+        var gehalten = _speicher?.Neueste(assetId);
+        if (gehalten is not null) return gehalten;
+
         await using var conn = await _factory.OpenAsync(ct);
 
-        /*  Ohne CTE und ohne Fensterfunktion: lesen, dann in C# auswählen.
-
-            Hier stand ein `WITH ranked AS (… ROW_NUMBER() OVER (PARTITION BY
-            horizon_hours ORDER BY made_at_utc DESC) … WHERE asset_id =
-            @assetId)` — die Lehrbuchform für „die jüngste je Horizont".
-
-            Das EventMesh-DataCell-Backend zählt eine Bedingung INNERHALB eines
-            CTE nicht als Einschränkung der Tabelle. Es wies die Abfrage am
-            27.09.2026 deshalb ab: „Komplexe Query über die grosse Tabelle
-            'forecast' (1.264.033 Zeilen) ohne einschränkendes WHERE" — obwohl
-            genau dort ein `WHERE asset_id = @assetId` steht. In der Oberfläche
-            erschien das als 500 beim Einblenden der Prognose.
-
-            Ein Wert hat über alle Horizonte hinweg einige hundert Prognosen.
-            Die zu lesen und die jüngste je Horizont hier zu wählen, kostet
-            nichts — und die Bedingung steht dabei dort, wo jede Datenbank sie
-            sieht.                                                             */
         var rows = await conn.QueryAsync<Forecast>(new CommandDefinition("""
             SELECT forecast_id AS ForecastId, asset_id AS AssetId,
                    horizon_hours AS HorizonHours, made_at_utc AS MadeAtUtc,
@@ -233,74 +265,83 @@ public sealed class ForecastRepository : IForecastRepository
              WHERE asset_id = @assetId
             """, new { assetId }, commandTimeout: 60, cancellationToken: ct));
 
-        return rows
+        var neueste = rows
             .GroupBy(f => f.HorizonHours)
             .Select(g => g.OrderByDescending(f => f.MadeAtUtc).First())
             .OrderBy(f => f.HorizonHours)
             .ToList();
+
+        _speicher?.LegeNeueste(assetId, neueste);
+        return neueste;
     }
 
     public async Task<IReadOnlyList<ForecastVsActual>> GetHistoryAsync(
         int assetId, int horizonHours, DateTime fromUtc, DateTime toUtc,
         CancellationToken ct = default)
     {
+        /*  Gehalten wird OHNE Zeitfenster, geschnitten wird in C#.
+
+            Das Fenster einer Kursansicht wandert mit jedem Tag; der Bestand je
+            Wert und Horizont nicht. Wer nach Fenster schluesselte, haette bei
+            jedem Aufruf einen neuen Schluessel und nie einen Treffer.        */
+        var gehalten = _speicher?.Verlauf(assetId, horizonHours);
+
+        if (gehalten is null)
+        {
+            gehalten = await LadeVerlaufAsync(assetId, horizonHours, ct);
+            _speicher?.LegeVerlauf(assetId, horizonHours, gehalten);
+        }
+
+        return gehalten
+            .Where(f => f.TargetTsUtc >= fromUtc && f.TargetTsUtc <= toUtc)
+            .ToList();
+    }
+
+    /*  Zwei eingeschraenkte Lesevorgaenge statt eines Verbunds mit
+        Fensterfunktion.
+
+        Hier stand ein `WITH ranked AS (… LEFT JOIN dbo.forecast_score …
+        ROW_NUMBER() OVER (PARTITION BY target_ts_utc …))`. Das ist die
+        Lehrbuchform und auf dem DataCell-Backend die teuerste Variante, die
+        man waehlen kann: Der Verbund materialisiert `forecast_score`
+        vollstaendig (gemessen 14,1 s fuer einen einzigen Wert), und eine
+        Bedingung INNERHALB eines CTE zaehlt dort nicht als Einschraenkung der
+        Tabelle. Der Rueckblick kostete dadurch 34 Sekunden.
+
+        Beide Abfragen unten greifen auf einen Index: die erste auf
+        `UX_forecast (asset_id, horizon_hours, made_at_utc)`, die zweite auf
+        `IX_forecast_score_wert (asset_id, horizon_hours)` aus Migration 047.
+        Gemessen ueber Npgsql: 177 bis 182 ms und 51 bis 70 ms.
+
+        Die Zuordnung und das Entdoppeln geschehen in C#. Das ist nicht nur
+        schneller, es ist auch die Stelle, an der man es nachlesen kann: „je
+        Zielzeitpunkt die zuletzt erstellte Prognose" ist eine Regel ueber die
+        Daten, keine Eigenschaft der Datenbank.                               */
+    private async Task<ForecastVsActual[]> LadeVerlaufAsync(
+        int assetId, int horizonHours, CancellationToken ct)
+    {
         await using var conn = await _factory.OpenAsync(ct);
 
-        /*  Zwei eingeschraenkte Lesevorgaenge statt eines Verbunds mit
-            Fensterfunktion.
-
-            Hier stand ein `WITH ranked AS (… LEFT JOIN dbo.forecast_score …
-            ROW_NUMBER() OVER (PARTITION BY target_ts_utc …))`. Das ist die
-            Lehrbuchform und auf dem DataCell-Backend die teuerste Variante,
-            die man waehlen kann: Der Verbund materialisiert `forecast_score`
-            vollstaendig (gemessen 14,1 s fuer einen einzigen Wert), und eine
-            Bedingung INNERHALB eines CTE zaehlt dort nicht als Einschraenkung
-            der Tabelle. Der Rueckblick im Diagramm kostete dadurch 34
-            Sekunden, wovon das Diagramm selbst 211 bis 449 ms braucht.
-
-            Beide Abfragen unten greifen jetzt auf einen Index: die erste auf
-            `UX_forecast (asset_id, horizon_hours, made_at_utc)`, die zweite
-            auf `IX_forecast_score_wert (asset_id, horizon_hours)` aus
-            Migration 047. Je Wert und Horizont sind das einige hundert
-            Zeilen, nicht 484.000.
-
-            Die Zuordnung und das Entdoppeln geschehen in C#. Das ist nicht
-            nur schneller, es ist auch die Stelle, an der man es nachlesen
-            kann: „je Zielzeitpunkt die zuletzt erstellte Prognose" ist eine
-            Regel ueber die Daten, keine Eigenschaft der Datenbank.            */
         var prognosen = await conn.QueryAsync<ForecastVsActual>(new CommandDefinition("""
             SELECT forecast_id AS ForecastId, made_at_utc AS MadeAtUtc,
                    target_ts_utc AS TargetTsUtc, base_close AS BaseClose,
                    predicted_close AS PredictedClose, confidence AS Confidence
               FROM dbo.forecast
-             WHERE asset_id = @assetId
-               AND horizon_hours = @horizonHours
-               AND target_ts_utc >= @fromUtc
-               AND target_ts_utc <= @toUtc
-            """, new { assetId, horizonHours, fromUtc, toUtc },
+             WHERE asset_id = @assetId AND horizon_hours = @horizonHours
+            """, new { assetId, horizonHours },
             commandTimeout: 120, cancellationToken: ct));
 
         /*  Zu einem Zielzeitpunkt kann es mehrere Prognosen geben -- etwa eine
             aus dem Backtest und eine aus dem Livebetrieb. Es zaehlt die
-            zuletzt erstellte: sie kannte den meisten Kontext.                 */
+            zuletzt erstellte: sie kannte den meisten Kontext.                */
         var jeZiel = prognosen
             .GroupBy(f => f.TargetTsUtc)
             .Select(g => g.OrderByDescending(f => f.MadeAtUtc).First())
             .OrderBy(f => f.TargetTsUtc)
-            .ToList();
+            .ToArray();
 
-        if (jeZiel.Count == 0) return jeZiel;
+        if (jeZiel.Length == 0) return jeZiel;
 
-        /*  Die Bewertungen dieses Wertes und Horizonts -- ohne Zeitfenster,
-            denn das kostet hier nichts und spart eine Bedingung, die der
-            Index nicht traegt.
-
-            Bewertungen, die Wert und Horizont noch nicht tragen, fehlen hier.
-            Das ist der Zustand zwischen dem Einspielen von Migration 047 und
-            dem Ende des Nachtragens beim Start; sichtbar wird er als
-            Rueckblick ohne Treffsicherheit, nicht als Fehler. Er heilt sich
-            mit dem Nachtragelauf, und der meldet, wie viele Zeilen er
-            gefuellt hat.                                                      */
         var bewertung = new Dictionary<long, (decimal? Ist, double? Fehler, bool? Treffer)>();
 
         var rohe = await conn.QueryAsync<(long ForecastId, decimal? Ist, double? Fehler, bool? Treffer)>(
@@ -375,33 +416,45 @@ public sealed class ForecastRepository : IForecastRepository
             """, list, cancellationToken: ct));
     }
 
-    /*  Treffsicherheit: eine GROUP-BY-Abfrage ueber EINE Tabelle.
+    /*  Treffsicherheit: Zeilen holen, in C# zusammenfassen.
 
-        Hier stand bis zum 27.09.2026 ein Verbund `forecast JOIN
-        forecast_score`, und danach eine prozessweite Tafel, die den Verbund
-        umging, indem sie beide Tabellen einmal ganz las. Beides ist weg, weil
-        beides denselben Denkfehler hatte: Es liess die Datenbank bei jeder
-        Frage neu herleiten, was seit dem Schreiben der Bewertung feststeht.
-        Seit Migration 047 traegt `forecast_score` Wert und Horizont selbst.
+        Das sieht nach dem Gegenteil dessen aus, was in CLAUDE.md steht
+        („Filter gehoeren in die Abfrage, nicht dahinter"), und ist es nicht:
+        Der FILTER bleibt in der Abfrage. Nur die AGGREGATION wandert heraus,
+        und dafuer gibt es einen gemessenen Grund.
 
-        Was der Umweg gekostet hat, gemessen auf einem ruhigen Node:
+        Das EventMesh-DataCell-Backend nutzt die Einschraenkung nicht mehr,
+        sobald darueber eine Aggregation sitzt. Gemessen am 27.09.2026 auf
+        einer frisch angelegten 50.000-Zeilen-Tabelle mit Index auf der
+        gefilterten Spalte, drei verschiedene Werte gegen den
+        Ergebnisspeicher:
 
-          der Verbund, eingeschraenkt auf EINEN Wert (997 Treffer)   14,1 s
-          dieselben 2.124 Kennungen als IN-Liste                    138,6 s
-          beide Tabellen ganz lesen (1,75 Mio Zeilen)                35   s
+          SELECT count(*)              WHERE gruppe = 51      1,754 ms
+          SELECT gruppe, count(*)      WHERE gruppe = 51
+                                       GROUP BY gruppe      105,605 ms
+          SELECT count(*), avg(wert)   WHERE gruppe = 51     73,552 ms
 
-        Der Node filtert die linke Seite korrekt und materialisiert die rechte
-        vollstaendig: 2.124 mal 483.588 Paare fuer 997 Treffer. Das ist dort
-        gemeldet und wird dort behoben -- aber selbst ein schneller Verbund
-        waere hier der Umweg geblieben. Diese Abfrage liest jetzt einen Index
-        und liefert sieben Zeilen.
+        Faktor 60 bis 80, nur weil ein GROUP BY oder ein zweites Aggregat
+        dazukommt. Auf `forecast_score` mit 483.588 Zeilen wurden daraus
+        **3.912 ms** -- und zwar fuer ein Ergebnis von sieben Zeilen. Diese
+        eine Abfrage steckte in jeder Kursansicht mit eingeblendeter Prognose
+        und machte den Unterschied zwischen 33 ms (SQL Server) und 3.855 ms.
 
-        `GetAccuracyAsync` hat fuenf Aufrufer, zwei davon (`ForecastService`,
-        `CombinedForecastService`) rufen sie JE WERT. Bei rund 600 verfolgten
-        Werten waren das 600 mal 14 Sekunden.                                  */
+        Roh gelesen sind es je Wert einige hundert bis zweitausend Zeilen ueber
+        `IX_forecast_score_wert (asset_id, horizon_hours)`. Die kosten auf
+        demselben Node einstellige Millisekunden -- und das erst, seit der
+        Draht nicht mehr einen Systemaufruf je Zeile macht. Vor dieser
+        Korrektur waere die Umgehung langsamer gewesen als das Problem.
+
+        Es IST eine Umgehung. Der Befund ist beim Backend gemeldet; faellt er
+        dort, gehoert das Aggregat zurueck in die Abfrage. Bis dahin steht
+        hier die Rechnung, die jede Datenbank sonst selbst macht.              */
     public async Task<IReadOnlyList<(int HorizonHours, int N, double Mape, double HitRate)>>
         GetAccuracyAsync(int? assetId, CancellationToken ct = default)
     {
+        var gehalten = _speicher?.Guete(assetId);
+        if (gehalten is not null) return gehalten;
+
         await using var conn = await _factory.OpenAsync(ct);
 
         /*  Der Wertefilter steht nur drin, wenn einer gemeint ist -- kein
@@ -416,18 +469,71 @@ public sealed class ForecastRepository : IForecastRepository
             ? "WHERE asset_id = @assetId"
             : "WHERE asset_id IS NOT NULL";
 
-        var rows = await conn.QueryAsync<(int, int, double, double)>(new CommandDefinition($"""
-            SELECT horizon_hours,
-                   CAST(COUNT(*) AS INT)                                            AS n,
-                   AVG(abs_pct_error)                                               AS mape,
-                   AVG(CASE WHEN direction_correct = {d.Wahr} THEN 1.0 ELSE 0.0 END) AS hit_rate
-              FROM dbo.forecast_score
-             {wertefilter}
-             GROUP BY horizon_hours
-             ORDER BY horizon_hours
-            """, new { assetId }, commandTimeout: 60, cancellationToken: ct));
+        var posten = new Dictionary<int, Gueteposten>();
 
-        return rows.ToList();
+        /*  GEPUFFERT lesen, nicht ungepuffert -- und das ist die Umkehrung
+            dessen, was hier bis eben stand.
+
+            Ich hatte `QueryUnbufferedAsync` gewaehlt, um den Speicher flach zu
+            halten: „die kleinere Menge gehoert gehalten, die groessere
+            durchgereicht". Das klingt vernuenftig und war hier um Faktor 30
+            falsch. Gemessen am 27.09.2026 ueber Npgsql gegen denselben Node,
+            dieselbe Abfrage, 993 Zeilen:
+
+              rohes ADO.NET                        93 bis 151 ms
+              Dapper QueryAsync (gepuffert)         68 bis  85 ms
+              Dapper QueryUnbufferedAsync        2.108 bis 2.151 ms
+
+            Der ungepufferte Weg kostet je Zeile eine eigene asynchrone
+            Fortsetzung; bei knapp tausend Zeilen sind das zwei Sekunden reiner
+            Verwaltungsaufwand. In der Kursansicht war das die gesamte
+            gemessene Zeit der Treffsicherheit -- 2.087 ms von 2.100 ms.
+
+            Die Lehre ist unangenehm und gehoert aufgeschrieben: Ich habe den
+            Aufwand einer Optimierung geschaetzt statt gemessen, und zwar
+            ausgerechnet in einer Sitzung, in der ich genau das mehrfach
+            angemahnt habe. Knapp tausend Zeilen passen in jeden Speicher;
+            „sparsam" war hier kein Argument, sondern eine Angewohnheit.      */
+        var zeilen = await conn.QueryAsync<(int Horizont, double? Fehler, bool? Treffer)>(
+            new CommandDefinition($"""
+                SELECT horizon_hours, abs_pct_error, direction_correct
+                  FROM dbo.forecast_score
+                 {wertefilter}
+                """, new { assetId }, commandTimeout: 300, cancellationToken: ct));
+
+        foreach (var z in zeilen)
+        {
+            if (z.Fehler is null || z.Treffer is null) continue;
+
+            if (!posten.TryGetValue(z.Horizont, out var p))
+                posten[z.Horizont] = p = new Gueteposten();
+
+            p.N++;
+            p.SummeFehler += z.Fehler.Value;
+            if (z.Treffer.Value) p.Treffer++;
+        }
+
+        var ergebnis = posten
+            .Where(e => e.Value.N > 0)
+            .OrderBy(e => e.Key)
+            .Select(e => (e.Key, e.Value.N,
+                          e.Value.SummeFehler / e.Value.N,
+                          (double)e.Value.Treffer / e.Value.N))
+            .ToList();
+
+        _speicher?.LegeGuete(assetId, ergebnis);
+        return ergebnis;
+    }
+
+    /// <summary>
+    /// Summen statt Mittelwerte — der Mittelwert von Mittelwerten ist nicht
+    /// der Mittelwert, und ueber Werte hinweg wird hier zusammengefasst.
+    /// </summary>
+    private sealed class Gueteposten
+    {
+        public int N;
+        public double SummeFehler;
+        public int Treffer;
     }
 
     /*  Wert und Horizont an den Altzeilen nachtragen.
@@ -435,54 +541,87 @@ public sealed class ForecastRepository : IForecastRepository
         Migration 047 legt die Spalten an, fuellt sie aber nicht: Ein
         Migrationsskript, das 484.000 Zeilen ueber einen Verbund nachzieht,
         scheitert auf diesem Backend an genau dem Verbund, dessentwegen die
-        Spalten ueberhaupt entstehen. Also hier, und zwar so, wie die
-        Anwendung ohnehin schreibt -- Massenkopie in eine Stufe, dann ein
-        MERGE.
+        Spalten ueberhaupt entstehen.
 
-        Gelesen wird ungepuffert. Auf dem DataCell-Backend kostet jede
-        ZURUECKGEGEBENE Zeile rund 15 Mikrosekunden Kernzeit (gemessen: der
-        Aufwand haengt an der Zeilenzahl, nicht an der Spaltenzahl und nicht
-        an den gescannten Zeilen), 1,26 Millionen Prognosen also gut zwanzig
-        Sekunden. Das ist der Preis fuer EINEN Lauf, der danach nie wieder
-        anfaellt -- gegen 14 Sekunden je Wert und Aufruf.
+        In BLOECKEN, und das ist die Lehre aus zwei Fehlschlaegen: Der erste
+        Entwurf baute eine einzige Massenkopie ueber alle 483.588 Zeilen. Die
+        lief minutenlang, und in dieser Zeit genuegte ein Neustart des Node
+        (der Kollege deployte gerade), um den ganzen Lauf zu verlieren -- ohne
+        Teilergebnis, denn geschrieben wurde erst am Ende. Ein Lauf, der nur
+        ganz oder gar nicht gelingt, gelingt bei einer halben Stunde Dauer
+        irgendwann gar nicht mehr.
 
-        Der Lauf meldet, wie viele Zeilen er gefuellt hat. Eine Migration, die
-        still nichts tut, sieht aus wie eine, die alles getan hat.             */
+        Jetzt schreibt jeder Block fuer sich. Bricht der Lauf ab, ist alles
+        bis zum letzten Block getan, und der naechste Start macht dort weiter
+        -- die Auswahl ist `asset_id IS NULL`, also selbstheilend.             */
+    private const int NachtragBlock = 50_000;
+
     public async Task<int> NachtragenAsync(CancellationToken ct = default)
     {
         await using var conn = await _factory.OpenAsync(ct);
 
         var offen = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
             "SELECT CAST(COUNT(*) AS INT) FROM dbo.forecast_score WHERE asset_id IS NULL",
-            commandTimeout: 120, cancellationToken: ct));
+            commandTimeout: 300, cancellationToken: ct));
 
         if (offen == 0) return 0;
 
         /*  Erst die offenen Kennungen, dann die Prognosen daruebergelegt. Die
-            kleinere Menge gehoert gehalten, die groessere durchgereicht.      */
-        var offeneIds = new HashSet<long>(offen);
+            kleinere Menge gehoert gehalten, die groessere durchgereicht.
 
-        await foreach (var id in conn.QueryUnbufferedAsync<long>(
-                           "SELECT forecast_id FROM dbo.forecast_score WHERE asset_id IS NULL",
-                           commandTimeout: 300).WithCancellation(ct))
-            offeneIds.Add(id);
+            Beide Lesevorgaenge gepuffert und NACHEINANDER: Zwei offene Leser
+            auf einer Verbindung gehen bei Npgsql nicht, und der zweite Lauf
+            ist ohnehin der grosse.                                            */
+        var offeneIds = new HashSet<long>(
+            await conn.QueryAsync<long>(new CommandDefinition(
+                "SELECT forecast_id FROM dbo.forecast_score WHERE asset_id IS NULL",
+                commandTimeout: 300, cancellationToken: ct)));
 
-        var tabelle = new DataTable();
-        tabelle.Columns.Add("forecast_id", typeof(long));
-        tabelle.Columns.Add("asset_id", typeof(int));
-        tabelle.Columns.Add("horizon_hours", typeof(int));
+        var tabelle = NeueNachtragstabelle();
+        var geschrieben = 0;
 
-        await foreach (var f in conn.QueryUnbufferedAsync<(long ForecastId, int AssetId, int HorizonHours)>(
-                           "SELECT forecast_id, asset_id, horizon_hours FROM dbo.forecast",
-                           commandTimeout: 300).WithCancellation(ct))
+        /*  Gepuffert, nicht ungepuffert: Dapper zahlt je Zeile eine eigene
+            asynchrone Fortsetzung, gemessen Faktor 30 gegenueber dem
+            gepufferten Weg (993 Zeilen: 2.151 ms gegen 68 ms). Bei 1,26
+            Millionen Zeilen waeren das Minuten reiner Verwaltungsaufwand.
+            Die Liste selbst kostet rund 40 MB und lebt nur waehrend dieses
+            einen Laufs.                                                     */
+        var prognosen = await conn.QueryAsync<(long ForecastId, int AssetId, int HorizonHours)>(
+            new CommandDefinition(
+                "SELECT forecast_id, asset_id, horizon_hours FROM dbo.forecast",
+                commandTimeout: 600, cancellationToken: ct));
+
+        foreach (var f in prognosen)
         {
             if (!offeneIds.Contains(f.ForecastId)) continue;
+
             tabelle.Rows.Add(f.ForecastId, f.AssetId, f.HorizonHours);
+
+            if (tabelle.Rows.Count < NachtragBlock) continue;
+
+            geschrieben += await BlockSchreibenAsync(conn, tabelle, ct);
+            tabelle = NeueNachtragstabelle();
         }
 
-        if (tabelle.Rows.Count == 0) return 0;
+        if (tabelle.Rows.Count > 0)
+            geschrieben += await BlockSchreibenAsync(conn, tabelle, ct);
 
-        // Eindeutiger Name je Aufruf -- siehe SqlDialekt.EindeutigerTempName.
+        return geschrieben;
+    }
+
+    private static DataTable NeueNachtragstabelle()
+    {
+        var t = new DataTable();
+        t.Columns.Add("forecast_id", typeof(long));
+        t.Columns.Add("asset_id", typeof(int));
+        t.Columns.Add("horizon_hours", typeof(int));
+        return t;
+    }
+
+    private async Task<int> BlockSchreibenAsync(
+        System.Data.Common.DbConnection conn, DataTable tabelle, CancellationToken ct)
+    {
+        // Eindeutiger Name je Block -- siehe SqlDialekt.EindeutigerTempName.
         var stufe = SqlDialekt.EindeutigerTempName("fsnach");
 
         await conn.ExecuteAsync(new CommandDefinition($"""
@@ -490,11 +629,11 @@ public sealed class ForecastRepository : IForecastRepository
               forecast_id BIGINT NOT NULL PRIMARY KEY,
               asset_id INT NOT NULL,
               horizon_hours INT NOT NULL);
-            """, cancellationToken: ct));
+            """, commandTimeout: 120, cancellationToken: ct));
 
         try
         {
-            await Massenkopie.SchreibeAsync(conn, tabelle, d.Temp(stufe), 300, ct);
+            await Massenkopie.SchreibeAsync(conn, tabelle, d.Temp(stufe), 600, ct);
 
             return await conn.ExecuteAsync(new CommandDefinition($"""
                 MERGE INTO dbo.forecast_score {d.MergeSperre} AS t
@@ -502,7 +641,7 @@ public sealed class ForecastRepository : IForecastRepository
                    ON t.forecast_id = s.forecast_id
                 WHEN MATCHED THEN UPDATE SET
                       asset_id = s.asset_id, horizon_hours = s.horizon_hours;
-                """, commandTimeout: 600, cancellationToken: ct));
+                """, commandTimeout: 900, cancellationToken: ct));
         }
         finally
         {

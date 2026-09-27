@@ -67,6 +67,20 @@ public static class DependencyInjection
         services.AddSingleton<ISqlConnectionFactory>(_ => VerbindungAusKonfiguration(config));
 
         services.AddScoped<IAssetRepository, AssetRepository>();
+        /*  Der Kursspeicher ist Singleton -- er soll die Aufrufe ueberleben,
+            sonst waere er keiner. Die Obergrenze steht hier und nicht in der
+            Konfiguration: Sie ist eine Eigenschaft dieser Anwendung, kein
+            Regler. 1,5 Millionen Bars sind rund 180 MB und damit ein Bruchteil
+            dessen, was der abgeloeste SQL Server allein fuer sich belegte
+            (gemessen 2,10 GB gegen 0,44 GB des Node).                        */
+        services.AddSingleton(new Kursspeicher(1_500_000));
+
+        /*  Der Prognosespeicher braucht keine Obergrenze: je Wert neun
+            Prognosen und eine Handvoll Guetezeilen, bei 700 Werten also
+            wenige Megabyte. Anders als beim Kursspeicher kann hier kein
+            einzelner Wert den Speicher fuellen.                             */
+        services.AddSingleton<Prognosespeicher>();
+
         services.AddScoped<IPriceBarRepository, PriceBarRepository>();
         services.AddScoped<IIngestRunRepository, IngestRunRepository>();
         services.AddScoped<IForecastRepository, ForecastRepository>();

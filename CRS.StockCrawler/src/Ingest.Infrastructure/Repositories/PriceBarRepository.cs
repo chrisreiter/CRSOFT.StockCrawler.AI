@@ -18,7 +18,16 @@ public sealed class PriceBarRepository : IPriceBarRepository
     /// </summary>
     private const int ChunkSize = 2000;
 
-    public PriceBarRepository(ISqlConnectionFactory factory) => _factory = factory;
+    /*  Der Kursspeicher ist optional: Faellt er weg, geht jede Abfrage wie
+        frueher an die Datenbank. Ein Zwischenspeicher, ohne den die Anwendung
+        nicht mehr laeuft, waere keiner mehr, sondern ein Bauteil.           */
+    private readonly Kursspeicher? _speicher;
+
+    public PriceBarRepository(ISqlConnectionFactory factory, Kursspeicher? speicher = null)
+    {
+        _factory = factory;
+        _speicher = speicher;
+    }
 
     public async Task<int> UpsertAsync(int assetId, string intervalCode, ProviderId provider,
                                        IReadOnlyList<PriceBar> bars, CancellationToken ct = default)
@@ -106,6 +115,13 @@ public sealed class PriceBarRepository : IPriceBarRepository
         await conn.ExecuteAsync(new CommandDefinition(
             $"""DROP TABLE {d.Temp(stufe)}""", cancellationToken: ct));
 
+        /*  Der Zwischenspeicher muss weg, sobald geschrieben wurde -- und
+            zwar HIER, an der einzigen Stelle, die Kursbars schreibt. Eine
+            Ablaufzeit statt dessen waere die falsche Wahl: Sie waere entweder
+            so kurz, dass sie nichts spart, oder so lang, dass ein Diagramm
+            nach dem Stundenlauf die alten Kurse zeigt.                       */
+        _speicher?.Verwerfe(assetId, intervalCode);
+
         return total;
     }
 
@@ -146,51 +162,65 @@ public sealed class PriceBarRepository : IPriceBarRepository
         var result = new Dictionary<int, IReadOnlyList<PriceBar>>(ids.Length);
         if (ids.Length == 0) return result;
 
-        await using var conn = await _factory.OpenAsync(ct);
+        /*  Je Wert eine Abfrage, nicht eine Sammelabfrage -- und das ist auf
+            diesem Backend keine Geschmacksfrage.
 
-        /* Ein Roundtrip je Block statt einer Abfrage je Wert — bei 100 Werten
-           sonst 100 Abfragen. Die Blockgröße kommt aus der Parametergrenze von
-           SQL Server; heute reicht ein Block, aber der Bestand soll wachsen
-           dürfen, ohne dass diese Stelle stillschweigend bricht. */
-        var rows = new List<(int AssetId, DateTime TsUtc, decimal? Open, decimal? High,
-                             decimal? Low, decimal Close, decimal? AdjClose, decimal? Volume)>();
+            Hier stand `{d.In("asset_id", "ids")}`, also `= ANY(@ids)`, mit der
+            Begruendung „ein Roundtrip je Block statt einer Abfrage je Wert".
+            Das ist auf jeder gewoehnlichen Datenbank richtig. Gemessen am
+            27.09.2026 gegen das EventMesh-DataCell-Backend, zwoelf Monate
+            Tagesbars, jeweils frische Werte gegen den Ergebnisspeicher:
 
-        foreach (var chunk in SqlBatching.Chunks(ids))
+              = ANY(ARRAY[201])                        176 ms
+              = ANY(ARRAY[202,203,204,205,206])      1.083 ms
+              = ANY(ARRAY[210,...,219])  (zehn)      1.036 ms
+              asset_id = 207  (einzeln)                169 ms
+              asset_id = 208  (einzeln)                152 ms
+              asset_id = 209  (einzeln)                126 ms
+
+            Die Sammelform kostet unabhaengig von der Zahl der Werte rund eine
+            Sekunde -- sie faellt offenbar auf einen vollen Durchlauf zurueck,
+            sobald mehr als ein Wert gemeint ist. Fuenf Einzelabfragen kosten
+            zusammen rund 750 ms und damit weniger; der eigentliche Gewinn ist
+            aber, dass jede fuer sich im Speicher landen kann.
+
+            Der Kommentar bleibt mit seinem Datum stehen: Faellt der Befund auf
+            dem Backend, gehoert die Sammelform zurueck. Ein Umweg um eine
+            fremde Schwaeche ohne Messdatum wird sonst stillschweigend zur
+            Architektur -- dieselbe Lehre wie beim `= ANY`-Umweg, der an
+            genau dieser Stelle schon einmal stand und zurueckgebaut wurde.   */
+        var fehlend = new List<int>(ids.Length);
+
+        foreach (var id in ids)
         {
-            /*  Wieder ueber SqlDialekt.In, also `= ANY(@ids)` auf Postgres.
-
-                Hier stand vom 27.09.2026 bis zum selben Abend eine
-                ausgeschriebene Werteliste im SQL, weil `= ANY` auf dem
-                EventMesh-DataCell-Backend ueber 80 Sekunden brauchte und in
-                den Timeout lief, waehrend `IN (201)` in 2,5 s antwortete.
-                Der Node bildet inzwischen den Effekt eines zusammengesetzten
-                Index nach und behandelt beide Formen gleich; nachgemessen
-                gegen 55561: `= ANY(ARRAY[201])` 253 ms, mit fuenf Werten
-                804 ms. Der Umweg ist damit nicht nur unnoetig, sondern
-                langsamer als der gerade Weg.
-
-                Die Notiz bleibt stehen, weil die Lehre bleibt: Ein Umweg um
-                eine fremde Schwaeche gehoert mit dem Datum seiner Messung
-                versehen und zurueckgebaut, sobald die Messung nicht mehr
-                gilt -- sonst wird aus einer Notloesung stillschweigend
-                Architektur.                                                    */
-            var part = await conn.QueryAsync<(int AssetId, DateTime TsUtc, decimal? Open, decimal? High,
-                                              decimal? Low, decimal Close, decimal? AdjClose, decimal? Volume)>(
-                new CommandDefinition($"""
-                    SELECT asset_id, ts_utc, "open", "high", "low", "close", adj_close, volume
-                      FROM dbo.price_bar
-                     WHERE {d.In("asset_id", "ids")} AND interval_code = @intervalCode
-                       AND ts_utc >= @fromUtc AND ts_utc <= @toUtc
-                     ORDER BY asset_id, ts_utc
-                    """, new { ids = chunk, intervalCode, fromUtc, toUtc },
-                    commandTimeout: 180, cancellationToken: ct));
-
-            rows.AddRange(part);
+            var gehalten = _speicher?.Hole(id, intervalCode, fromUtc, toUtc);
+            if (gehalten is not null) result[id] = gehalten;
+            else fehlend.Add(id);
         }
 
-        foreach (var g in rows.GroupBy(r => r.AssetId))
+        if (fehlend.Count == 0) return result;
+
+        await using var conn = await _factory.OpenAsync(ct);
+
+        foreach (var id in fehlend)
         {
-            result[g.Key] = g.Select(r => new PriceBar
+            /*  Geladen wird ab `fromUtc`, und genau dieser Zeitpunkt wird dem
+                Speicher als untere Grenze mitgegeben. Wer spaeter eine
+                laengere Historie anfordert, bekommt keinen Treffer und laedt
+                neu -- lieber ein Fehlgriff als eine Linie, die stillschweigend
+                frueher endet, als sie soll.                                   */
+            var rohe = await conn.QueryAsync<(DateTime TsUtc, decimal? Open, decimal? High,
+                                              decimal? Low, decimal Close, decimal? AdjClose, decimal? Volume)>(
+                new CommandDefinition("""
+                    SELECT ts_utc, "open", "high", "low", "close", adj_close, volume
+                      FROM dbo.price_bar
+                     WHERE asset_id = @id AND interval_code = @intervalCode
+                       AND ts_utc >= @fromUtc AND ts_utc <= @toUtc
+                     ORDER BY ts_utc
+                    """, new { id, intervalCode, fromUtc, toUtc },
+                    commandTimeout: 180, cancellationToken: ct));
+
+            var bars = rohe.Select(r => new PriceBar
             {
                 TsUtc = r.TsUtc,
                 Open = r.Open,
@@ -198,13 +228,15 @@ public sealed class PriceBarRepository : IPriceBarRepository
                 Low = r.Low,
                 Close = r.Close,
                 AdjClose = r.AdjClose,
-                Volume = r.Volume
-            }).ToList();
+                Volume = r.Volume,
+            }).ToArray();
+
+            result[id] = bars;
+            _speicher?.Lege(id, intervalCode, fromUtc, bars);
         }
 
         return result;
     }
-
 
     public async Task<(DateTime TsUtc, decimal Close)?> GetBarAtOrBeforeAsync(
         int assetId, string intervalCode, DateTime tsUtc, CancellationToken ct = default)
