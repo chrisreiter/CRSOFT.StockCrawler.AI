@@ -436,7 +436,7 @@ public sealed class HousekeepingService(
             new CommandDefinition("""
                 SELECT lauf_id, gestartet_utc, beendet_utc, probe, ausgeloest, regeln, zeilen, dauer_s, note
                   FROM dbo.housekeeping_lauf
-                 ORDER BY lauf_id DESC OFFSET 0 ROWS FETCH NEXT (@n) ROWS ONLY
+                 ORDER BY lauf_id DESC OFFSET 0 ROWS FETCH NEXT @n ROWS ONLY
                 """, new { n = Math.Clamp(laeufe, 1, 100) }, cancellationToken: ct))).ToList();
 
         var regeln = kopf.Count == 0

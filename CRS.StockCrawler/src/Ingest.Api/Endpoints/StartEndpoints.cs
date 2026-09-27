@@ -240,7 +240,7 @@ public static class StartEndpoints
                   LEFT JOIN dbo.knowledge_source f ON f.source_id = s.parent_source_id
                  WHERE s.pillar = 'semantic' AND s.kind = 'article' AND s.indexed_utc IS NOT NULL
                  ORDER BY COALESCE(s.published_utc, s.added_utc) DESC
-                OFFSET 0 ROWS FETCH NEXT (60) ROWS ONLY
+                OFFSET 0 ROWS FETCH NEXT 60 ROWS ONLY
                 """, cancellationToken: ct));
 
         /*  Hoechstens zwei Meldungen je Quelle. Die juengsten zehn kamen im

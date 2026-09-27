@@ -226,7 +226,7 @@ public static class AnalysisEndpoints
                          GROUP BY asset_id_a, asset_id_b
                   ) cx ON cx.asset_id_a = p.asset_id_a AND cx.asset_id_b = p.asset_id_b
                  WHERE p.interval_code = @interval AND p.n_obs >= @minObs {extra}
-                 ORDER BY {order} OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY
+                 ORDER BY {order} OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
                 """;
 
             var rows = (await conn.QueryAsync<ExtremePair>(new CommandDefinition(

@@ -113,7 +113,7 @@ public sealed class ReasoningUrteilService(
              WHERE a.is_tracked = {d.Wahr} AND p."close" > 0
              ORDER BY CASE WHEN COALESCE(b.bestand, 0) > 0 THEN 0 ELSE 1 END,
                       CASE WHEN u.zuletzt IS NULL THEN 0 ELSE 1 END, u.zuletzt, a.asset_id
-            OFFSET 0 ROWS FETCH NEXT (@max) ROWS ONLY
+            OFFSET 0 ROWS FETCH NEXT @max ROWS ONLY
             """, new { max = Math.Clamp(maxWerte, 1, 200) }, cancellationToken: ct))).ToList();
 
         // Der Tageskontext einmal je Lauf, nicht je Wert.
@@ -249,7 +249,7 @@ public sealed class ReasoningUrteilService(
                    u.begruendung AS Begruendung, u.werkzeuge AS Werkzeuge, u.sekunden AS Sekunden,
                    u.bewertet_utc AS BewertetUtc, u.realisiert AS Realisiert, u.treffer AS Treffer
               FROM dbo.reasoning_urteil u JOIN dbo.asset a ON a.asset_id = u.asset_id
-             ORDER BY u.made_at_utc DESC OFFSET 0 ROWS FETCH NEXT (@n) ROWS ONLY
+             ORDER BY u.made_at_utc DESC OFFSET 0 ROWS FETCH NEXT @n ROWS ONLY
             """, new { n = Math.Clamp(letzte, 1, 500) }, cancellationToken: ct))).ToList();
 
         var (verdienst, grund) = IReasoningUrteilService.Verdienst(z.Gerichtet, z.Treffer);

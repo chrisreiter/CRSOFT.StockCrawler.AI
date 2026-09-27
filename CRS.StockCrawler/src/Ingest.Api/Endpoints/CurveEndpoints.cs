@@ -134,16 +134,44 @@ public static class CurveEndpoints
             Results.Ok(await svc.RunsAsync(ct)));
 
         /* Häufigkeit je Art — die erste Plausibilitätsprüfung eines Laufs. */
-        g.MapGet("/stats", async (ICurveDiscussionService svc, int? lauf,
-                                  CancellationToken ct) =>
-            Results.Ok(new
+        g.MapGet("/stats", async (ICurveDiscussionService svc, ILoggerFactory protokoll,
+                                  int? lauf, CancellationToken ct) =>
+        {
+            /*  Wie bei den Verknüpfungen: eine Datenbank, die nicht antwortet,
+                ist kein Programmfehler.
+
+                Diese Auszählung gruppiert über alle Ereignisse eines Laufs —
+                243.312 im jüngsten — ohne Zeilenbegrenzung, denn sie will ja
+                gerade alle zählen. Grosse Gruppierungen sind auf dem
+                EventMesh-DataCell-Backend am 27.09.2026 der letzte langsame
+                Punkt; die Ansicht lief deshalb in den Lesetimeout und zeigte
+                einen roten Serverfehler.                                      */
+            IReadOnlyList<dynamic> arten;
+            string? stoerung = null;
+
+            try
             {
-                arten = await svc.TypeStatsAsync(lauf, ct),
+                arten = await svc.TypeStatsAsync(lauf, ct);
+            }
+            catch (Exception ex)
+            {
+                protokoll.CreateLogger("Curve").LogWarning(ex, "Artenverteilung nicht abrufbar");
+                arten = [];
+                stoerung = "Die Datenbank hat die Auszählung nicht in der vorgesehenen Zeit "
+                         + "geliefert. Die Verteilung bleibt deshalb leer — das ist keine "
+                         + "Aussage über die Daten, sondern über die Abfrage.";
+            }
+
+            return Results.Ok(new
+            {
+                arten,
+                stoerung,
 
                 hinweis = "Sind fast alle Funde von einer einzigen Art, stimmt die Schwelle "
                         + "nicht. Erwartet wird eine Mischung, in der Wende- und Hochpunkte "
                         + "seltener sind als Ausbrüche."
-            }));
+            });
+        });
 
         /* Die Verknüpfungen zwischen den Werten. */
         g.MapGet("/links", async (ICurveDiscussionService svc, ILoggerFactory protokoll,

@@ -19,6 +19,18 @@ public sealed record CurveEventRow(
     DateTime TsUtc, string EventType, short Sign, double Severity,
     decimal ClosePrice, decimal Smoothed, double Slope, double Curvature);
 
+/// <summary>
+/// Ein Ereignis ohne die Angaben zum Wert — so, wie es aus der Datenbank kommt.
+///
+/// <para>Symbol, Name und Klasse stehen in <c>asset</c> (704 Zeilen) und werden
+/// von der Anwendung angehängt, statt über die grosse Ereignistabelle verbunden
+/// zu werden. Deshalb braucht das Lesen einen eigenen Typ: <see cref="CurveEventRow"/>
+/// verlangt diese drei Felder, die Abfrage liefert sie bewusst nicht.</para>
+/// </summary>
+internal sealed record Rohereignis(
+    long CurveEventId, int AssetId, DateTime TsUtc, string EventType, short Sign,
+    double Severity, decimal ClosePrice, decimal Smoothed, double Slope, double Curvature);
+
 /// <summary>Eine Seite davon.</summary>
 public sealed record CurveEventPage(
     int RunId, int Page, int Size, long Total, IReadOnlyList<CurveEventRow> Rows);
@@ -316,7 +328,7 @@ public sealed class CurveDiscussionService(
             ? "FROM dbo.curve_event e JOIN dbo.asset a ON a.asset_id = e.asset_id"
             : "FROM dbo.curve_event e";
 
-        var rohzeilen = (await conn.QueryAsync<CurveEventRow>(new CommandDefinition(
+        var rohzeilen = (await conn.QueryAsync<Rohereignis>(new CommandDefinition(
             $"""
              SELECT e.curve_event_id AS CurveEventId, e.asset_id AS AssetId,
                     e.ts_utc AS TsUtc, e.event_type AS EventType, e.sign AS Sign,
@@ -325,7 +337,7 @@ public sealed class CurveDiscussionService(
              {quelle}
              {where}
               ORDER BY {order}
-             OFFSET @skip ROWS FETCH NEXT (@take) ROWS ONLY;
+             OFFSET @skip ROWS FETCH NEXT @take ROWS ONLY;
              """, p, cancellationToken: ct))).ToList();
 
         var werte = (await conn.QueryAsync<(int AssetId, string Symbol, string? Name, byte Klasse)>(
@@ -334,9 +346,15 @@ public sealed class CurveDiscussionService(
                 cancellationToken: ct)))
             .ToDictionary(a => a.AssetId);
 
-        var rows = rohzeilen.Select(r => werte.TryGetValue(r.AssetId, out var a)
-            ? r with { Symbol = a.Symbol, Name = a.Name, AssetClass = (AssetClass)a.Klasse }
-            : r).ToList();
+        var rows = rohzeilen.Select(r =>
+        {
+            werte.TryGetValue(r.AssetId, out var a);
+            return new CurveEventRow(
+                r.CurveEventId, r.AssetId,
+                a.Symbol ?? $"#{r.AssetId}", a.Name, (AssetClass)a.Klasse,
+                r.TsUtc, r.EventType, r.Sign, r.Severity,
+                r.ClosePrice, r.Smoothed, r.Slope, r.Curvature);
+        }).ToList();
 
         return new CurveEventPage(id, page, size, total, rows);
     }
@@ -419,7 +437,7 @@ public sealed class CurveDiscussionService(
               JOIN dbo.asset a ON a.asset_id = l.asset_a
               JOIN dbo.asset b ON b.asset_id = l.asset_b
              WHERE l.run_id = @id {wertefilter}
-             ORDER BY l.lift DESC OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY;
+             ORDER BY l.lift DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY;
             """, new { id, limit = Math.Clamp(limit, 10, 500), assetId },
             commandTimeout: 25, cancellationToken: ct))).ToList();
     }
@@ -443,7 +461,7 @@ public sealed class CurveDiscussionService(
              WHERE run_id = @id
              GROUP BY event_type
              ORDER BY anzahl DESC;
-            """, new { id }, cancellationToken: ct))).ToList();
+            """, new { id }, commandTimeout: 25, cancellationToken: ct))).ToList();
     }
 
     // ----------------------------------------------------------------------

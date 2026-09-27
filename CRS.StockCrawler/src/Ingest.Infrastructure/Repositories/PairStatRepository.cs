@@ -169,7 +169,7 @@ public sealed class PairStatRepository : IPairStatRepository
                WHERE asset_id_a = @assetId AND interval_code = @intervalCode
                  AND best_lag_bars < 0
             ) x
-            ORDER BY ABS(x.BestLagCorr) DESC OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY
+            ORDER BY ABS(x.BestLagCorr) DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
             """, new { assetId = assetIdB, intervalCode, limit },
             commandTimeout: 120, cancellationToken: ct));
 
@@ -188,7 +188,7 @@ public sealed class PairStatRepository : IPairStatRepository
                    spread_before AS SpreadBefore, spread_after AS SpreadAfter
               FROM dbo.crossing
              WHERE interval_code = @intervalCode AND ts_utc >= @fromUtc
-             ORDER BY ts_utc DESC OFFSET 0 ROWS FETCH NEXT (@limit) ROWS ONLY
+             ORDER BY ts_utc DESC OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
             """, new { fromUtc, intervalCode, limit }, commandTimeout: 120, cancellationToken: ct));
 
         return rows.ToList();
