@@ -181,11 +181,11 @@ public sealed class ForecastRepository : IForecastRepository
                 WHEN MATCHED THEN UPDATE SET
                      actual_close = @Ist, actual_return = @IstRendite,
                      abs_pct_error = @Fehler, direction_correct = @Richtung,
-                     scored_at_utc = {d.Jetzt}
+                     scored_at_utc = @Jetzt
                 WHEN NOT MATCHED THEN
                      INSERT (forecast_id, actual_close, actual_return, abs_pct_error,
-                             direction_correct)
-                     VALUES (@Id, @Ist, @IstRendite, @Fehler, @Richtung);
+                             direction_correct, scored_at_utc)
+                     VALUES (@Id, @Ist, @IstRendite, @Fehler, @Richtung, @Jetzt);
                 """,
                 /* Ein anonymes Objekt, kein Tupel.
 
@@ -194,7 +194,7 @@ public sealed class ForecastRepository : IForecastRepository
                    not be used for parameters -- the language-level names are not
                    available to use as parameter names". Die Namen, die im C#-Quelltext
                    stehen, gibt es zur Laufzeit nicht. */
-                new { s.Id, s.Ist, s.IstRendite, s.Fehler, s.Richtung },
+                new { s.Id, s.Ist, s.IstRendite, s.Fehler, s.Richtung, Jetzt = DateTime.UtcNow },
                 cancellationToken: ct));
         }
     }
@@ -210,9 +210,9 @@ public sealed class ForecastRepository : IForecastRepository
         await conn.ExecuteAsync(new CommandDefinition("""
             INSERT INTO dbo.forecast_score
               (forecast_id, actual_close, actual_return, abs_pct_error, direction_correct,
-               asset_id, horizon_hours)
+               asset_id, horizon_hours, scored_at_utc)
             SELECT @ForecastId, @ActualClose, @ActualReturn, @AbsPctError, @DirectionCorrect,
-                   @AssetId, @HorizonHours
+                   @AssetId, @HorizonHours, @ScoredAtUtc
              WHERE NOT EXISTS (SELECT 1 FROM dbo.forecast_score WHERE forecast_id = @ForecastId)
             """, list, cancellationToken: ct));
 
