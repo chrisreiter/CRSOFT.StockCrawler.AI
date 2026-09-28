@@ -173,7 +173,8 @@ public sealed class ScoringService : IScoringService
                     AbsPctError = absPctError,
                     DirectionCorrect = directionCorrect,
                     AssetId = f.AssetId,
-                    HorizonHours = f.HorizonHours
+                    HorizonHours = f.HorizonHours,
+                    ScoredAtUtc = DateTime.UtcNow
                 });
 
                 /* Dieselbe Rechnung für die Mischung -- sofern eine da ist. Ältere

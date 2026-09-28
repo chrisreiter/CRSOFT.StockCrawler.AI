@@ -143,75 +143,36 @@ public sealed class Vorwaermer : BackgroundService
             _log.LogInformation(
                 "Prognosespeicher vorgewÃ¤rmt: {Fertig} von {Gesamt} Werten in {Sek:N0} s",
                 fertig2, verfolgt.Count, uhr2.Elapsed.TotalSeconds);
-            /*  Dritter Durchgang: Stundenreihen.
+            /*  HIER IST SCHLUSS â€” und das ist eine Korrektur, keine Sparmassnahme.
 
-                Nach den Tagesreihen, weil sie seltener gebraucht werden und
-                viermal so gross sind: drei Monate stuendlich sind je Wert
-                2.160 Bars, ueber 646 Werte rund 1,4 Millionen. Zusammen mit
-                den Tagesreihen bleibt das unter dem Budget von 2,5 Millionen.
+                Bis zum 28.09.2026 folgten hier zwei weitere Durchgaenge:
+                Stundenreihen und Rueckblick. Beide waren gegen einen ruhigen
+                Node gemessen (127 s und 167 s) und sahen dort guenstig aus.
 
-                Drei Monate, weil die Kursansicht bei Stundenintervall damit
-                vorbelegt ist.                                               */
-            var uhr3 = Stopwatch.StartNew();
-            var fertig3 = 0;
-            var vonH = bis.AddMonths(-3);
+                Im Betrieb sind sie es nicht. Gemessen am selben Tag: Der
+                Rueckblick-Durchgang lief nach 38 Minuten noch immer, der Node
+                hatte in dieser Zeit 16.119 Sekunden CPU verbraucht, und die
+                Anwendung antwortete auf ihre eigenen Anfragen mit 500 und
+                â€žTimeout during reading attempt". Die Vorwaermung hat also
+                genau das kaputtgemacht, wofuer es sie gibt.
 
-            foreach (var a in verfolgt)
-            {
-                if (ct.IsCancellationRequested) break;
+                Der Grund ist derselbe wie ueberall auf diesem Backend: Der
+                Rueckblick liest je Wert aus `forecast` und `forecast_track`
+                (9,3 Mio Zeilen), und eine ueber den Index gefundene Zeile
+                kostet dort ein Vielfaches einer sequentiell gelesenen. Ueber
+                646 Werte summiert sich das zu einer Last, die eine
+                Nebenbeschaeftigung nicht haben darf.
 
-                try
-                {
-                    await bars.GetManyAsync([a.AssetId], BarInterval.Hourly, vonH, bis, ct);
-                    fertig3++;
-                }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _log.LogDebug(ex, "Stunden-Vorwaermen fuer {Symbol} uebersprungen", a.Symbol); }
+                Geblieben sind die zwei billigen Durchgaenge: Tagesbars
+                (97 s) und Prognosen (228 s). Sie decken den haeufigsten
+                Aufruf ab. Wer eine Stundenreihe oder den Rueckblick oeffnet,
+                zahlt den ersten Aufruf selbst â€” das ist der richtige Preis,
+                solange das Vorwaermen teurer ist als das Warten.
 
-                try { await Task.Delay(25, ct); }
-                catch (OperationCanceledException) { break; }
-            }
-
-            _log.LogInformation(
-                "Kursspeicher stündlich vorgewärmt: {Fertig} von {Gesamt} Werten, {Bars} Bars in {Sek:N0} s",
-                fertig3, verfolgt.Count, _speicher.GehalteneBars, uhr3.Elapsed.TotalSeconds);
-
-            /*  Vierter Durchgang: der Rueckblick.
-
-                Zuletzt, weil er die teuerste und die seltenste Ansicht ist:
-                je Wert eine Prognosehistorie und eine Rueckrechnungsspur,
-                zusammen gemessen rund 1,4 Sekunden. Ueber alle Werte sind
-                das etwa fuenfzehn Minuten im Hintergrund.
-
-                Nur der Standardhorizont (24 Stunden bei Tagesbars). Wer einen
-                anderen waehlt, zahlt den ersten Aufruf -- das ist eine
-                bewusste Grenze: Alle neun Horizonte vorzuwaermen waere die
-                neunfache Zeit und das neunfache Budget fuer eine Ansicht, die
-                fast immer auf dem Standardwert steht.                       */
-            var uhr4 = Stopwatch.StartNew();
-            var fertig4 = 0;
-
-            foreach (var a in verfolgt)
-            {
-                if (ct.IsCancellationRequested) break;
-
-                try
-                {
-                    await spur.GetAsync(a.AssetId, 24, BarInterval.Daily, von, bis, ct);
-                    await prognosen.GetHistoryAsync(a.AssetId, 24, von, bis, ct);
-                    fertig4++;
-                }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _log.LogDebug(ex, "Rueckblick-Vorwaermen fuer {Symbol} uebersprungen", a.Symbol); }
-
-                try { await Task.Delay(25, ct); }
-                catch (OperationCanceledException) { break; }
-            }
-
-            _log.LogInformation(
-                "Rückblick vorgewärmt: {Fertig} von {Gesamt} Werten in {Sek:N0} s",
-                fertig4, verfolgt.Count, uhr4.Elapsed.TotalSeconds);
-
+                Die Lehre, und sie ist die allgemeinere: Eine
+                Hintergrundaufgabe muss gegen den BETRIEB gemessen werden,
+                nicht gegen ein ruhiges System. Ich habe hier dieselbe Falle
+                gebaut, vor der ich in dieser Sitzung zweimal gewarnt habe.  */
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

@@ -1,0 +1,53 @@
+Startseite|/api/start/
+Zeitplan|/api/scheduler
+Oberflaechenzustand|/api/state/
+Werteliste|/api/assets/?limit=400&tracked=true
+Werte-Facetten|/api/assets/facets
+Verfolgte Werte|/api/assets/tracked
+Chart 1 Wert|/api/series/?ids=201&interval=1d&months=12
+Chart 5 Werte + Prognose|/api/series/?ids=201,202,203,204,205&interval=1d&months=12&forecast=true
+Chart + Rueckblick|/api/series/?ids=201&interval=1d&months=12&forecast=true&forecastPast=true
+Chart stuendlich|/api/series/?ids=201&interval=1h&months=3
+Einzelwert-Reihe|/api/series/201?interval=1d&months=12
+Prognosestand|/api/forecast/stand
+Prognose je Wert|/api/forecast/201
+Treffsicherheit|/api/forecast/accuracy
+Guete-Uebersicht|/api/guete/uebersicht?h=24
+Guete-Lernkurve|/api/guete/lernkurve?h=24
+Guete-Mischvergleich|/api/guete/mischvergleich
+Saeulengewichte|/api/saeulen/gewichte
+Saeulen-Verdienst|/api/saeulen/skill
+Analyse-Matrix|/api/analysis/matrix
+Analyse-Korrelationen|/api/analysis/correlations/201?interval=1d&limit=25
+Analyse-Kreuzungen|/api/analysis/crossings?interval=1d&days=90&limit=100
+Analyse-Fuehrende|/api/analysis/leaders/201?interval=1d&limit=15
+Kurven-Laeufe|/api/curve/runs
+Kurven-Statistik|/api/curve/stats
+Kurven-Ereignisse|/api/curve/events?limit=50
+Kurven-Verknuepfungen|/api/curve/links?limit=50
+Depot-Bestand|/api/bestand
+Depot-Tausch|/api/bestand/tausch?depot=aktiv
+Autopilot|/api/autopilot/
+Autopilot-Rangfolge|/api/autopilot/rangfolge?depot=aktiv&grenze=25
+Day-Trading heute|/api/daytrading/heute?stunden=24
+Fluss-Markt|/api/flow/market?interval=1d&months=6
+Fluss-Gruppen|/api/flow/groups?interval=1d&months=6
+Fluss-Rotationspaare|/api/flow/rotation-pairs?interval=1d&months=6&limit=12
+Fluss-Beitraege|/api/flow/contributors?interval=1d&recentDays=30&limit=12
+Langfrist|/api/langfrist/uebersicht?monate=60
+Herde-Ausloeser|/api/herde/ausloeser
+Herde-Umkehr|/api/herde/umkehr?limit=20
+Herde-Zeitzonen|/api/herde/zeitzonen
+Grundschwingungen|/api/grundschwingungen/
+Spektral-Moden|/api/spectral/modes?interval=1d
+Spektral-Fuehrende|/api/spectral/leaders?interval=1d
+Deep-Status|/api/deep/status
+Neuzugaenge|/api/neuzugang/
+Bestandszahlen|/api/health/stats
+Laeufe|/api/health/runs?last=40
+Anbieter|/api/health/providers
+Kursspeicher|/api/health/kursspeicher
+Hausmeister|/api/housekeeping/
+Reasoning-Urteile|/api/reasoning/urteile?letzte=30
+Reasoning-Journal|/api/reasoning/journal?tage=7
+Benutzerliste|/api/auth/benutzer

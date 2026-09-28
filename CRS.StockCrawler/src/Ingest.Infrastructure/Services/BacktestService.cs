@@ -269,7 +269,8 @@ public sealed class BacktestService : IBacktestService
                         AbsPctError = absPctError,
                         DirectionCorrect = directionCorrect,
                         AssetId = asset.AssetId,
-                        HorizonHours = horizonHours
+                        HorizonHours = horizonHours,
+                        ScoredAtUtc = DateTime.UtcNow
                     }], ct);
                 }
             }
