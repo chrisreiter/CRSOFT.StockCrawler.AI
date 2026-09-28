@@ -166,6 +166,13 @@ public sealed class AuthService : IAuthService
         der Weg.                                                               */
     private static readonly TimeSpan Kurzfrist = TimeSpan.FromSeconds(15);
 
+    /// <summary>
+    /// Wie lange eine frisch angemeldete Sitzung im Speicher ueberbrueckt
+    /// wird, bis die geschriebene Zeile lesbar ist. Reichlich bemessen gegen
+    /// die gemessenen 250 ms — die Verzoegerung waechst unter Schreiblast.
+    /// </summary>
+    private static readonly TimeSpan Anmeldebruecke = TimeSpan.FromMinutes(2);
+
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, (Angemeldet Wer, DateTime Bis)> _kurz = new();
 
     public AuthService(ISqlConnectionFactory factory, ILogger<AuthService> log,
@@ -416,7 +423,38 @@ public sealed class AuthService : IAuthService
 
         _log.LogInformation("Angemeldet: {Login} ({Rolle})", u.Login, u.Rolle);
 
-        return (new Angemeldet(u.UserId, u.Login, u.Anzeigename, u.Rolle), null);
+        var angemeldet = new Angemeldet(u.UserId, u.Login, u.Anzeigename, u.Rolle);
+
+        /*  Die frische Sitzung sofort in den Kurzspeicher — als Brücke, bis
+            die geschriebene Zeile lesbar ist.
+
+            Auf dem EventMesh-DataCell-Backend ist eine gerade geschriebene
+            Zeile nicht sofort für den nächsten Lesevorgang sichtbar. Gemessen
+            am 28.09.2026: im Ruhezustand nach rund 250 ms, WÄHREND eines
+            schreibenden Laufs (die Analyse legte 925.000 Kreuzungen an) auch
+            nach drei Sekunden noch nicht — zwei von drei Anmeldungen blieben
+            dauerhaft ungültig, die Sitzungszeile stand dabei nachweislich in
+            der Tabelle.
+
+            Für den Benutzer sieht das aus wie ein falsches Kennwort: Die
+            Anmeldung antwortet mit 200, die nächste Anfrage kennt niemanden,
+            und die Oberfläche fällt wortlos aufs Formular zurück. Genau so
+            wurde es am Vortag gemeldet — und die damalige Erklärung (ein
+            berechneter Ablaufzeitpunkt, der still verschwand) war richtig,
+            aber offenbar nicht die ganze.
+
+            Der Kurzspeicher überbrückt das: Die nächste Anfrage findet die
+            Sitzung im Speicher und fragt die Datenbank gar nicht. Bis die
+            Brücke abläuft, ist die Zeile längst lesbar. Zwei Minuten sind
+            reichlich bemessen gegen die gemessenen 250 ms und decken auch
+            einen schreibenden Lauf ab; ein Abmelden räumt sie ohnehin sofort.
+
+            Das ist eine Umgehung. Ein Backend, das eine bestätigte Schreibung
+            nicht sofort zurücklesen kann, gehört dort behoben — gemeldet ist
+            es.                                                                */
+        _kurz[sitzung] = (angemeldet, DateTime.UtcNow + Anmeldebruecke);
+
+        return (angemeldet, null);
     }
 
     public async Task AbmeldenAsync(Guid sitzung, CancellationToken ct = default)
