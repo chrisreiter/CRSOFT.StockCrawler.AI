@@ -30,12 +30,31 @@ public static class HealthEndpoints
             kann, ist eine Behauptung. `bytesGeschaetzt` ist bewusst als
             Schaetzung benannt -- gemessen wird der echte Verbrauch am Prozess,
             nicht hier.                                                        */
-        app.MapGet("/api/health/kursspeicher", (Kursspeicher speicher) => Results.Ok(new
+        /*  Die Trefferquote gehoert hierher, nicht nur die Fuellmenge.
+
+            Ein Zwischenspeicher verdeckt das Problem, das ihn noetig macht.
+            Wer in einem halben Jahr wissen will, ob das Backend besser
+            geworden ist, braucht die Quote: Sie sagt, wie oft trotz allem
+            gelesen werden musste. Ohne sie bleibt der Speicher fuer immer
+            drin, weil niemand belegen kann, dass er entbehrlich ist.
+
+            `ergaenzungen` zaehlt, wie oft ein Schreibvorgang in den Speicher
+            eingearbeitet statt weggeworfen wurde -- die Zahl, an der sich
+            ablesen laesst, ob das Fortschreiben greift.                       */
+        app.MapGet("/api/health/kursspeicher", (Kursspeicher speicher) =>
         {
-            reihen = speicher.GehalteneReihen,
-            bars = speicher.GehalteneBars,
-            bytesGeschaetzt = (long)speicher.GehalteneBars * 120,
-        })).WithTags("Health");
+            var gesamt = speicher.Treffer + speicher.Fehlschlaege;
+            return Results.Ok(new
+            {
+                reihen = speicher.GehalteneReihen,
+                bars = speicher.GehalteneBars,
+                bytesGeschaetzt = (long)speicher.GehalteneBars * 120,
+                treffer = speicher.Treffer,
+                fehlschlaege = speicher.Fehlschlaege,
+                trefferquote = gesamt > 0 ? Math.Round((double)speicher.Treffer / gesamt, 3) : (double?)null,
+                ergaenzungen = speicher.Ergaenzungen,
+            });
+        }).WithTags("Health");
 
         app.MapGet("/api/health/runs", async (IIngestRunRepository repo, int last = 50,
                                               CancellationToken ct = default) =>

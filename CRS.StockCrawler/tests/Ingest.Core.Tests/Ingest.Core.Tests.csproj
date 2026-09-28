@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Ingest.Core\Ingest.Core.csproj" />
+    <ProjectReference Include="..\..\src\Ingest.Infrastructure\Ingest.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

@@ -50,6 +50,22 @@ public sealed class Kursspeicher
     private readonly int _budget;
     private long _uhr;
 
+    /*  Zaehler, und sie sind kein Beiwerk.
+
+        Ein Zwischenspeicher verdeckt das Problem, das ihn noetig macht. Wer
+        spaeter wissen will, ob das Backend besser geworden ist, braucht die
+        Fehlschlagquote: Sie sagt, wie oft trotz allem gelesen werden musste.
+        Ohne diese Zahl bleibt der Speicher fuer immer drin, weil niemand
+        belegen kann, dass er entbehrlich geworden ist -- und genau das steht
+        als Auflage in der Dokumentation.                                       */
+    private long _treffer;
+    private long _fehlschlaege;
+    private long _ergaenzungen;
+
+    public long Treffer => Interlocked.Read(ref _treffer);
+    public long Fehlschlaege => Interlocked.Read(ref _fehlschlaege);
+    public long Ergaenzungen => Interlocked.Read(ref _ergaenzungen);
+
     /// <param name="budgetBars">
     /// Obergrenze in Bars. 1,5 Millionen entsprechen bei dieser Datenform rund
     /// 300 MB. Das deckt die Tagesreihen aller verfolgten Werte ueber zwei
@@ -74,9 +90,19 @@ public sealed class Kursspeicher
     /// </summary>
     public IReadOnlyList<PriceBar>? Hole(int wert, string intervall, DateTime von, DateTime bis)
     {
-        if (!_abschnitte.TryGetValue((wert, intervall), out var a)) return null;
-        if (a.AbUtc > von) return null;
+        if (!_abschnitte.TryGetValue((wert, intervall), out var a))
+        {
+            Interlocked.Increment(ref _fehlschlaege);
+            return null;
+        }
 
+        if (a.AbUtc > von)
+        {
+            Interlocked.Increment(ref _fehlschlaege);
+            return null;
+        }
+
+        Interlocked.Increment(ref _treffer);
         a.Zugriff = Interlocked.Increment(ref _uhr);
 
         // Binäre Suche statt Where(): der Abschnitt ist sortiert, und bei
@@ -111,8 +137,94 @@ public sealed class Kursspeicher
     }
 
     /// <summary>
+    /// Die eben geschriebenen Bars in den gehaltenen Abschnitt einarbeiten,
+    /// statt ihn wegzuwerfen.
+    ///
+    /// <para><b>Warum das den Unterschied macht.</b> Der Tageslauf schreibt für
+    /// alle verfolgten Werte; mit <see cref="Verwerfe"/> war danach der gesamte
+    /// Kursspeicher leer, und die unmittelbar folgenden Läufe — Analyse,
+    /// Prognose, Autopilot — haben dieselben Bars einzeln wieder aus der
+    /// Datenbank geholt. Gemessen am 28.09.2026 kostet allein das erneute Laden
+    /// von 318.590 Tagesbars <b>92 Sekunden</b>, und zwar direkt nachdem die
+    /// Anwendung diese Zeilen selbst geschrieben hat. Sie kennt sie also
+    /// bereits; sie ein zweites Mal zu bezahlen ist reine Verschwendung.</para>
+    ///
+    /// <para><b>Warum das sicher ist.</b> Ein Upsert schreibt genau die Bars,
+    /// die hier hereingereicht werden — es gibt keine dritte Stelle, die an der
+    /// Reihe rührt. Bei gleichem Zeitstempel gewinnt der NEUE Bar; das ist
+    /// dieselbe Regel, die der Upsert in der Datenbank anwendet, und sie ist der
+    /// Grund, warum ein Nachladen derselben Tage (der Inkrementlauf holt die
+    /// letzten fünf Tage erneut) korrigierte Kurse durchreicht statt sie zu
+    /// verdoppeln.</para>
+    ///
+    /// <para><b>Was bewusst NICHT passiert.</b> Bars vor <c>AbUtc</c> werden
+    /// verworfen, nicht vorangestellt. <c>AbUtc</c> ist die Zusage „ab hier ist
+    /// die Reihe vollständig"; sie nach unten zu verschieben, weil zufällig ein
+    /// älterer Bar geschrieben wurde, wäre eine Zusage ohne Deckung — der
+    /// Bereich dazwischen ist nie geladen worden. Ein Leser, der weiter zurück
+    /// fragt, bekommt so korrekt einen Fehlschlag statt einer Reihe mit Loch.</para>
+    ///
+    /// <para>Wird die Reihe nicht gehalten, passiert nichts: Was nicht im
+    /// Speicher steht, muss auch nicht fortgeschrieben werden.</para>
+    /// </summary>
+    public void Ergaenze(int wert, string intervall, IReadOnlyList<PriceBar>? geschrieben)
+    {
+        if (geschrieben is null || geschrieben.Count == 0) return;
+        if (!_abschnitte.TryGetValue((wert, intervall), out var alt)) return;
+
+        var neue = geschrieben.Where(b => b.TsUtc >= alt.AbUtc)
+                              .OrderBy(b => b.TsUtc)
+                              .ToArray();
+        if (neue.Length == 0) return;
+
+        var verschmolzen = Verschmelze(alt.Bars, neue);
+
+        var ersetzt = new Abschnitt
+        {
+            AbUtc = alt.AbUtc,
+            Bars = verschmolzen,
+            Zugriff = Interlocked.Increment(ref _uhr),
+        };
+
+        _abschnitte[(wert, intervall)] = ersetzt;
+        Interlocked.Increment(ref _ergaenzungen);
+        NeuZaehlen();
+        Aufraeumen();
+    }
+
+    /*  Zwei sortierte Folgen zu einer sortierten ohne Dubletten.
+
+        Bei gleichem Zeitstempel gewinnt der neue Bar. Das ist nicht Geschmack:
+        Der Inkrementlauf laedt die letzten Tage bewusst erneut, weil ein
+        Anbieter Kurse nachtraeglich korrigiert (Splits, verspaetete
+        Schlusskurse). Gaebe der alte den Ausschlag, haette der Speicher genau
+        die Korrektur nicht, wegen der nachgeladen wurde.                        */
+    private static PriceBar[] Verschmelze(PriceBar[] alt, PriceBar[] neu)
+    {
+        var ziel = new List<PriceBar>(alt.Length + neu.Length);
+        int i = 0, j = 0;
+
+        while (i < alt.Length && j < neu.Length)
+        {
+            var c = alt[i].TsUtc.CompareTo(neu[j].TsUtc);
+            if (c < 0) ziel.Add(alt[i++]);
+            else if (c > 0) ziel.Add(neu[j++]);
+            else { ziel.Add(neu[j++]); i++; }   // gleicher Zeitpunkt: der neue gilt
+        }
+
+        while (i < alt.Length) ziel.Add(alt[i++]);
+        while (j < neu.Length) ziel.Add(neu[j++]);
+
+        return ziel.ToArray();
+    }
+
+    /// <summary>
     /// Verwerfen, sobald für diesen Wert und dieses Intervall geschrieben wurde.
     /// Ein Aufruf für eine nicht gehaltene Reihe ist billig und erlaubt.
+    ///
+    /// <para>Bleibt für die Fälle, in denen die Anwendung NICHT weiss, was
+    /// geschrieben wurde — Löschläufe des Hausmeisters etwa. Wer die
+    /// geschriebenen Bars zur Hand hat, nimmt <see cref="Ergaenze"/>.</para>
     /// </summary>
     public void Verwerfe(int wert, string intervall)
     {
