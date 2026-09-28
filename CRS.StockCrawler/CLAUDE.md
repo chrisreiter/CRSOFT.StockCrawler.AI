@@ -1409,11 +1409,27 @@ Neustart 35 Minuten Import über 646 Werte, und ich habe es stundenlang für
 richtiges Verhalten gehalten, weil die Meldung „Tages- und Stundenlauf
 versäumt" ja stimmte.
 
-**Und `now() at time zone 'utc'` liefert dort die ORTSZEIT.** Dieselbe Probe:
-`finished_utc = 00:42:55` statt `22:42:55`. Zwei Stunden in der Zukunft — und
-damit in die gefährlichere Richtung, denn ein solcher Zeitstempel sieht neuer
-aus, als er ist. Wer ihn gegen einen aus C# geschriebenen vergleicht, bekommt
-systematisch das falsche Ergebnis. Über zwanzig Stellen der Anwendung setzen
+**Und ein dort geschriebener Zeitstempel kommt mit Ortszeit-Offset zurück.**
+Dieselbe Probe: `finished_utc = 00:42:55` statt `22:42:55`. Zwei Stunden in der
+Zukunft — und damit in die gefährlichere Richtung, denn ein solcher Zeitstempel
+sieht neuer aus, als er ist. Wer ihn gegen einen aus C# geschriebenen
+vergleicht, bekommt systematisch das falsche Ergebnis.
+
+**Korrektur vom 28.09.2026:** Hier stand zuerst „`now() at time zone 'utc'`
+liefert dort die ORTSZEIT". Das ist falsch und war nie gemessen. Am Live-Node
+geprüft liefern `now()` und `now() at time zone 'utc'` beide korrektes UTC
+(09:28:07 gegen System-UTC 09:28:07); die Datenbankentwicklung hat den Vertrag
+zusätzlich mit einem Regressionstest festgenagelt. Der Versatz entsteht beim
+Schreiben: Gespeichert wird `2026-09-28 11:28:23+02:00` — als *Zeitpunkt*
+richtig, aber in Ortszeit mit Offset kanonisiert. Die Spalte ist app-seitig ein
+`timestamp without time zone`, Npgsql liefert daraus `11:28:23`, und der
+Vergleich gegen `DateTime.UtcNow` geht um zwei Stunden daneben.
+**Ein Befund muss sagen, an welcher Stelle gemessen wurde** — ich habe aus dem
+zurückgelesenen Wert auf die Rechnung geschlossen, ohne die Rechnung zu prüfen,
+und damit die falsche Komponente beschuldigt. Für die Anwendung ändert die
+Korrektur nichts; die Gegenmassnahme unten bleibt richtig.
+
+Über zwanzig Stellen der Anwendung setzen
 `{d.Jetzt}` in einem UPDATE; die fünf, an denen eine Entscheidung daran hängt
 (`finished_utc`/`beendet_utc` in `ingest_run`, `curve_run`, `learning_epoch`,
 `freq_run`, `housekeeping_lauf`, `autopilot_lauf`), binden den Zeitpunkt
@@ -1696,6 +1712,37 @@ zu breite Canvas über die Nachbarspalten. `drawCharts` legt deshalb erst alle
 Boxen an (`createBox`) und zeichnet danach in einem zweiten Durchgang
 (`renderPlot`). `.chart-box` hat zusätzlich `min-width: 0` und
 `overflow: hidden` als Netz.
+
+**Ein `AS`-Alias auf der ERSTEN projizierten Spalte hebelt am
+DataCell-Backend das `ORDER BY` aus.** Gemessen am 28.09.2026:
+`SELECT run_id, job_name, started_utc … WHERE job_name = 'update:1h'
+ORDER BY run_id DESC FETCH NEXT 1` liefert Lauf **11250** vom selben Tag;
+dieselbe Abfrage mit `run_id AS X` liefert **11126 vom 25.09.** — die Werte
+in sich stimmig, aber die falsche Zeile. Kein Fehler, Status 200. Die
+Position trennt scharf: Alias auf Spalte 2 oder 3 ist harmlos, Alias gleich
+dem Spaltennamen (`run_id AS run_id`) ebenfalls, Alias in Anführungszeichen
+dagegen nicht. Die Sortierung wird nicht falsch ausgeführt, sondern
+**verworfen** — an `dbo.asset` liefert der Alias-Fall exakt dasselbe wie „gar
+kein ORDER BY". Auf `dbo.ingest_run` kommt ein zweites Symptom dazu: Spalten
+kommen als NULL zurück, darunter der Primärschlüssel, der in keiner
+existierenden Zeile NULL sein kann; so wurde der Befund über
+`/api/health/runs` überhaupt sichtbar (`{"runId":0,"startedUtc":
+"0001-01-01T00:00:00"}`).
+
+**Unsichtbar war er, weil `WHERE` auf den Primärschlüssel alles heilt** —
+wo genau eine Zeile herauskommt, ist die Sortierung bedeutungslos. Betroffen
+sind **47 Abfragen** dieser Anwendung, und zwar ausgerechnet das Muster
+„jüngster Eintrag" (`ORDER BY … DESC FETCH NEXT 1`): letzter Lauf, jüngste
+Prognose, letzter Kurs, neuester Kurvenlauf. Dapper bildet auf
+Eigenschaftsnamen ab, deshalb steht fast überall ein Alias.
+
+Daraus zwei Lehren. Die bekannte: **Ein Backend, das nicht abbricht, sondern
+falsch antwortet, ist die schwierigste Sorte.** Die neue, und sie betrifft
+das eigene Vorgehen: **Ein Messaufbau, der Statuscode und Dauer prüft, kann
+eine falsche Antwort per Bauart nicht sehen.** Die Ansicht „Läufe" stand in
+zwei aufeinanderfolgenden Messungen unter „gut" (31 ms, 24 ms, je Status
+200) und war die ganze Zeit leer. „27 von 53 Ansichten sind gut" ist deshalb
+eine Aussage über Tempo, nicht über Richtigkeit.
 
 ## Neuen Provider ergänzen
 

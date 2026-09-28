@@ -360,7 +360,8 @@ Am Node, dort gemeldet und dort zu beheben:
    ihn nur nicht — ein Weichenproblem, kein fehlendes Verfahren.
 6. **Ein `DEFAULT` auf einer Spalte greift beim `INSERT` nicht.**
    `dbo.ingest_run.started_utc` blieb leer, ohne Fehler und ohne Meldung.
-7. **`now() at time zone 'utc'` liefert die Ortszeit**, nicht UTC.
+7. **Zeitstempel werden mit Ortszeit-Offset kanonisiert**, und die Anwendung
+   liest sie als UTC.
 
    Die beiden letzten sind **keine Tempofragen, sondern Korrektheit**, und
    Punkt 7 ist der gefährlichste Befund dieser ganzen Arbeit. An einer
@@ -380,6 +381,46 @@ Am Node, dort gemeldet und dort zu beheben:
    Zeitstempel sieht **neuer** aus, als er ist. Ein falsches Tempo merkt man,
    einen falschen Zeitstempel nicht.
 
+   **Nachtrag 28.09.2026 — die Ursache sitzt woanders, als hier zuerst
+   stand.** Die erste Fassung dieses Punktes behauptete, `now() at time zone
+   'utc'` rechne falsch. Das ist widerlegt: Die Datenbankentwicklung hat den
+   UTC-Vertrag mit einem Regressionstest festgenagelt, und am Live-Node
+   nachgemessen stimmt der Lesepfad auf die Sekunde.
+
+   ```
+   SELECT now(), (now() at time zone 'utc')
+     → 2026-09-28 09:28:07.4372252 | 2026-09-28 09:28:07.4372272
+   System-UTC                       09:28:07
+   ```
+
+   Der Versatz entsteht beim **Schreiben**. Dieselbe Probezeile, heute:
+
+   ```
+   UPDATE … SET finished_utc = now() at time zone 'utc'
+     → finished_utc = 2026-09-28 11:28:23.0306484+02:00
+   System-UTC                       09:28:23
+   ```
+
+   Der gespeicherte **Zeitpunkt ist richtig** — 11:28:23+02:00 ist derselbe
+   Moment wie 09:28:23 UTC. Kanonisiert wird aber in Ortszeit mit Offset, und
+   die Spalte heisst `finished_utc` und ist app-seitig ein `timestamp without
+   time zone`. Npgsql liefert daraus ein `DateTime` mit 11:28:23, die
+   Anwendung vergleicht es gegen `DateTime.UtcNow` — und liegt zwei Stunden
+   daneben. Die Wirkung ist also genau die oben beschriebene, die Ursache
+   eine andere.
+
+   **Die Lehre über den Einzelfall hinaus: Ein Befund muss sagen, an welcher
+   Stelle gemessen wurde.** „`now()` liefert Ortszeit" und „der Wert kommt
+   mit Ortszeit-Offset aus der Spalte zurück" sehen von aussen gleich aus und
+   führen zu völlig verschiedenen Reparaturen. Ich habe aus dem
+   zurückgelesenen Wert auf die Rechnung geschlossen, ohne die Rechnung
+   selbst zu prüfen — dieselbe Art Fehlschluss wie beim Vergleich einer
+   Gleichheit über 1 Zeile mit einem Bereich über 200.001 Zeilen. Wer eine
+   fremde Komponente beschuldigt, schuldet ihr die Einzelmessung.
+
+   Für die Anwendung ändert das nichts: Die fünf Zeitstempel, an denen eine
+   Entscheidung hängt, werden aus C# gebunden und sind von beidem unabhängig.
+
    Was Punkt 6 gekostet hat, zeigt, wie teuer ein lautloser Fehler wird:
    `NachholenAsync` entscheidet über `MAX(started_utc) … AND finished_utc IS
    NOT NULL`, ob ein Tageslauf versäumt wurde. Ohne `started_utc` fand es nie
@@ -388,11 +429,10 @@ Am Node, dort gemeldet und dort zu beheben:
    Messungen dieses Dokuments — und ich habe es für richtiges Verhalten
    gehalten, weil die Meldung „Tages- und Stundenlauf versäumt" ja stimmte.
 
-   Rückmeldung aus der Datenbankentwicklung zu beiden: Der Schreibpfad
-   behandelt `now()` bereits korrekt als UTC; der Executor-Pfad tut es nicht.
-   Punkt 6 ist dieselbe Familie — die Zeile wird beim Einfügen nicht
-   vervollständigt. Beides ist ohne Schreibrisiko an einer Probezeile
-   nachprüfbar.
+   Rückmeldung aus der Datenbankentwicklung: Der Lesepfad behandelt `now()`
+   korrekt als UTC — siehe den Nachtrag oben. Punkt 6 besteht dagegen
+   unverändert: In derselben Probe vom 28.09. blieb `started_utc` wieder
+   leer. Beides ist ohne Schreibrisiko an einer Probezeile nachprüfbar.
 
 In der Anwendung:
 
@@ -404,3 +444,89 @@ In der Anwendung:
    Besonders `PrognosegueteService.RanglisteAsync` (acht Aggregate über den
    Verbund zweier Grosstabellen, siebenmal hintereinander gerufen),
    `StartEndpoints.PrognoseAsync` und `BriefingService.WartungAsync`.
+
+---
+
+## Befund 11, 28.09.2026: Ein Alias auf der ersten Spalte hebelt `ORDER BY` aus
+
+Der schwerste Befund dieser ganzen Arbeit, und er ist keine Tempofrage.
+
+### Was passiert
+
+```sql
+SELECT run_id,      job_name, started_utc FROM dbo.ingest_run
+ WHERE job_name = 'update:1h' ORDER BY run_id DESC FETCH NEXT 1
+  → 11250 | update:1h | 2026-09-28 09:08:02      richtig, jüngster Lauf
+
+SELECT run_id AS X, job_name, started_utc FROM dbo.ingest_run
+ WHERE job_name = 'update:1h' ORDER BY run_id DESC FETCH NEXT 1
+  → 11126 | update:1h | 2026-09-25 11:07:26      FALSCHE ZEILE, drei Tage alt
+```
+
+Ein `AS` auf der **ersten** projizierten Spalte, und die Abfrage liefert eine
+andere Zeile. Die Werte sind in sich stimmig — 11126 gehört wirklich zum
+25.09. Es ist also keine kaputte Zeile, sondern die **falsche**. Kein Fehler,
+kein Hinweis, Status 200.
+
+### Die Position ist scharf trennend
+
+| | |
+| --- | --- |
+| Alias auf Spalte 1 | **falsch** |
+| Alias auf Spalte 2 | richtig |
+| Alias auf Spalte 3 | richtig |
+| Alias gleich dem Spaltennamen (`run_id AS run_id`) | richtig |
+| Alias in Anführungszeichen (`AS "RunId"`) | **falsch** |
+| Literal statt Parameter beim Limit | kein Unterschied |
+
+### Das `ORDER BY` wird nicht falsch ausgeführt, sondern verworfen
+
+Die Gegenprobe an `dbo.asset` zeigt es am deutlichsten:
+
+```
+ORDER BY asset_id, ohne Alias    →  1   | BTC-USD     geordnet
+ORDER BY asset_id, Alias Sp. 1   →  236 | XLV         Sortierung ignoriert
+ohne ORDER BY                    →  236 | XLV         dieselbe Zeile
+```
+
+Der Alias-Fall liefert **exakt dasselbe wie „gar kein ORDER BY"**.
+
+Auf `dbo.ingest_run` kommt ein zweites Symptom dazu: Dort liefert derselbe
+Rückfallpfad Spalten als NULL — unter anderem den Primärschlüssel, der in
+keiner existierenden Zeile NULL sein kann. Sichtbar wurde der Befund genau
+dort, über `/api/health/runs`:
+
+```json
+{"runId":0,"jobName":"update:1d","startedUtc":"0001-01-01T00:00:00"}
+```
+
+Status **200**, 24 ms. `GetRecentAsync` liest `run_id AS RunId, …` — Alias auf
+Spalte 1.
+
+### Warum es so lange unsichtbar war
+
+**Bei `WHERE` auf den Primärschlüssel ist alles in Ordnung.** Mit Alias auf
+einer, keiner oder allen Spalten — jedes Mal korrekt. Wo genau eine Zeile
+herauskommt, ist die Sortierung bedeutungslos und der Fehler unsichtbar. Das
+ist der Normalfall der meisten Abfragen.
+
+### Die Reichweite in dieser Anwendung
+
+**47 Abfragen** haben die Form „`ORDER BY` mit `AS`-Alias auf der ersten
+Spalte". Dapper bildet auf Eigenschaftsnamen ab, deshalb steht fast überall
+ein Alias. Das Muster „jüngster Eintrag" — `ORDER BY … DESC FETCH NEXT 1` —
+ist in dieser Anwendung allgegenwärtig: letzter Lauf, jüngste Prognose,
+letzter Kurs, neuester Kurvenlauf. **Jede dieser Abfragen liefert potenziell
+eine beliebige statt der jüngsten Zeile.**
+
+### Die Lehre
+
+Sie ist dieselbe wie beim Sitzungsfehler und bei `COUNT(DISTINCT)`, nur
+teurer: **Ein Backend, das nicht abbricht, sondern falsch antwortet, ist die
+schwierigste Sorte.** Und eine zweite, die diesen Tag betrifft:
+
+**Ein Messaufbau, der Statuscode und Dauer prüft, kann eine falsche Antwort
+per Bauart nicht sehen.** Die Ansicht „Läufe" steht in beiden 53er-Messungen
+unter „gut" — 31 ms, dann 24 ms, beide Male Status 200. Sie war die ganze
+Zeit leer. Die Aussage „27 von 53 Ansichten sind gut" ist damit eine Aussage
+über **Tempo**, nicht über Richtigkeit, und sie war so nicht gemeint.
