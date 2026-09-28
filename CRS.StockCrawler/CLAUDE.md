@@ -1451,6 +1451,38 @@ geschnitten; dieselbe Überlegung beim Rückblicksverlauf und bei der
 Rückrechnungsspur. **Der Test dafür ist banal und wurde trotzdem zu spät
 gemacht**: zweimal dieselbe Anfrage, und die zweite muss schneller sein.
 
+**Wer schreibt, weiss was er schrieb — also fortschreiben statt verwerfen.**
+Der Kursspeicher wurde bei jedem `UpsertAsync` verworfen. Das ist korrekt und
+teuer: Der Tageslauf schreibt für ALLE verfolgten Werte, also war der Speicher
+danach vollständig leer, und Analyse, Prognose und Autopilot — die unmittelbar
+folgen — holten dieselben Bars einzeln wieder aus der Datenbank. Gemessen am
+28.09.2026: **318.590 Tagesbars, 92 Sekunden**, unmittelbar nachdem die
+Anwendung genau diese Zeilen selbst geschrieben hatte. `Ergaenze` arbeitet
+stattdessen die geschriebenen Bars ein; `UpsertAsync` reicht dafür die bereits
+entdoppelte, sortierte Liste weiter, die ohnehin in die Datenbank ging. Es
+kostet nichts und keinen zusätzlichen Speicher — es ist dieselbe Datenmenge
+unter demselben Budget, sie wird nur nicht weggeworfen.
+
+Drei Regeln, die das Verschmelzen richtig machen, und jede hat einen Grund:
+**Bei gleichem Zeitstempel gewinnt der NEUE Bar** — der Inkrementlauf lädt die
+letzten fünf Tage bewusst erneut, weil Anbieter Kurse nachträglich korrigieren;
+gäbe der alte den Ausschlag, hätte der Speicher genau die Korrektur nicht,
+wegen der nachgeladen wurde. **Bars vor `AbUtc` werden verworfen, nicht
+vorangestellt** — `AbUtc` ist die Zusage „ab hier ist die Reihe vollständig",
+und sie nach unten zu verschieben, weil zufällig ein älterer Bar geschrieben
+wurde, wäre eine Zusage ohne Deckung. **Was nicht gehalten wird, wird nicht
+angelegt** — ein Abschnitt aus dem Nichts hätte kein belastbares `AbUtc`.
+`Verwerfe` bleibt für die Fälle, in denen die Anwendung nicht weiss, was
+geschrieben wurde (Löschläufe des Hausmeisters).
+
+**Ein Zwischenspeicher braucht seine Fehlschlagquote, sonst wird er
+unsterblich.** Er verdeckt das Problem, das ihn nötig macht. Ohne die Zahl,
+wie oft trotz allem gelesen werden musste, kann später niemand belegen, dass
+er entbehrlich geworden ist — und dann bleibt er für immer drin, obwohl in
+dieser Datei steht, dass die Zwischenspeicher eine Notmassnahme sind und auf
+den Prüfstand gehören, sobald das Backend besser ist. `Treffer`,
+`Fehlschlaege` und `Ergaenzungen` stehen unter `/api/health/kursspeicher`.
+
 **`QueryUnbufferedAsync` ist nicht sparsam, sondern langsam.** Ich hatte es
 gewählt, um bei der Treffsicherheit „den Speicher flach zu halten" — knapp
 tausend Zeilen. Gemessen über Npgsql gegen dasselbe Backend, 993 Zeilen:
