@@ -472,3 +472,82 @@ Join-Schlüssel der reinen Filterseite bauen, die andere Seite durchstreamen
 und `COUNT`/`SUM` direkt falten. Speicherbedarf ist dann Hash plus
 Akkumulatoren statt der vollen Zwischenmenge — und sie ist damit Tempo und
 Grenze zugleich.
+
+---
+
+# Sechste Messung: die streamende Aggregation — und die Korrektur meines
+# eigenen Messaufbaus
+
+Die streamende Aggregation (`8bf94a7`) wurde deployed, gemessen, **für kaputt
+befunden und zurückgerollt** — und dieses Urteil war falsch. Der Weg dorthin
+gehört in dieses Dokument, weil er die vorherigen fünf Messungen relativiert.
+
+## Was zuerst gemessen wurde
+
+Mit `8bf94a7` lieferten sieben von acht Ansichten 500, vier davon waren
+vorher in Ordnung. Naheliegende Ursache geprüft und ausgeschlossen: Die
+Speicher-Schranke testweise von 2,8 auf 6 GB angehoben — dasselbe Bild. Also
+zurückgerollt.
+
+**Nach der Rückrollung war es genauso schlecht.** Derselbe Node-Stand, der
+eine Stunde vorher vier Ansichten mit 200 geliefert hatte, lieferte jetzt
+acht Mal 500.
+
+## Die Ursache: der Messaufbau selbst
+
+Der **zweite Durchgang ist schlechter als der erste**. Im Aufwärmdurchgang
+lieferten Kurven-Statistik, Kurven-Verknüpfungen und Bestandszahlen noch
+Ergebnisse; im Messdurchgang unmittelbar danach alle drei 500. Der Heap
+schrumpft zwischen den Abfragen nicht, und die Speicher-Schranke greift mit
+jedem weiteren Durchgang früher.
+
+**Acht schwere Ansichten hintereinander sind ein anderer Test als acht
+einzelne.** Alle Sequenz-Messungen dieses Dokuments — auch die Spitzen von
+8,76, 10,48 und 9,68 GB — messen deshalb zu einem Teil die Reihenfolge und
+nicht die Ansicht.
+
+## Die saubere Messung: ein frischer Node je Ansicht
+
+| Ansicht | `b36aff6` | `8bf94a7` (Streaming) | |
+| --- | --- | --- | --- |
+| Bestandszahlen | 200 / 27,69 s / 0,74 GB | **200 / 13,25 s / 0,15 GB** | halbe Zeit, ein Fünftel Speicher |
+| Startseite | 200 / 39,95 s / 0,63 GB | **200 / 24,07 s / 0,67 GB** | 40 % schneller |
+| Güte-Lernkurve | 200 / 15,60 s / 1,10 GB | 200 / 15,90 s / 1,08 GB | unverändert |
+| Prognosestand | 500 / 34,06 s / 3,76 GB | 500 / 47,64 s / 3,92 GB | greift nicht |
+| Güte-Mischvergleich | 500 / 47,97 s / 4,41 GB | 500 / 47,76 s / 4,57 GB | greift nicht |
+
+**Die streamende Aggregation ist also eine Verbesserung**, und Bestandszahlen
+ist ihr sauberster Beleg: halbe Zeit bei einem Fünftel des Speichers. Dass
+Prognosestand und Güte-Mischvergleich nicht profitieren, war vorhergesagt —
+sie haben drei Tabellen beziehungsweise `GROUP BY` und nehmen den
+Rückfallpfad.
+
+## Der wichtigste Einzelbefund dieser Messung
+
+**Eine einzelne schwere Ansicht kostet 0,15 bis 1,10 GB.** Die 9,68 und
+10,48 GB entstanden ausschliesslich dadurch, dass acht davon hintereinander
+liefen. Die Vorgabe von 3,34 GB wird von einer einzelnen Ansicht **nicht**
+gerissen — mit genau zwei Ausnahmen, und die sind der verbleibende harte
+Rest: Prognosestand 3,92 GB und Güte-Mischvergleich 4,57 GB.
+
+Damit ist die Empfehlung aus der fünften Messung („Speicherschranke, weil
+eine einzelne Abfrage zehn Gigabyte ziehen darf") **in dieser Schärfe
+falsch**. Keine einzelne Abfrage zieht zehn Gigabyte. Die Schranke bleibt
+trotzdem sinnvoll — als Netz für die zwei Ansichten, die es einzeln tun.
+
+## Ein zweiter Fehler im Protokoll, gefunden und behoben
+
+Der erste Einzeltest meldete für die Güte-Lernkurve „500 nach 36 ms" mit
+`Timeout during reading attempt`. Das sah nach einem Befund aus und war der
+Aufbau: **Nach einem Node-Neustart hält der Verbindungspool der Anwendung
+tote Verbindungen, und die erste Anfrage scheitert sofort.** Seither steht im
+Protokoll ein Verwurfsaufruf nach jedem Neustart; dieselbe Ansicht lieferte
+danach 200 in 15,6 s.
+
+## Die Lehre
+
+**Ein Messaufbau muss gegen sich selbst kontrolliert werden.** In dieser
+Datei steht seit Wochen, dass eine Hintergrundaufgabe gegen den BETRIEB
+gemessen werden muss und nicht gegen ein ruhiges System. Hier war die
+störende Hintergrundlast der eigene vorherige Messdurchgang — und der
+Störfaktor war nicht das Umfeld, sondern die Methode.
