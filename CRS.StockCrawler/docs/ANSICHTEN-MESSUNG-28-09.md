@@ -133,3 +133,272 @@ Sitzung mit einer Probe prüfen (sonst misst man 53-mal einen 401 — auch das i
 hier passiert), dann jede Ansicht einmal mit Zeitlimit. **Vorher die
 Vorwärmung abwarten und keinen Import laufen lassen**, sonst misst man das
 Umfeld statt der Anwendung.
+
+---
+
+# Zweite Messung, nach dem Deploy vom 28.09. 11:11 Uhr
+
+Dieselben 53 Ansichten, derselbe Ablauf, dieselben Bedingungen — nur mit den
+drei Node-Änderungen des Vormittags. Die erste Messung oben ist der
+Vergleichsstand.
+
+## Ergebnis in einem Satz
+
+**Acht Ansichten sind deutlich schneller, zwei sind von „kaputt" auf „langsam"
+gewandert, keine ist schlechter geworden — und die neun schwersten Fälle stehen
+unverändert.**
+
+## Was messbar besser wurde
+
+| Ansicht | vorher | nachher | |
+| --- | ---: | ---: | ---: |
+| Fluss-Beiträge | 4.737 ms | 41 ms | ×115 |
+| Autopilot-Rangfolge | 2.120 ms | 115 ms | ×18 |
+| Kurven-Ereignisse | 8.937 ms | 510 ms | ×17 |
+| Herde-Umkehr | 7.359 ms | 1.379 ms | ×5,3 |
+| Analyse-Korrelationen | Zeitlimit 60 s | 23.523 ms | erstmals eine Antwort |
+| Autopilot | **500** nach 45,1 s | 25.841 ms | von kaputt auf langsam |
+| Depot-Bestand | 1.870 ms | 965 ms | ×1,9 |
+| Analyse-Kreuzungen | 895 ms | 480 ms | ×1,9 |
+
+## Was unverändert kaputt ist
+
+Alle mit demselben Muster — Aggregat oder `GROUP BY` über einen Verbund:
+
+| Ansicht | |
+| --- | ---: |
+| Langfrist | **500** nach 56,9 s |
+| Spektral-Moden | Zeitlimit 60 s |
+| Spektral-Führende | Zeitlimit 60 s |
+| Güte-Mischvergleich | **500** nach 36,1 s |
+| Prognosestand | **500** nach 34,1 s |
+| Güte-Lernkurve | **500** nach 34,1 s |
+| Kurven-Statistik | 27.048 ms |
+| Kurven-Verknüpfungen | 23.949 ms |
+| Bestandszahlen | 14.073 ms |
+| Startseite | 26.100 ms |
+
+## Eine Zeile dieser Messung war falsch, und zwar in die schmeichelhafte Richtung
+
+Die Startseite stand im Rohprotokoll mit **8 ms** — ein Faktor 3.079 gegenüber
+den 24.635 ms der ersten Messung. Das wäre der mit Abstand grösste Erfolg des
+Tages gewesen und ist keiner: `/api/start/` hält sein Ergebnis **fünf Minuten**,
+und mein eigener Probeaufruf kurz vorher hatte den Speicher gefüllt. Kalt
+nachgemessen sind es **26.100 ms**, warm 13 ms.
+
+Gegenüber 24.635 ms ist das unverändert bis minimal schlechter. Die Kachel steht
+genau dort, wo sie stand.
+
+**Die Lehre: Ein Messaufbau muss die Zwischenspeicher der Anwendung kennen, die
+er durchmisst** — sonst misst er sie statt der Datenbank. Bei den beiden
+vorgewärmten Speichern (Kurse, Prognosen) war mir das bewusst, sie sind in
+beiden Läufen gleich warm. Den Fünf-Minuten-Speicher des Startseiten-Endpunkts
+hatte ich vergessen, obwohl ich ihn selbst gebaut habe. Ein Faktor 3.079 ist
+dabei das freundlichste Ergebnis: Er ist so unplausibel, dass er auffällt. Ein
+Faktor 3 wäre durchgegangen.
+
+## Speicher: eine Spitze, kein Leck
+
+Während der Messung erreichte der Node **4,92 GB**, später bei einem einzelnen
+Startseiten-Aufruf **6,26 GB** — deutlich über den 3,34 GB des SQL Servers und
+damit über der Vorgabe. Im 15-Sekunden-Protokoll fällt er danach wieder:
+
+```
+11:26:22   3,43 GB
+11:26:37   0,89 GB
+11:26:52   0,59 GB
+…
+11:32:45   0,61 GB   (nach dem 6,26-GB-Ausschlag)
+```
+
+Es ist also **kein Leck, sondern eine Spitze**, und sie entsteht genau bei den
+Abfragen, die am Zwischenzeilen-Budget scheitern. Das ist derselbe Befund von
+der Speicherseite: Was 1,5 Millionen Zwischenzeilen materialisiert, braucht
+dafür auch den Speicher. Im Ruhezustand liegt der Node bei **0,58 bis 0,61 GB**
+gegen 3,34 GB beim SQL Server.
+
+Die Vorgabe „nie grösser als der SQL Server" ist damit im Betrieb eingehalten
+und in der Spitze verletzt. Beides gehört in denselben Satz, sonst ist es keine
+Aussage.
+
+## Was die Zahlen für die Datenbankentwicklung bedeuten
+
+Die acht Verbesserungen und die zehn offenen Fälle trennen sauber: Verbessert
+hat sich, was **je Treffer rekonstruiert** oder **mit Limit gelesen** wird. Nicht
+verbessert hat sich **kein einziger** Fall von „Aggregat über einen Verbund".
+Das war vor dem Deploy die Vermutung und ist jetzt gemessen — die
+Startseiten-Kachel ist der Prüfstein dafür, und ihre zwei Kardinalitäten
+(336.753 und 1.203.327, Summe 1.540.080 gegen ein Budget von 1.500.000) sagen
+auch, warum: Beide Seiten werden materialisiert, bevor verbunden wird, und die
+Summe reisst das Budget um 2,7 %.
+
+---
+
+# Dritte Messung, nach dem Korrektheits-Deploy (`9cd113a`, 28.09. 13:12 Uhr)
+
+Zwei Fixes am Node: die Alias-Auflösung im `ORDER BY` (Befund 11) und das
+gebündelte Zusammensetzen der Zeilen. Beide zielen auf **Richtigkeit**, nicht
+auf Tempo. Gemessen wurde trotzdem vollständig — eine Korrektur, die nebenbei
+etwas verlangsamt, muss man sehen.
+
+## Bedingungen
+
+Node um 13:12:32 mit den neuen Binärdateien gestartet, Anwendung um 13:14:11
+mit `Ingest__NachholenNachAusfall=false`. Der Nachholimport war vorher
+vollständig durchgelaufen (646 Werte, 0 Fehler, 3.337 Zeilen, 5.825 s). Beide
+Zwischenspeicher vorgewärmt, **kein** Import während der Messung, nächster
+Stundenlauf erst 54 Minuten später.
+
+## Ergebnis
+
+**Keine einzige Statusverschlechterung.** 43× 200, 7× 500, 2× Zeitlimit, 1×
+400 (Analyse-Matrix, die einen Parameter braucht — kein Fehler des Backends).
+30 Ansichten unter 200 ms.
+
+Bewegt hat sich:
+
+| Ansicht | vorher | nachher | |
+| --- | ---: | ---: | --- |
+| Kurven-Statistik | 27.048 ms | **14.712 ms** | −12,3 s |
+| Depot-Bestand | 965 ms | **665 ms** | −300 ms |
+| Analyse-Kreuzungen | 480 ms | 661 ms | +181 ms |
+
+Der Rest liegt im Rauschen.
+
+## Der unerwartete Nebenertrag
+
+Von einem reinen Korrektheits-Fix war **kein** Tempo-Effekt erwartet. Die
+Halbierung der Kurven-Statistik und die Vorwärmzeiten sprechen dafür, dass das
+gebündelte Zusammensetzen der Zeilen mehr bringt als gedacht:
+
+| | ursprünglich | vor dem Fix | nach dem Fix |
+| --- | ---: | ---: | ---: |
+| Kursspeicher vorwärmen | 97 s | 138 s | **92 s** |
+| Prognosespeicher vorwärmen | 228 s | 140 s | **107 s** |
+| Node nach der Vorwärmung | — | 0,53 GB | **0,23 GB** |
+
+Zusammen 199 s statt 278 s, und der Node braucht danach **weniger als die
+Hälfte** des Speichers. Beides passt zum selben Mechanismus: Eine Anweisung je
+Zeilenmenge statt einer je Spalte.
+
+## Was die Korrektheit betrifft — der eigentliche Zweck
+
+Der Prüfstein (`npgprobe`, acht Fälle mit eigenem Soll je Fall):
+
+| | vorher | nachher |
+| --- | ---: | ---: |
+| bestanden | 2 | **7** |
+| falsch | 6 | **1** |
+
+Am Symptom, mit dem der Befund sichtbar wurde:
+
+```
+vorher:  {"runId":0,     "startedUtc":"0001-01-01T00:00:00"}
+nachher: {"runId":11255, "startedUtc":"2026-09-28T09:33:18",
+          "finishedUtc":"2026-09-28T11:10:23",
+          "okCount":646, "errCount":0, "rowsWritten":3337}
+```
+
+Und an der folgenreichsten Stelle der Anwendung, dem Umrechnungskurs des
+Depots (`InvestService:966`) — die Abfrage wörtlich wie im Quelltext gegen
+dieselbe ohne Alias:
+
+```
+mit Alias (wie in der App):  1,13765645 | 28/09/2026 00:00:00
+ohne Alias (Referenz):       1,13765645 | 28/09/2026 00:00:00
+```
+
+Identisch, und es ist die jüngste Bar. Vorher hätte diese Abfrage einen
+beliebigen historischen Wechselkurs liefern können.
+
+## Ein Fall bleibt offen
+
+`SELECT run_id, job_name, started_utc FROM dbo.ingest_run OFFSET 0 ROWS FETCH
+NEXT 1 ROWS ONLY` — ohne WHERE, ohne ORDER BY — liefert weiterhin NULL im
+Primärschlüssel. Dass die Zeile eine beliebige ist, ist ohne `ORDER BY`
+zulässig; ein leerer Primärschlüssel ist es nicht. In der Anwendung kommt
+diese Form auf keiner Tabelle mit sparsamen Spalten vor, der Fehler zeigt also
+derzeit niemandem eine falsche Zahl.
+
+## Die Lehre dieses Durchgangs
+
+**Der Vorher-Lauf ist nicht Bürokratie, er ist die Kontrolle.** Ich hätte ihn
+beinahe übersprungen, weil die Ursache ja bereits gefunden und der Fix bereits
+gebaut war. Genau dieser Lauf — am ruhigen Node, ohne jede Schreiblast, mit
+allen sechs Fehlern — hat die zwischenzeitliche Erklärung widerlegt, der
+Fehler entstehe durch gleichzeitiges Schreiben. Ohne ihn stünde eine plausible,
+gut belegte und falsche Ursache in diesem Dokument.
+
+---
+
+# Vierte Messung: der Semi-Join (`a015c05`, 28.09. 13:36 Uhr)
+
+Gezielt die acht Ansichten, auf die der Fix zielt. Nur
+`EventMesh.Sql.Node.dll` ersetzt, `EventMesh.Infrastructure.dll` unverändert —
+die Zahl ist damit gegen den Korrektheits-Stand isoliert.
+
+## Ergebnis
+
+| Ansicht | vorher | nachher | |
+| --- | ---: | ---: | --- |
+| Güte-Lernkurve | **500** nach 36,1 s | **200** nach 17,7 s | von kaputt auf langsam |
+| Kurven-Verknüpfungen | 29.084 ms | 21.265 ms | −7,8 s |
+| Kurven-Statistik | 23.909 ms | 20.716 ms | −3,2 s |
+| **Startseite (kalt)** | 26.145 ms | **26.130 ms** | **unverändert** |
+| Prognosestand | 500 nach 34,1 s | 500 nach 34,1 s | unverändert |
+| Güte-Mischvergleich | 500 nach 36,1 s | 500 nach 34,1 s | unverändert |
+| Langfrist | Zeitlimit | Zeitlimit | unverändert |
+
+## Die Kachel, auf die es ankam, hat sich nicht bewegt
+
+Die Startseite scheitert mit **derselben** Meldung wie vorher:
+`Query erzeugt ueber 1.500.000 (Zwischen-)Zeilen`. Der Grund steht in der
+Abfrage selbst:
+
+```sql
+SELECT CAST(COUNT(*) AS INT),
+       CAST(SUM(CASE WHEN s.direction_correct = true THEN 1 ELSE 0 END) AS INT)
+  FROM dbo.forecast_score s
+  JOIN dbo.forecast f ON f.forecast_id = s.forecast_id
+ WHERE f.model_version = 'ens-1'
+   AND s.scored_at_utc >= (now() - INTERVAL '30 days')
+```
+
+**Das ist kein zeilenliefernder Verbund, sondern ein Aggregat über einen
+Verbund.** Es gibt keine Join-Ausgabe, die ein Semi-Join reduzieren könnte —
+gebraucht werden zwei Skalare. Dieselbe Form haben Prognosestand,
+Güte-Mischvergleich und Langfrist. **Vier der fünf hartnäckigen Ansichten sind
+Aggregate über Verbünde**, und keine davon hat sich bewegt.
+
+Das deckt sich mit dem Muster der ersten Messung — dort stand schon, dass fast
+jede langsame oder kaputte Ansicht ein Aggregat über eine grosse Tabelle fährt,
+oft über einen Verbund. Nach vier Messungen ist das die einzige Kategorie, die
+sich durch keinen der bisherigen Eingriffe bewegt hat.
+
+## Der Speicher geht in die falsche Richtung
+
+Während derselben acht Ansichten, im Fünf-Sekunden-Takt gemessen:
+
+| | Spitze | Ruhe danach |
+| --- | ---: | ---: |
+| vor dem Semi-Join | 8,76 GB | 4,66 GB |
+| nach dem Semi-Join | **10,48 GB** | 2,74 GB |
+
+Zum Vergleich: SQL Server 3,34 GB, der Node nach der Vorwärmung 0,23 GB.
+
+Ob der Semi-Join das verursacht, ist **nicht** belegt — der Nachher-Lauf hatte
+einen Verwerfungsdurchgang vor sich, den der Vorher-Lauf nicht hatte.
+Ausschliessen lässt es sich aber auch nicht, und die Richtung stimmt nicht.
+
+**Daraus folgt die wichtigere Einsicht dieses Durchgangs:** Solange eine
+einzelne Abfrage zehn Gigabyte ziehen darf, ist jede Tempo-Verbesserung auf
+Sand gebaut. Der Node braucht **0,23 GB** für seinen gesamten vorgewärmten
+Betrieb und **10,48 GB** für acht Ansichten. Nicht die Dauer dieser Abfragen
+ist das eigentliche Problem, sondern dass sie unbegrenzt Speicher belegen
+dürfen — die Vorgabe „nie grösser als der SQL Server" ist damit um das
+Dreifache gerissen.
+
+Die nächste Arbeit am Backend ist deshalb nicht die nächste Verbund-Variante,
+sondern **streamende Aggregation über den Verbund** (Hash auf die kleinere
+Seite, die grössere durchstreamen, `COUNT`/`SUM` direkt falten, nie
+materialisieren) **und eine Speicherschranke je Abfrage**.
