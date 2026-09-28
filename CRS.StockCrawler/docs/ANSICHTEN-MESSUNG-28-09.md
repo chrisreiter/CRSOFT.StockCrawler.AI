@@ -402,3 +402,73 @@ Die nächste Arbeit am Backend ist deshalb nicht die nächste Verbund-Variante,
 sondern **streamende Aggregation über den Verbund** (Hash auf die kleinere
 Seite, die grössere durchstreamen, `COUNT`/`SUM` direkt falten, nie
 materialisieren) **und eine Speicherschranke je Abfrage**.
+
+---
+
+# Fünfte Messung: die Speicher-Schranke (`b36aff6`, 28.09. 15:50 Uhr)
+
+Nach der Erkenntnis der vierten Messung — nicht die Dauer der Aggregate ist
+das eigentliche Problem, sondern dass sie unbegrenzt Speicher belegen dürfen —
+bekam der Node eine harte Grenze: Über 2.800 MB verwalteten Speicher bricht
+eine Abfrage **fangbar** ab, statt in Richtung Speichernot zu laufen.
+
+## Sie greift, und das ist sichtbar
+
+Die Startseiten-Kachel bricht jetzt sofort ab:
+
+```
+Query zieht ueber 2800 MB verwalteten Speicher — abgebrochen
+(Node-Speichergrenze). Bitte WHERE/LIMIT einschraenken.
+```
+
+**500 nach 76 ms** statt 26 Sekunden Mahlen. Für sich genommen ein Gewinn: Die
+Abfrage verbrennt keine halbe Minute mehr, bevor sie aufgibt.
+
+## Sie hält die Grenze trotzdem nicht
+
+Dieselben acht Ansichten, Fünf-Sekunden-Takt:
+
+| | Spitze |
+| --- | ---: |
+| vor dem Semi-Join | 8,76 GB |
+| mit Semi-Join | 10,48 GB |
+| **mit Schranke** | **9,68 GB** |
+
+Acht Prozent besser, und weiterhin das Dreifache der Vorgabe von 3,34 GB.
+
+## Warum — zwei Kandidaten ausgeschlossen, einer bleibt
+
+Am selben Prozess kurz nacheinander:
+
+```
+Spitze waehrend der Abfragen     9,68 GB
+WorkingSet64 kurz danach         3,36 GB
+PrivateMemorySize64              3,34 GB
+im Leerlauf nach der Vorwaermung 0,23 GB
+```
+
+1. **Kein Leck.** Der Speicher wird freigegeben; die Spitze ist transient.
+2. **Nicht die Server-Speicherbereinigung.** `eventmesh-sql.runtimeconfig.json`
+   führt `System.GC.Server: false` — Workstation-GC läuft bereits. (In der
+   Anwendung war genau das der Hebel, 0,93 auf 0,14 GB; deshalb zuerst dort
+   nachgesehen.)
+
+Was bleibt: **Die Schranke misst den verwalteten Heap je Abfrage, die Vorgabe
+gilt für den Arbeitssatz des Prozesses.** Dazwischen liegen native Puffer, die
+Caches der Speicher-Engine und vor allem freigegebener, aber nicht an das
+Betriebssystem zurückgegebener Speicher. Eine Grenze von 2,8 GB je Abfrage
+kann einen Arbeitssatz von 9,68 GB erzeugen, ohne je auszulösen — bei mehreren
+Abfragen hintereinander erst recht.
+
+## Was daraus folgt
+
+**Die Schranke behandelt das Symptom und ist trotzdem richtig** — als Netz.
+Sie soll bleiben, und ihr Wert soll NICHT heruntergesetzt werden: 2,8 GB je
+Abfrage ist plausibel, und tiefer bräche Abfragen ab, die heute funktionieren.
+
+Die Massnahme, die den Speicher gar nicht erst entstehen lässt, ist die
+**streamende Aggregation über den Verbund**: einen Hash nur über die
+Join-Schlüssel der reinen Filterseite bauen, die andere Seite durchstreamen
+und `COUNT`/`SUM` direkt falten. Speicherbedarf ist dann Hash plus
+Akkumulatoren statt der vollen Zwischenmenge — und sie ist damit Tempo und
+Grenze zugleich.
