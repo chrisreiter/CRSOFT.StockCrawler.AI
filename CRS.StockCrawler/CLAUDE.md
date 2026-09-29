@@ -1342,19 +1342,24 @@ liesse sie sich nur aus dem eigenen Bestand — und damit hätte man den
 bleibt**; deshalb läuft der Sammler im Tageslauf vor dem Autopiloten. Erster
 gemessener Vorlauf: **9,0 Tage** zwischen Ankündigung und erwartetem Start.
 
-**Ein Backend, das nicht abbricht, sondern falsch antwortet, ist die
-schwierigste Sorte.** Der Umzug auf EventMesh DataCell am 27.09.2026 hat das
-vorgeführt: `expires_utc = jetzt + 14 Tage` speicherte `jetzt`, ohne Fehler und
-ohne Warnung. Da der Sitzungslesevorgang `expires_utc > jetzt` verlangt, war
-jede Sitzung im Moment ihrer Entstehung abgelaufen — der Login antwortete mit
-`200` und der richtigen Rolle, die nächste Anfrage kannte niemanden, und die
-Oberfläche fiel wortlos aufs Formular zurück. **Es sah aus wie ein falsches
-Kennwort und war keines.** Dieselbe Familie: `CASE WHEN spalte > jetzt` nahm bei
-`spalte IS NULL` den `THEN`-Zweig und zeigte das einzige Verwalterkonto
-dauerhaft als gesperrt; `COUNT(DISTINCT x)` ignorierte `DISTINCT` und lieferte
-die Zeilenzahl. Ein Abbruch ist ein Geschenk — er zeigt auf die Stelle. Eine
-falsche Antwort lässt den Suchenden dort graben, wo nichts ist. Alle Einzelheiten:
-[docs/EVENTMESH-DATACELL-BERICHT-27-09.md](docs/EVENTMESH-DATACELL-BERICHT-27-09.md).
+**Die Eigenheiten des Datenbank-Backends stehen nicht mehr hier.** Diese
+Anwendung läuft seit dem 27.09.2026 auf dem EventMesh SQL-Node statt auf SQL
+Server, und was dieser Node anders macht — stille falsche Antworten, teure
+Abfrageformen, Schreiben das Lesen blockiert — ist ein Thema für sich und
+gehört in sein eigenes Repository:
+**`MagNet/EventMesh/docs/SQL-NODE-BEFUNDE.md`**.
+
+Wer hier an SQL arbeitet, sollte es gelesen haben. Die zwei Sätze, die alles
+einordnen: **Der Node bricht bei einem Problem oft nicht ab, sondern antwortet
+falsch** — ein Abbruch zeigt auf die Stelle, eine falsche Antwort lässt den
+Suchenden dort graben, wo nichts ist. Und: **mit dem Treiber der Anwendung
+messen, nicht mit `psql`** — der Unterschied Literal/Parameter hat dort
+mehrfach Befunde erzeugt und verschwinden lassen.
+
+Was in dieser Datei bleibt, sind die **Gegenmittel der Anwendung** — die
+Zwischenspeicher, die Sitzungsprüfung, die Massenkopie, die
+Speicherbereinigung. Sie sind Umgehungen mit Ablaufdatum und gehören zum
+StockCrawler, nicht zum Node.
 
 **Was auf JEDER Anfrage liegt, darf die Datenbank nicht anfassen.** Die
 Sitzungsprüfung `WerIstDasAsync` las und schrieb je Anfrage zwei Mal — und die
@@ -1382,65 +1387,6 @@ eines Charts so lange". Jetzt zwei schlichte Lesevorgänge und die Zuordnung in
 C#, **einmal für alle Werte** (24,6 s), prozessweit gehalten, beim Start
 vorgewärmt. Die Frage war nicht „wie mache ich diese Abfrage schneller",
 sondern „warum stelle ich sie sechshundertmal".
-
-**Ein Verbund über einen Primärschlüssel kann ein Kreuzprodukt sein.** Gemessen
-am 27.09.2026 auf einem unbelasteten Node: Einzelzugriff `WHERE forecast_id =
-100000` **1,8 ms**, die ganze Tabelle zählen (483.588 Zeilen) **916 ms**, der
-Verbund eingeschränkt auf einen Wert (2.399 linke Zeilen, 997 Treffer)
-**17,6 s**, dieselben Kennungen als wörtliche `IN`-Liste **168 s**, als
-`IN (SELECT …)` Abbruch nach 278 s mit „Query erzeugt über 1.500.000
-(Zwischen-)Zeilen". Die letzte Meldung benennt die Ursache selbst: Der Executor
-filtert die linke Seite, materialisiert die rechte aber vollständig, bevor er
-verbindet. Die Schranke trifft damit den Falschen — ohne das Kreuzprodukt gäbe
-es die Zwischenzeilen nicht. **Die Zahl, die es verrät, ist das Verhältnis von
-Aufwand zu Ergebnis**: 1,16 Milliarden Paare für 997 Zeilen. Wer nur die
-Gesamtdauer sieht, hält es für eine große Abfrage; wer die Trefferzahl daneben
-legt, sieht den Plan.
-
-**Ein Spaltenstandard ist eine Zusage der Datenbank — und auf dem
-DataCell-Backend greift er beim INSERT nicht.** `dbo.ingest_run.started_utc`
-trägt in beiden Schemata ein `DEFAULT` auf die aktuelle Zeit. Gemessen am
-28.09.2026 an einer Probezeile: `started_utc` bleibt **NULL**, ohne Fehler und
-ohne Meldung. Die Folge sah nach etwas ganz anderem aus: `NachholenAsync`
-entscheidet über `MAX(started_utc) … AND finished_utc IS NOT NULL`, ob ein
-Tageslauf versäumt wurde — ohne Zeitstempel findet es nie einen erledigten Lauf
-und holt bei JEDEM Start nach. An einem Abend waren das bei jedem einzelnen
-Neustart 35 Minuten Import über 646 Werte, und ich habe es stundenlang für
-richtiges Verhalten gehalten, weil die Meldung „Tages- und Stundenlauf
-versäumt" ja stimmte.
-
-**Und ein dort geschriebener Zeitstempel kommt mit Ortszeit-Offset zurück.**
-Dieselbe Probe: `finished_utc = 00:42:55` statt `22:42:55`. Zwei Stunden in der
-Zukunft — und damit in die gefährlichere Richtung, denn ein solcher Zeitstempel
-sieht neuer aus, als er ist. Wer ihn gegen einen aus C# geschriebenen
-vergleicht, bekommt systematisch das falsche Ergebnis.
-
-**Korrektur vom 28.09.2026:** Hier stand zuerst „`now() at time zone 'utc'`
-liefert dort die ORTSZEIT". Das ist falsch und war nie gemessen. Am Live-Node
-geprüft liefern `now()` und `now() at time zone 'utc'` beide korrektes UTC
-(09:28:07 gegen System-UTC 09:28:07); die Datenbankentwicklung hat den Vertrag
-zusätzlich mit einem Regressionstest festgenagelt. Der Versatz entsteht beim
-Schreiben: Gespeichert wird `2026-09-28 11:28:23+02:00` — als *Zeitpunkt*
-richtig, aber in Ortszeit mit Offset kanonisiert. Die Spalte ist app-seitig ein
-`timestamp without time zone`, Npgsql liefert daraus `11:28:23`, und der
-Vergleich gegen `DateTime.UtcNow` geht um zwei Stunden daneben.
-**Ein Befund muss sagen, an welcher Stelle gemessen wurde** — ich habe aus dem
-zurückgelesenen Wert auf die Rechnung geschlossen, ohne die Rechnung zu prüfen,
-und damit die falsche Komponente beschuldigt. Für die Anwendung ändert die
-Korrektur nichts; die Gegenmassnahme unten bleibt richtig.
-
-Über zwanzig Stellen der Anwendung setzen
-`{d.Jetzt}` in einem UPDATE; die fünf, an denen eine Entscheidung daran hängt
-(`finished_utc`/`beendet_utc` in `ingest_run`, `curve_run`, `learning_epoch`,
-`freq_run`, `housekeeping_lauf`, `autopilot_lauf`), binden den Zeitpunkt
-inzwischen aus C#. Die übrigen sind `updated_utc`-Felder, die niemand liest.
-
-Beides ist dieselbe Familie wie der Sitzungsfehler (`expires_utc = jetzt + 14
-Tage` wurde still zu `jetzt`) und dieselbe Lehre, nur eine Stufe allgemeiner:
-**Nicht nur berechnete Ausdrücke gehören in den Code, sondern auch alles, was
-auf einer Zusage des Schemas beruht.** Ein `DEFAULT`, ein `CHECK`, ein
-`ON DELETE CASCADE` — jede dieser Zusagen ist ein Versprechen, das ein fremdes
-Backend halten kann oder nicht, und das Nichthalten ist lautlos.
 
 **Ein Zwischenspeicher, dessen Schlüssel mitwandert, trifft nie.** Der erste
 Entwurf des Kursspeichers schlüsselte nach dem angefragten Zeitraum. Der
@@ -1492,17 +1438,6 @@ asynchrone Fortsetzung. In der Kursansicht war das die gesamte Zeit der
 Treffsicherheit. Ungepuffert lohnt erst bei Mengen, die nicht in den Speicher
 passen — und dann ist die eigentliche Frage, warum man sie überhaupt holt.
 
-**Viele kleine Indexsuchen können schlechter sein als eine grosse Abfrage —
-und `psql` sagt das Gegenteil.** Die jüngste Prognose je Horizont über neun
-`FETCH NEXT 1`-Abfragen kostet über `psql` 3,5 bis 11,6 ms je Stück, über
-Npgsql aber **1.426 bis 1.947 ms zusammen**; eine einzige Abfrage über alle
-2.392 Prognosen des Wertes kostet 466 ms. `psql` verschickt einfache Abfragen
-mit Literalen, Npgsql verschickt Parse/Bind/Execute — auf diesem Backend
-kostet jede dieser Runden mehr als das Lesen von tausenden Zeilen. Die Regel
-„mit dem Treiber der Anwendung messen" stand an diesem Tag bereits in dieser
-Datei; ich bin trotzdem hineingelaufen, weil die `psql`-Zahl so überzeugend
-aussah.
-
 **Wer aus der Gesamtzeit schliesst, optimiert die falsche Stelle.** Ich habe
 das an einem Abend zweimal getan — erst die jüngsten Prognosen (waren es
 nicht), dann die Kursbars (waren es nur zum Teil). Drei Zeilen Protokoll mit
@@ -1543,29 +1478,6 @@ Kommentar: `GetManyAsync` fragt je Wert statt per `= ANY` (1.083 ms gegen
 einer gewöhnlichen Datenbank die schlechtere Wahl. Ohne Datum weiss in einem
 halben Jahr niemand mehr, ob die Begründung noch gilt — genau das ist an
 dieser Stelle schon einmal passiert und wurde zurückgebaut.
-
-**Das EventMesh-DataCell-Backend zahlt je Zeile, die es über einen Index
-findet, nicht je gelesener Zeile.** Sequentiell liefert es 3,3 µs je Zeile;
-über einen Index sind es 60 µs, bei acht Spalten 832 µs — der Aufwand wächst
-mit Zeilen MAL Spalten, weil jede Zeile aus einzelnen Zellen zusammengesetzt
-wird. Eine Kursansicht holt genau so: ein paar hundert Zeilen über einen
-Index. Daraus folgt die ganze Bauform der Gegenmittel — Zwischenspeicher für
-alles, was sich nur bei einem Lauf ändert, und Vorwärmen im Hintergrund.
-Alle Zahlen und die offenen Punkte am Node stehen in
-[docs/VERGLEICH-SQLSERVER-MESHNODE.md](docs/VERGLEICH-SQLSERVER-MESHNODE.md).
-
-**Wer ein fremdes Backend misst, misst mit dem Treiber der Anwendung.** Ich habe
-über `psql` mit `PREPARE`/`EXECUTE` getestet — der Node kennt das nicht und
-antwortet mit `SELECT 0`, statt zu scheitern. Damit wurde *jede* Prüfung falsch
-negativ, und ich habe einen Befund gemeldet, den es nicht gab. Über echtes
-Npgsql sah dieselbe Anweisung völlig anders aus.
-
-**Was in der Datenbank gerechnet wird, hängt an ihren Zusagen; was in C#
-gerechnet wird, nicht.** Die Lehre aus demselben Tag, und sie gilt weit über
-dieses Backend hinaus: Zeitpunkte, Fristen und Fallunterscheidungen über den
-bestehenden Zeilenwert (`COALESCE(@neu, spalte)`, `CASE … ELSE spalte END`)
-gehören in den Code, nicht ins SQL. Dort sind sie nachweisbar richtig, auf jedem
-Backend gleich, und sie kosten nichts.
 
 **Dapper kennt `DateOnly` weder als Parameter noch als Ergebnis.** Als Parameter
 „cannot be used as a parameter value", beim Lesen verlangt es einen Konstruktor
@@ -1744,38 +1656,6 @@ zu breite Canvas über die Nachbarspalten. `drawCharts` legt deshalb erst alle
 Boxen an (`createBox`) und zeichnet danach in einem zweiten Durchgang
 (`renderPlot`). `.chart-box` hat zusätzlich `min-width: 0` und
 `overflow: hidden` als Netz.
-
-**Ein `AS`-Alias auf der ERSTEN projizierten Spalte hebelt am
-DataCell-Backend das `ORDER BY` aus.** Gemessen am 28.09.2026:
-`SELECT run_id, job_name, started_utc … WHERE job_name = 'update:1h'
-ORDER BY run_id DESC FETCH NEXT 1` liefert Lauf **11250** vom selben Tag;
-dieselbe Abfrage mit `run_id AS X` liefert **11126 vom 25.09.** — die Werte
-in sich stimmig, aber die falsche Zeile. Kein Fehler, Status 200. Die
-Position trennt scharf: Alias auf Spalte 2 oder 3 ist harmlos, Alias gleich
-dem Spaltennamen (`run_id AS run_id`) ebenfalls, Alias in Anführungszeichen
-dagegen nicht. Die Sortierung wird nicht falsch ausgeführt, sondern
-**verworfen** — an `dbo.asset` liefert der Alias-Fall exakt dasselbe wie „gar
-kein ORDER BY". Auf `dbo.ingest_run` kommt ein zweites Symptom dazu: Spalten
-kommen als NULL zurück, darunter der Primärschlüssel, der in keiner
-existierenden Zeile NULL sein kann; so wurde der Befund über
-`/api/health/runs` überhaupt sichtbar (`{"runId":0,"startedUtc":
-"0001-01-01T00:00:00"}`).
-
-**Unsichtbar war er, weil `WHERE` auf den Primärschlüssel alles heilt** —
-wo genau eine Zeile herauskommt, ist die Sortierung bedeutungslos. Betroffen
-sind **47 Abfragen** dieser Anwendung, und zwar ausgerechnet das Muster
-„jüngster Eintrag" (`ORDER BY … DESC FETCH NEXT 1`): letzter Lauf, jüngste
-Prognose, letzter Kurs, neuester Kurvenlauf. Dapper bildet auf
-Eigenschaftsnamen ab, deshalb steht fast überall ein Alias.
-
-Daraus zwei Lehren. Die bekannte: **Ein Backend, das nicht abbricht, sondern
-falsch antwortet, ist die schwierigste Sorte.** Die neue, und sie betrifft
-das eigene Vorgehen: **Ein Messaufbau, der Statuscode und Dauer prüft, kann
-eine falsche Antwort per Bauart nicht sehen.** Die Ansicht „Läufe" stand in
-zwei aufeinanderfolgenden Messungen unter „gut" (31 ms, 24 ms, je Status
-200) und war die ganze Zeit leer. „27 von 53 Ansichten sind gut" ist deshalb
-eine Aussage über Tempo, nicht über Richtigkeit.
-
 ## Neuen Provider ergänzen
 
 `IMarketDataProvider` implementieren (Kurse) oder `IUniverseProvider`
