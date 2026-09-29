@@ -39,6 +39,65 @@ let busyCount = 0;
 let statusArt = null;      // 'busy' | 'err' | 'ok'
 let statusUhr = null;
 
+/*  ------------------------------------------------------- Ladeanzeige ----
+
+    Warum das mehr sein muss als ein Wort in der Kopfzeile.
+
+    Auf dem SQL Server war jede Ansicht in Millisekunden da; ein dezentes
+    „laedt …" reichte, weil es ohnehin niemand las. Auf dem jetzigen Backend
+    brauchen einzelne Ansichten zehn bis sechzig Sekunden. In dieser Zeit
+    sieht eine Oberflaeche, die sich nicht rührt, kaputt aus -- und der
+    Benutzer klickt nach, was die Lage verschlimmert, weil die naechste
+    Abfrage dazukommt.
+
+    Drei Mittel, absteigend nach Wirkung:
+
+      1. Ein Balken am oberen Rand. Er laeuft, solange etwas laeuft. Das ist
+         die Anzeige, die man aus dem Augenwinkel sieht, ohne hinzuschauen.
+      2. Der Wartezeiger auf dem ganzen Dokument. Wer die Maus bewegt,
+         bekommt die Antwort, ohne irgendwohin zu blicken.
+      3. Die VERSTRICHENE ZEIT im Text. Das ist hier das eigentlich
+         Wichtige: „laedt … 23 s" sagt, dass gearbeitet wird. „laedt …"
+         allein sagt das nach zwanzig Sekunden nicht mehr -- es sieht aus wie
+         ein Hänger. Und ab einer halben Minute steht dabei, woran es liegt,
+         damit niemand den Fehler bei sich sucht.
+
+    Der Balken haengt bewusst NICHT an der Kopfzeile, sondern an `position:
+    fixed`. Die Kopfzeile ist ein Flex-Element, und dort etwas einzuhaengen,
+    das seine Breite animiert, hat schon einmal das Statusfeld aus dem Bild
+    geschoben.                                                              */
+let ladeBeginn = 0;
+let ladeUhr = null;
+
+function ladeAnzeigeAn() {
+  ladeBeginn = Date.now();
+  document.body.classList.add('laedt');
+
+  const tick = () => {
+    const s = Math.round((Date.now() - ladeBeginn) / 1000);
+    let text = s < 2 ? 'lädt …' : `lädt … ${s} s`;
+
+    /*  Ab einer halben Minute wird aus der Anzeige eine Erklaerung. Wer
+        dreissig Sekunden auf eine Liste wartet, hat sonst nur zwei
+        Deutungen: kaputt oder ich habe etwas falsch gemacht. Beide sind
+        falsch, und beide fuehren zu einem weiteren Klick.                  */
+    if (s >= 30) text += ' — die Datenbank braucht für diese Ansicht lange';
+    else if (s >= 10) text += ' — grössere Abfrage';
+
+    setStatus(text, 'busy');
+  };
+
+  tick();
+  clearInterval(ladeUhr);
+  ladeUhr = setInterval(tick, 1000);
+}
+
+function ladeAnzeigeAus() {
+  clearInterval(ladeUhr);
+  ladeUhr = null;
+  document.body.classList.remove('laedt');
+}
+
 function setStatus(msg, kind) {
   /* Eine Ladeanzeige darf eine stehende Meldung nicht verdraengen. Sie ist
      Beiwerk; die Meldung ist das Ergebnis. */
@@ -68,7 +127,7 @@ async function api(path, opts = {}) {
      dann, was los ist, statt einen technischen Fehler zu zeigen.           */
 
   busyCount++;
-  if (busyCount === 1) setStatus('lädt …', 'busy');
+  if (busyCount === 1) ladeAnzeigeAn();
   try {
     const res = await fetch(path, opts);
     const text = await res.text();
@@ -97,8 +156,16 @@ async function api(path, opts = {}) {
     busyCount--;
 
     /* Nur die eigene Ladeanzeige wegraeumen. Steht dort inzwischen ein
-       Ergebnis -- Erfolg oder Fehler --, bleibt es stehen. */
-    if (busyCount === 0 && statusArt === 'busy') setStatus('');
+       Ergebnis -- Erfolg oder Fehler --, bleibt es stehen.
+
+       Balken und Wartezeiger gehen IMMER aus, wenn nichts mehr laeuft, auch
+       wenn ein Fehler stehenbleibt. Sie beschreiben den Zustand „es arbeitet
+       gerade", und der ist dann vorbei -- ein Balken, der neben einer
+       Fehlermeldung weiterlaeuft, behauptet das Gegenteil.                 */
+    if (busyCount === 0) {
+      ladeAnzeigeAus();
+      if (statusArt === 'busy') setStatus('');
+    }
   }
 }
 
