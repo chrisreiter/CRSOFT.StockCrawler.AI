@@ -2,6 +2,48 @@
 
 Hinweise für Claude Code (claude.ai/code) zur Arbeit in diesem Repository.
 
+## PRÄMISSE: Diese Anwendung ist der Sparringpartner für den EventMesh-Knoten
+
+**Jedes Anwendungsbeispiel dient dazu, die Datenbank schneller zu machen — nicht die
+Anwendung.** CRSOFT.StockCrawler läuft gegen zwei Gegenstellen mit demselben
+Datenbestand: den **EventMesh DataCell-Knoten** (`C:\work\github\chrisreiter\MagNet`,
+Arbeitsbaum `em-correctness`, Zweig `node-tds`) und einen **SQL Server**. Der SQL
+Server ist der Maßstab, diese Anwendung ist das Messgerät, und optimiert wird
+ausschließlich der Knoten.
+
+Daraus folgt für die Arbeit in *diesem* Repository:
+
+1. **Am Anwendungscode wird nichts geändert, um eine Messzahl zu verbessern.** Kein
+   umgeschriebenes SQL, kein zusätzlicher Index, kein geänderter Abfragepfad, kein
+   Zwischenspeicher, kein aufgelöstes N+1 — auch dann nicht, wenn es offensichtlich
+   wäre. Eine ungeschickt gestellte Abfrage ist ein **Prüfstein** für den Knoten: Der
+   SQL Server beantwortet sie ja auch. Ein Knoten, der nur auf gut gestellte Abfragen
+   schnell reagiert, ist nicht schnell.
+
+   Fällt eine solche Stelle auf, wird sie **notiert**, nicht behoben. (Beispiel
+   04.10.2026: Reasoning-Journal schickt achtzig identische Kursabfragen, eine je
+   Wert. Das bleibt so — der Knoten beantwortet alle achtzig in 0,2 s, und genau diese
+   Art Last soll er aushalten.)
+
+2. **Wo die Anwendung gegen den SQL Server schon schnell ist, ist nichts zu tun.** Ist
+   eine Ansicht auf beiden Seiten schnell, taugt sie nicht als Fall. Ist sie auf beiden
+   Seiten langsam, liegt es an der Anwendung — dann wird das festgestellt und der Fall
+   fallen gelassen, nicht im Knoten gesucht.
+
+3. **Änderungen an der Anwendung sind nur zulässig, wenn sie fachlich gewollt sind** —
+   neue Funktionen, Korrekturen an Inhalten, Darstellung. Nicht als Ausweichen vor
+   einer Knotenschwäche.
+
+**Die Messregeln** stehen in `docs/zeilenkosten.md` des Knoten-Repositorys und gelten
+hier mit: Ergebnisse vor Zeiten vergleichen; mindestens drei Läufe; die Messung
+aufteilen, *bevor* eine Vermutung gebildet wird; niemals messen, während etwas anderes
+läuft (Zeitplan, Import, ein zweiter Messdurchgang).
+
+**Wichtig für die Bewertung von Zeilenzahlen:** Die beiden Gegenstellen halten *nicht*
+genau denselben Bestand — `price_bar` +13.551 und `forecast` +6.387 Zeilen auf dem
+Knoten, `forecast_score`, `asset` und `crossing` identisch. Für `price_bar` und
+`forecast` ist eine abweichende Zeilenzahl deshalb **kein** Korrektheitsbefund.
+
 ## Worum es geht
 
 .NET 8 System (CRSOFT.StockCrawler), das Kurse von Aktien, Fonds/ETFs und Kryptowährungen in ein
